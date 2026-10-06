@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { AnimatePresence, motion, MotionConfig } from "motion/react";
 import {
+  BookOpen,
   LayoutDashboard,
   ShoppingBag,
   Factory,
@@ -65,6 +66,7 @@ import {
 import { LinesPanel, DashboardInsights } from "@/components/RequirementPanels";
 import { BackupPanel } from "@/components/BackupPanel";
 import { AdminPanel } from "@/components/AdminPanel";
+import { UserGuide } from "@/components/UserGuide";
 const navigation = [
   {
     id: "overview",
@@ -133,6 +135,7 @@ const navigation = [
     icon: DatabaseBackup,
     permission: "users.manage",
   },
+  { id: "guide", label: "Xem hướng dẫn", icon: BookOpen, permission: null },
 ] as const;
 type Tab = (typeof navigation)[number]["id"];
 export default function Page() {
@@ -252,16 +255,17 @@ export default function Page() {
     ? navigation
         .filter(
           (n) =>
-            hasPermission(session.user, n.permission) &&
+            (n.permission === null ||
+              hasPermission(session.user, n.permission)) &&
             (!isWorker ||
-              ["overview", "production", "payroll"].includes(n.id)) &&
+              ["overview", "production", "payroll", "guide"].includes(n.id)) &&
             (n.id !== "backup" ||
               session.user.roles.some((r) => r.id === "admin")) &&
             (!session.representing ||
               !["users", "roles", "backup"].includes(n.id)),
         )
         .map((n) =>
-          isWorker
+          isWorker && n.id !== "guide"
             ? {
                 ...n,
                 label:
@@ -353,7 +357,9 @@ export default function Page() {
     onChanged: refresh,
   };
   const panel =
-    active?.id === "overview" ? (
+    active?.id === "guide" ? (
+      <UserGuide user={session.user} />
+    ) : active?.id === "overview" ? (
       <div className="stack">
         <div className="kpi-grid">
           {[
@@ -660,12 +666,14 @@ export default function Page() {
               <div>
                 <h1>{title}</h1>
                 <p>
-                  {isWorker
-                    ? "Theo dõi công việc, sản lượng và tiền công trong phạm vi của bạn."
-                    : "Theo dõi và điều phối hoạt động xưởng may."}
+                  {active?.id === "guide"
+                    ? "Hướng dẫn từng bước, từ nhận đơn đến giao hàng và đối chiếu tiền công."
+                    : isWorker
+                      ? "Theo dõi công việc, sản lượng và tiền công trong phạm vi của bạn."
+                      : "Theo dõi và điều phối hoạt động xưởng may."}
                 </p>
               </div>
-              <div className="inline-actions">
+              <div className="inline-actions" hidden={active?.id === "guide"}>
                 <Action
                   tone="secondary"
                   aria-label="Làm mới dữ liệu"

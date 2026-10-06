@@ -1789,3 +1789,29 @@ table .text-button {
   .records-actions > .inline-actions > * { flex: 1; justify-content: center; }
   .records-section-title { padding: 16px; }
 }
+
+.user-guide { max-width: 1100px; display: flex; flex-direction: column; gap: 14px; }
+.guide-intro { padding: 24px; }
+.guide-intro h2 { display: flex; align-items: center; gap: 12px; font-size: 22px; }
+.guide-intro h2 svg { flex-shrink: 0; }
+.user-guide p, .guide-content li { line-height: 1.75; }
+.guide-intro p { margin: 14px 0; }
+.guide-search { display: block; margin: 20px 0; }
+.guide-search > span { display: block; margin-bottom: 8px; font-weight: 600; }
+.guide-search > div { display: flex; align-items: center; gap: 10px; }
+.guide-search input { width: 100%; min-width: 0; }
+.guide-topic > summary, .guide-permissions > summary { cursor: pointer; min-height: 44px; font-weight: 600; line-height: 1.6; }
+.guide-topic > summary { padding: 18px 24px; font-size: 18px; }
+.guide-topic > summary:focus-visible, .guide-permissions > summary:focus-visible { outline: 2px solid #71717a; outline-offset: -2px; border-radius: 8px; }
+.guide-content { padding: 0 24px 24px; border-top: 1px solid var(--border); }
+.guide-content p { margin-top: 16px; }
+.guide-content ol, .guide-permissions ul { padding-left: 24px; margin-top: 16px; }
+.guide-content li + li { margin-top: 14px; }
+.guide-permissions { padding: 16px; background: #f7f8fa; border-radius: 8px; }
+.guide-permissions li { padding: 4px 0; line-height: 1.6; }
+.page-heading > [hidden] { display: none; }
+@media (max-width: 767px) {
+  .guide-intro { padding: 16px; }
+  .guide-topic > summary { padding: 16px; font-size: 16px; }
+  .guide-content { padding: 0 16px 16px; }
+}
