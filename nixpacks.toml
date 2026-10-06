@@ -1,0 +1,20 @@
+# Nixpacks configuration for Dokploy deployment
+# Ensures build tools are available for better-sqlite3 native C++ compilation
+
+[phases.setup]
+nixPkgs = ["...", "python3", "gcc", "gnumake"]
+
+[phases.install]
+cmds = ["npm install"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm run start"
+
+[variables]
+NIXPACKS_NODE_VERSION = "20"
+NODE_ENV = "production"
+PORT = "3000"
+HOSTNAME = "0.0.0.0"

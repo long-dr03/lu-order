@@ -15,7 +15,18 @@ import {
 
 export * from "./types";
 
-const dbPath = path.resolve(process.cwd(), "lu_order.db");
+import fs from "fs";
+
+const rawDbPath = process.env.DATABASE_PATH || "lu_order.db";
+const dbPath = path.isAbsolute(rawDbPath)
+  ? rawDbPath
+  : path.resolve(/*turbopackIgnore: true*/ process.cwd(), rawDbPath);
+
+const dbDir = path.dirname(dbPath);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+
 const db = new Database(dbPath);
 
 // Enable WAL mode for high performance
