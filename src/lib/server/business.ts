@@ -33,7 +33,6 @@ import {
   audit,
   actorLabel,
   hashToken,
-  account,
 } from "./auth";
 import { text, quantity, date, line, today } from "./validation";
 
@@ -83,39 +82,43 @@ export interface AuditEntry {
   represented_id: string | null;
   line_id: number | null;
 }
-export function visibleOrders(
+export async function visibleOrders(
   ctx: Context,
   permission: Permission = "orders.view",
 ) {
-  return getAllOrders().filter((o) =>
+  return (await getAllOrders()).filter((o) =>
     permits(ctx.user, permission, { lineId: o.line_id }),
   );
 }
-export function orderFor(ctx: Context, id: string, permission: Permission) {
-  const order = getOrderById(id);
+export async function orderFor(
+  ctx: Context,
+  id: string,
+  permission: Permission,
+) {
+  const order = await getOrderById(id);
   ensure(order, 404, "Không tìm thấy đơn hàng.");
   requirePermission(ctx, permission, { lineId: order.line_id });
   return {
     ...order,
-    operations: db
+    operations: await db
       .prepare(
         "SELECT r.*,COALESCE(e.name,a.name) worker_name FROM operation_records r LEFT JOIN employees e ON e.id=r.worker_id LEFT JOIN accounts a ON a.id=COALESCE(r.represented_id,r.actor_id) WHERE r.order_id=? ORDER BY r.id DESC",
       )
       .all(id),
   };
 }
-export function employeesFor(
+export async function employeesFor(
   ctx: Context,
   permission: Permission = "production.view",
 ) {
-  return getEmployees().filter((e) =>
+  return (await getEmployees()).filter((e) =>
     [e.line_id, ...(e.assigned_line_ids || [])].some((lineId) =>
       permits(ctx.user, permission, { employeeId: e.id, lineId }),
     ),
   );
 }
-export function linesFor(ctx: Context) {
-  return getLines().filter(
+export async function linesFor(ctx: Context) {
+  return (await getLines()).filter(
     (l) =>
       ctx.user.roles
         .flatMap((r) => r.grants)
@@ -126,30 +129,32 @@ export function linesFor(ctx: Context) {
         ) || ctx.user.line_ids.includes(l.id),
   );
 }
-export function logsFor(
+export async function logsFor(
   ctx: Context,
   permission: Permission = "production.view",
 ) {
-  return (
-    db
-      .prepare("SELECT * FROM production_logs ORDER BY log_date DESC,id DESC")
-      .all() as ProductionLog[]
-  )
-    .filter((l) =>
-      permits(ctx.user, permission, {
-        employeeId: l.employee_id,
-        lineId: l.line_id,
-      }),
+  return await Promise.all(
+    (
+      (await db
+        .prepare("SELECT * FROM production_logs ORDER BY log_date DESC,id DESC")
+        .all()) as ProductionLog[]
     )
-    .map((l) => ({
-      ...l,
-      product_code:
-        (
-          db
-            .prepare("SELECT product_code FROM orders WHERE id=?")
-            .get(l.order_id) as { product_code: string } | undefined
-        )?.product_code || "",
-    }));
+      .filter((l) =>
+        permits(ctx.user, permission, {
+          employeeId: l.employee_id,
+          lineId: l.line_id,
+        }),
+      )
+      .map(async (l) => ({
+        ...l,
+        product_code:
+          (
+            (await db
+              .prepare("SELECT product_code FROM orders WHERE id=?")
+              .get(l.order_id)) as { product_code: string } | undefined
+          )?.product_code || "",
+      })),
+  );
 }
 export interface Filters {
   month?: string;
@@ -164,7 +169,21 @@ export interface Filters {
   from?: string;
   to?: string;
 }
-export function filterLogs(logs: ProductionLog[], f: Filters) {
+export async function filterLogs(logs: ProductionLog[], f: Filters) {
+  const codes = new Map(
+    f.product
+      ? (
+          (await db
+            .prepare(
+              "SELECT id,product_code FROM orders WHERE id=ANY(?::text[])",
+            )
+            .all([...new Set(logs.map((l) => l.order_id))])) as {
+            id: string;
+            product_code: string;
+          }[]
+        ).map((r) => [r.id, r.product_code])
+      : [],
+  );
   return logs.filter(
     (l) =>
       (!f.month || l.month === f.month) &&
@@ -172,15 +191,7 @@ export function filterLogs(logs: ProductionLog[], f: Filters) {
       (!f.line_id || l.line_id === f.line_id) &&
       (!f.stage || l.stage === f.stage) &&
       (!f.product ||
-        [
-          l.order_id,
-          l.product_name,
-          (
-            db
-              .prepare("SELECT product_code FROM orders WHERE id=?")
-              .get(l.order_id) as { product_code: string } | undefined
-          )?.product_code || "",
-        ]
+        [l.order_id, l.product_name, codes.get(l.order_id) || ""]
           .join(" ")
           .toLowerCase()
           .includes(f.product.toLowerCase())) &&
@@ -284,10 +295,13 @@ export function queryFilters(request: Request): Filters {
   );
   return parsed;
 }
-export function payrollFor(ctx: Context, f: Filters) {
+export async function payrollFor(ctx: Context, f: Filters) {
   requirePermission(ctx, "payroll.view");
   const month = f.month || (f.from || f.to ? "" : today().slice(0, 7));
-  const logs = filterLogs(logsFor(ctx, "payroll.view"), { ...f, month });
+  const logs = await filterLogs(await logsFor(ctx, "payroll.view"), {
+    ...f,
+    month,
+  });
   const grouped = new Map<
     string,
     {
@@ -314,9 +328,9 @@ export function payrollFor(ctx: Context, f: Filters) {
     current.total_entries++;
     grouped.set(groupKey, current);
   }
-  const lock = db
+  const lock = (await db
     .prepare("SELECT * FROM payroll_locks WHERE month=?")
-    .get(month) as { locked_by: string; locked_at: string } | undefined;
+    .get(month)) as { locked_by: string; locked_at: string } | undefined;
   return {
     month,
     logs,
@@ -326,32 +340,40 @@ export function payrollFor(ctx: Context, f: Filters) {
     lockedAt: lock?.locked_at,
   };
 }
-export function qcFor(ctx: Context) {
-  const orders = visibleOrders(ctx, "qc.view");
+export async function qcFor(ctx: Context) {
+  const orders = await visibleOrders(ctx, "qc.view");
   return (
-    db.prepare("SELECT * FROM qc_records ORDER BY id DESC").all() as QcEntry[]
+    (await db
+      .prepare("SELECT * FROM qc_records ORDER BY id DESC")
+      .all()) as QcEntry[]
   ).filter((q) => orders.some((o) => o.id === q.order_id));
 }
-export function auditFor(ctx: Context) {
+export async function auditFor(ctx: Context) {
   requirePermission(ctx, "audit.view");
-  return (
-    db
-      .prepare("SELECT * FROM audit_logs ORDER BY id DESC LIMIT 500")
-      .all() as AuditEntry[]
-  ).filter((a) =>
-    permits(ctx.user, "audit.view", {
-      employeeId: account(a.represented_id || a.actor_id || "")?.employee_id,
-      lineId: a.line_id ?? undefined,
-    }),
-  );
+  const rows = (await db
+    .prepare(
+      "SELECT a.*,u.employee_id AS audit_employee_id FROM audit_logs a LEFT JOIN accounts u ON u.id=COALESCE(a.represented_id,a.actor_id) ORDER BY a.id DESC LIMIT 500",
+    )
+    .all()) as (AuditEntry & { audit_employee_id: string | null })[];
+  return rows
+    .filter((a) =>
+      permits(ctx.user, "audit.view", {
+        employeeId: a.audit_employee_id,
+        lineId: a.line_id ?? undefined,
+      }),
+    )
+    .map(({ audit_employee_id, ...row }) => {
+      void audit_employee_id;
+      return row;
+    });
 }
-export function dashboard(ctx: Context) {
-  const orders = visibleOrders(ctx);
+export async function dashboard(ctx: Context) {
+  const orders = await visibleOrders(ctx);
   const logs = hasPermission(ctx.user, "production.view")
-    ? filterLogs(logsFor(ctx), { month: today().slice(0, 7) })
+    ? await filterLogs(await logsFor(ctx), { month: today().slice(0, 7) })
     : [];
   const payroll = hasPermission(ctx.user, "payroll.view")
-    ? payrollFor(ctx, {})
+    ? await payrollFor(ctx, {})
     : null;
   return {
     orders: {
@@ -372,22 +394,22 @@ export function dashboard(ctx: Context) {
         ? payroll.logs.reduce((a, l) => a + l.total_pay, 0)
         : null,
     },
-    employeesCount: employeesFor(ctx).length,
+    employeesCount: (await employeesFor(ctx)).length,
   };
 }
-export function unlocked(month: string) {
+export async function unlocked(month: string) {
   ensure(
-    !db.prepare("SELECT 1 FROM payroll_locks WHERE month=?").get(month),
+    !(await db.prepare("SELECT 1 FROM payroll_locks WHERE month=?").get(month)),
     409,
     "Tháng lương đã chốt; không thể ghi thêm sản lượng.",
   );
 }
-export function idempotent<T>(
+export async function idempotent<T>(
   ctx: Context,
   request: Request,
   input: unknown,
-  operation: () => T,
-): T {
+  operation: () => T | Promise<T>,
+): Promise<T> {
   const key = request.headers.get("idempotency-key");
   ensure(
     key && /^[a-zA-Z0-9-]{16,80}$/.test(key),
@@ -401,12 +423,12 @@ export function idempotent<T>(
       input,
     }),
   );
-  return db.transaction(() => {
-    const old = db
+  return await db.transaction(async () => {
+    const old = (await db
       .prepare(
         "SELECT payload_hash,response FROM idempotency WHERE actor_id=? AND request_key=?",
       )
-      .get(ctx.actor.id, key) as
+      .get(ctx.actor.id, key)) as
       { payload_hash: string; response: string } | undefined;
     if (old) {
       ensure(
@@ -416,13 +438,10 @@ export function idempotent<T>(
       );
       return JSON.parse(old.response) as T;
     }
-    const result = operation();
-    db.prepare("INSERT INTO idempotency VALUES (?,?,?,?)").run(
-      ctx.actor.id,
-      key,
-      signature,
-      JSON.stringify(result),
-    );
+    const result = await operation();
+    await db
+      .prepare("INSERT INTO idempotency VALUES (?,?,?,?)")
+      .run(ctx.actor.id, key, signature, JSON.stringify(result));
     return result;
   })();
 }
@@ -437,15 +456,15 @@ const productImageUrl = z
   .string()
   .regex(/^\/api\/product-images\/[0-9a-f-]{36}$/)
   .nullable();
-function validateProductImage(
+async function validateProductImage(
   ctx: Context,
   url: string | null | undefined,
   current?: string | null,
 ) {
   if (!url || url === current) return;
-  const image = db
+  const image = (await db
     .prepare("SELECT owner_id FROM product_images WHERE id=?")
-    .get(url.split("/").pop()) as { owner_id: string } | undefined;
+    .get(url.split("/").pop())) as { owner_id: string } | undefined;
   ensure(
     image && image.owner_id === ctx.user.id,
     422,
@@ -503,7 +522,7 @@ export const createOrderSchema = z
       .max(100),
   })
   .strict();
-export function createOrder(
+export async function createOrder(
   ctx: Context,
   input: z.infer<typeof createOrderSchema>,
 ) {
@@ -515,13 +534,13 @@ export function createOrder(
   );
   if (input.responsible_id)
     ensure(
-      db
+      await db
         .prepare("SELECT 1 FROM employees WHERE id=? AND line_id=?")
         .get(input.responsible_id, input.line_id),
       422,
       "Người phụ trách phải thuộc chuyền được chọn.",
     );
-  validateProductImage(ctx, input.image_url);
+  await validateProductImage(ctx, input.image_url);
   const keys = input.variants.map(
     (v) => `${v.color.toLocaleLowerCase()}|${v.size}`,
   );
@@ -532,14 +551,16 @@ export function createOrder(
   );
   ensure(
     !input.order_code ||
-      !db.prepare("SELECT 1 FROM orders WHERE id=?").get(input.order_code),
+      !(await db
+        .prepare("SELECT 1 FROM orders WHERE id=?")
+        .get(input.order_code)),
     409,
     "Mã đơn đã tồn tại. Chọn mã khác.",
   );
-  const order = createOrderWithVariants(
+  const order = await createOrderWithVariants(
     {
       order: {
-        id: input.order_code || generateNextOrderCode(),
+        id: input.order_code || (await generateNextOrderCode()),
         customer: input.customer,
         product_name: input.product_name,
         product_code:
@@ -560,29 +581,33 @@ export function createOrder(
     actorLabel(ctx),
   );
   for (const v of input.variants) {
-    db.prepare(
-      "UPDATE order_variants SET color_hex=?,colors_json=? WHERE order_id=? AND color=? AND size=?",
-    ).run(
-      v.colors?.[0].hex || v.color_hex || null,
-      v.colors ? JSON.stringify(v.colors) : null,
-      order.id,
-      v.color,
-      v.size,
-    );
+    await db
+      .prepare(
+        "UPDATE order_variants SET color_hex=?,colors_json=? WHERE order_id=? AND color=? AND size=?",
+      )
+      .run(
+        v.colors?.[0].hex || v.color_hex || null,
+        v.colors ? JSON.stringify(v.colors) : null,
+        order.id,
+        v.color,
+        v.size,
+      );
   }
   if (input.responsible_id) {
-    const employee = db
+    const employee = (await db
       .prepare("SELECT name FROM employees WHERE id=?")
-      .get(input.responsible_id) as { name: string };
-    db.prepare(
-      "UPDATE orders SET responsible_id=?,assigned_to=? WHERE id=?",
-    ).run(input.responsible_id, employee.name, order.id);
+      .get(input.responsible_id)) as { name: string };
+    await db
+      .prepare("UPDATE orders SET responsible_id=?,assigned_to=? WHERE id=?")
+      .run(input.responsible_id, employee.name, order.id);
   }
   // Enrich the legacy creation audit with verified identities.
-  db.prepare(
-    "UPDATE audit_logs SET actor_id=?,represented_id=?,line_id=? WHERE id=(SELECT MAX(id) FROM audit_logs)",
-  ).run(ctx.actor.id, ctx.representing ? ctx.user.id : null, input.line_id);
-  return getOrderById(order.id)!;
+  await db
+    .prepare(
+      "UPDATE audit_logs SET actor_id=?,represented_id=?,line_id=? WHERE id=(SELECT MAX(id) FROM audit_logs)",
+    )
+    .run(ctx.actor.id, ctx.representing ? ctx.user.id : null, input.line_id);
+  return (await getOrderById(order.id))!;
 }
 export const moveSchema = z
   .object({
@@ -610,12 +635,12 @@ export const moveSchema = z
       v.deadline !== undefined ||
       v.notes !== undefined,
   );
-export function moveOrder(
+export async function moveOrder(
   ctx: Context,
   id: string,
   input: z.infer<typeof moveSchema>,
 ) {
-  const o = getOrderById(id);
+  const o = await getOrderById(id);
   ensure(o, 404, "Không tìm thấy đơn.");
   assertVersion(o, input.version);
   ensure(
@@ -656,7 +681,7 @@ export function moveOrder(
     422,
     "Hạn giao không được trước ngày nhận đơn.",
   );
-  validateProductImage(ctx, input.image_url, o.image_url);
+  await validateProductImage(ctx, input.image_url, o.image_url);
   const responsible =
     input.responsible_id === undefined
       ? input.line_id && input.line_id !== o.line_id
@@ -664,9 +689,9 @@ export function moveOrder(
         : o.responsible_id || null
       : input.responsible_id;
   const person = responsible
-    ? (db
+    ? ((await db
         .prepare("SELECT name FROM employees WHERE id=? AND line_id=?")
-        .get(responsible, input.line_id || o.line_id) as
+        .get(responsible, input.line_id || o.line_id)) as
         { name: string } | undefined)
     : undefined;
   ensure(
@@ -676,63 +701,77 @@ export function moveOrder(
   );
   const stage = input.stage || o.current_stage;
   const index = LUUTA_STAGES.findIndex((s) => s.key === stage);
-  db.prepare(
-    "UPDATE orders SET responsible_id=?,product_code=?,current_stage=?,line_id=?,assigned_to=?,customer=?,deadline=?,notes=?,image_url=?,progress=?,status=?,version=version+1 WHERE id=?",
-  ).run(
-    responsible,
-    input.product_code || o.product_code,
-    stage,
-    input.line_id || o.line_id,
-    person?.name || `Chuyền ${input.line_id || o.line_id}`,
-    input.customer || o.customer,
-    input.deadline || o.deadline,
-    input.notes ?? o.notes,
-    input.image_url === undefined ? o.image_url : input.image_url,
-    input.stage
-      ? Math.round((index / (LUUTA_STAGES.length - 1)) * 100)
-      : o.progress,
-    stage === "hoan_thanh"
-      ? "completed"
-      : o.status === "completed"
-        ? "on_track"
-        : o.status,
-    id,
-  );
-  if (input.stage && input.exception) {
-    db.prepare(
-      "UPDATE order_stages SET status='pending',completed_at=NULL WHERE order_id=? AND status='in_progress'",
-    ).run(id);
-    db.prepare(
-      "UPDATE order_stages SET status='in_progress',started_at=CURRENT_TIMESTAMP,completed_at=NULL WHERE order_id=? AND stage_key=?",
-    ).run(id, input.stage);
-    if (stage === "hoan_thanh")
-      db.prepare(
-        "UPDATE order_stages SET status='completed',completed_at=CURRENT_TIMESTAMP WHERE order_id=? AND stage_key=?",
-      ).run(id, stage);
-  } else if (input.stage) {
-    db.prepare(
-      "UPDATE order_stages SET status='completed',completed_at=CURRENT_TIMESTAMP WHERE order_id=? AND stage_key=?",
-    ).run(id, o.current_stage);
-    if (["nhan_don", "kiem_npl", "kiem_rap"].includes(o.current_stage))
-      db.prepare(
-        "UPDATE order_stages SET completed_qty=received_qty,remaining_qty=0 WHERE order_id=? AND stage_key=?",
-      ).run(id, o.current_stage);
-    db.prepare(
-      "UPDATE order_stages SET status=?,started_at=COALESCE(started_at,CURRENT_TIMESTAMP),completed_at=? WHERE order_id=? AND stage_key=?",
-    ).run(
-      stage === "hoan_thanh" ? "completed" : "in_progress",
-      stage === "hoan_thanh" ? new Date().toISOString() : null,
-      id,
+  await db
+    .prepare(
+      "UPDATE orders SET responsible_id=?,product_code=?,current_stage=?,line_id=?,assigned_to=?,customer=?,deadline=?,notes=?,image_url=?,progress=?,status=?,version=version+1 WHERE id=?",
+    )
+    .run(
+      responsible,
+      input.product_code || o.product_code,
       stage,
+      input.line_id || o.line_id,
+      person?.name || `Chuyền ${input.line_id || o.line_id}`,
+      input.customer || o.customer,
+      input.deadline || o.deadline,
+      input.notes ?? o.notes,
+      input.image_url === undefined ? o.image_url : input.image_url,
+      input.stage
+        ? Math.round((index / (LUUTA_STAGES.length - 1)) * 100)
+        : o.progress,
+      stage === "hoan_thanh"
+        ? "completed"
+        : o.status === "completed"
+          ? "on_track"
+          : o.status,
+      id,
     );
+  if (input.stage && input.exception) {
+    await db
+      .prepare(
+        "UPDATE order_stages SET status='pending',completed_at=NULL WHERE order_id=? AND status='in_progress'",
+      )
+      .run(id);
+    await db
+      .prepare(
+        "UPDATE order_stages SET status='in_progress',started_at=to_char(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh','YYYY-MM-DD HH24:MI:SS'),completed_at=NULL WHERE order_id=? AND stage_key=?",
+      )
+      .run(id, input.stage);
+    if (stage === "hoan_thanh")
+      await db
+        .prepare(
+          "UPDATE order_stages SET status='completed',completed_at=to_char(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh','YYYY-MM-DD HH24:MI:SS') WHERE order_id=? AND stage_key=?",
+        )
+        .run(id, stage);
+  } else if (input.stage) {
+    await db
+      .prepare(
+        "UPDATE order_stages SET status='completed',completed_at=to_char(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh','YYYY-MM-DD HH24:MI:SS') WHERE order_id=? AND stage_key=?",
+      )
+      .run(id, o.current_stage);
+    if (["nhan_don", "kiem_npl", "kiem_rap"].includes(o.current_stage))
+      await db
+        .prepare(
+          "UPDATE order_stages SET completed_qty=received_qty,remaining_qty=0 WHERE order_id=? AND stage_key=?",
+        )
+        .run(id, o.current_stage);
+    await db
+      .prepare(
+        "UPDATE order_stages SET status=?,started_at=COALESCE(started_at,to_char(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh','YYYY-MM-DD HH24:MI:SS')),completed_at=? WHERE order_id=? AND stage_key=?",
+      )
+      .run(
+        stage === "hoan_thanh" ? "completed" : "in_progress",
+        stage === "hoan_thanh" ? new Date().toISOString() : null,
+        id,
+        stage,
+      );
   }
-  audit(
+  await audit(
     ctx,
     input.exception ? "Chuyển bước ngoại lệ" : "Cập nhật đơn",
     `${id}: Trước ${JSON.stringify({ customer: o.customer, product_code: o.product_code, deadline: o.deadline, line_id: o.line_id, notes: o.notes, image_url: o.image_url })}; Sau ${JSON.stringify(input)}; ${input.stage ? `${LUUTA_STAGES.find((s) => s.key === o.current_stage)?.label} → ${LUUTA_STAGES[index].label}` : ""}${input.line_id ? ` → Chuyền ${input.line_id}` : ""}${input.exception ? `; Lý do: ${input.reason}` : ""}`,
     input.line_id || o.line_id,
   );
-  return getOrderById(id);
+  return await getOrderById(id);
 }
 export const logSchema = z
   .object({
@@ -748,14 +787,14 @@ export const logSchema = z
     version: z.number().int().positive(),
   })
   .strict();
-export function recordProduction(
+export async function recordProduction(
   ctx: Context,
   input: z.infer<typeof logSchema>,
 ) {
-  const o = getOrderById(input.order_id);
+  const o = await getOrderById(input.order_id);
   ensure(o, 404, "Không tìm thấy đơn.");
   assertVersion(o, input.version);
-  const emp = getEmployees().find((e) => e.id === input.employee_id);
+  const emp = (await getEmployees()).find((e) => e.id === input.employee_id);
   ensure(emp, 422, "Nhân viên không hợp lệ.");
   ensure(
     canRecordProduction(ctx.user, emp, o),
@@ -770,10 +809,10 @@ export function recordProduction(
   const deferPackingPay =
     input.record_packing &&
     input.stage === "Đóng gói" &&
-    !!db
+    !!(await db
       .prepare("SELECT 1 FROM payroll_locks WHERE month=?")
-      .get(input.log_date.slice(0, 7));
-  if (!deferPackingPay) unlocked(input.log_date.slice(0, 7));
+      .get(input.log_date.slice(0, 7)));
+  if (!deferPackingPay) await unlocked(input.log_date.slice(0, 7));
   let packingOperationId: number | undefined;
 
   ensure(o.status !== "completed", 422, "Đơn hàng đã hoàn thành.");
@@ -786,11 +825,11 @@ export function recordProduction(
     (v) => v.color === input.color && v.size === input.size,
   ) as Variant | undefined;
   ensure(v, 422, "Màu–size không thuộc đơn hàng.");
-  const parts = db
+  const parts = (await db
     .prepare(
       "SELECT id,name,unit_price FROM order_work_items WHERE order_id=? AND stage=? ORDER BY id",
     )
-    .all(o.id, input.stage) as {
+    .all(o.id, input.stage)) as {
     id: number;
     name: string;
     unit_price: number;
@@ -803,20 +842,20 @@ export function recordProduction(
   );
   const rate =
     part ||
-    (db
+    ((await db
       .prepare(
         "SELECT unit_price FROM order_rates WHERE order_id=? AND stage=?",
       )
-      .get(o.id, input.stage) as { unit_price: number } | undefined);
+      .get(o.id, input.stage)) as { unit_price: number } | undefined);
   let completedQuantity = input.quantity;
   ensure(rate, 422, "Chưa có đơn giá cho công đoạn. Liên hệ quản lý.");
   const totalPay = input.quantity * rate.unit_price;
   const existingPay = (
-    db
+    (await db
       .prepare(
         "SELECT (SELECT COALESCE(SUM(total_pay),0) FROM production_logs)+(SELECT COALESCE(SUM(total_pay),0) FROM pending_packing_pay WHERE settled_log_id IS NULL) total",
       )
-      .get() as { total: number }
+      .get()) as { total: number }
   ).total;
   ensure(
     Number.isSafeInteger(totalPay) &&
@@ -841,11 +880,11 @@ export function recordProduction(
     const maximum = input.stage === "Cắt" ? v.quantity : v.cut_qty;
     const paidPart = part
       ? (
-          db
+          (await db
             .prepare(
               "SELECT COALESCE(SUM(quantity),0) n FROM production_logs WHERE work_item_id=? AND color=? AND size=?",
             )
-            .get(part.id, v.color, v.size) as { n: number }
+            .get(part.id, v.color, v.size)) as { n: number }
         ).n
       : v[column];
     ensure(
@@ -854,7 +893,7 @@ export function recordProduction(
       "Số lượng vượt quá đầu vào của màu–size.",
     );
     const next = part
-      ? completedWork(o.id, input.stage, v.color, v.size, {
+      ? await completedWork(o.id, input.stage, v.color, v.size, {
           workId: part.id,
           delta: input.quantity,
         })
@@ -865,10 +904,9 @@ export function recordProduction(
       422,
       "Dữ liệu phần việc không khớp tiến độ; liên hệ quản lý.",
     );
-    db.prepare(`UPDATE order_variants SET ${column}=? WHERE id=?`).run(
-      next,
-      v.id,
-    );
+    await db
+      .prepare(`UPDATE order_variants SET ${column}=? WHERE id=?`)
+      .run(next, v.id);
   } else if (input.record_packing) {
     ensure(
       o.current_stage === "dong_goi",
@@ -885,10 +923,10 @@ export function recordProduction(
       422,
       "Số đóng gói vượt lượng QC đạt còn lại.",
     );
-    db.prepare(
-      "UPDATE order_variants SET packed_qty=packed_qty+? WHERE id=?",
-    ).run(input.quantity, v.id);
-    const packingRecord = db
+    await db
+      .prepare("UPDATE order_variants SET packed_qty=packed_qty+? WHERE id=?")
+      .run(input.quantity, v.id);
+    const packingRecord = await db
       .prepare(
         "INSERT INTO operation_records(order_id,action,color,size,quantity,passed,packages,operation_date,worker_id,notes,image_url,actor_id,represented_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
       )
@@ -918,20 +956,20 @@ export function recordProduction(
           ? v.reworked_qty
           : v.packed_qty;
     const paid = (
-      db
+      (await db
         .prepare(
           "SELECT COALESCE(SUM(quantity),0) qty FROM production_logs WHERE order_id=? AND color=? AND size=? AND stage=?",
         )
-        .get(o.id, v.color, v.size, input.stage) as { qty: number }
+        .get(o.id, v.color, v.size, input.stage)) as { qty: number }
     ).qty;
     const reserved =
       input.stage === "Đóng gói"
         ? (
-            db
+            (await db
               .prepare(
                 "SELECT COALESCE(SUM(quantity),0) n FROM pending_packing_pay WHERE order_id=? AND color=? AND size=? AND settled_log_id IS NULL",
               )
-              .get(o.id, v.color, v.size) as { n: number }
+              .get(o.id, v.color, v.size)) as { n: number }
           ).n
         : 0;
     ensure(
@@ -944,7 +982,7 @@ export function recordProduction(
   }
   if (deferPackingPay) {
     ensure(packingOperationId, 422, "Chưa ghi nhận đóng gói.");
-    const pending = db
+    const pending = await db
       .prepare(
         "INSERT INTO pending_packing_pay(operation_id,order_id,employee_id,employee_name,product_name,line_id,color,size,work_date,quantity,unit_price,total_pay) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
       )
@@ -962,8 +1000,10 @@ export function recordProduction(
         rate.unit_price,
         totalPay,
       );
-    db.prepare("UPDATE orders SET version=version+1 WHERE id=?").run(o.id);
-    audit(
+    await db
+      .prepare("UPDATE orders SET version=version+1 WHERE id=?")
+      .run(o.id);
+    await audit(
       ctx,
       "Đóng gói chờ đối chiếu công",
       `${emp.name}: ${o.id} ${v.color}/${v.size} +${input.quantity}; ngày ${input.log_date}; tháng đã khóa, chưa cộng lương`,
@@ -976,7 +1016,7 @@ export function recordProduction(
         "Đã xác nhận đóng gói. Tháng lương đã khóa; tiền công đang chờ quản lý đối chiếu trong Lương sản phẩm, chưa cộng vào lương.",
     };
   }
-  const result = db
+  const result = await db
     .prepare(
       "INSERT INTO production_logs(log_date,employee_id,employee_name,line_id,order_id,product_name,color,size,stage,quantity,unit_price,total_pay,updated_by,month,work_item_id,work_item_name,completed_quantity) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
     )
@@ -999,16 +1039,16 @@ export function recordProduction(
       part?.name || null,
       completedQuantity,
     );
-  db.prepare("UPDATE orders SET version=version+1 WHERE id=?").run(o.id);
-  audit(
+  await db.prepare("UPDATE orders SET version=version+1 WHERE id=?").run(o.id);
+  await audit(
     ctx,
     "Nhập sản lượng",
     `${emp.name}: ${o.id} ${v.color}/${v.size} ${input.stage}${part ? ` · ${part.name}` : ""} +${input.quantity}; hoàn thành công đoạn +${completedQuantity}`,
     o.line_id,
   );
-  return db
+  return (await db
     .prepare("SELECT * FROM production_logs WHERE id=?")
-    .get(result.lastInsertRowid) as ProductionLog;
+    .get(result.lastInsertRowid)) as ProductionLog;
 }
 export const operationSchema = z
   .object({
@@ -1026,12 +1066,12 @@ export const operationSchema = z
     notes: z.string().max(2000).optional(),
   })
   .strict();
-export function recordOperation(
+export async function recordOperation(
   ctx: Context,
   id: string,
   input: z.infer<typeof operationSchema>,
 ) {
-  const o = getOrderById(id);
+  const o = await getOrderById(id);
   ensure(o, 404, "Không tìm thấy đơn.");
   assertVersion(o, input.version);
   const quality = ["qc", "rework", "reinspect"].includes(input.action);
@@ -1070,7 +1110,7 @@ export function recordOperation(
     422,
     "Đơn hàng không ở công đoạn phù hợp.",
   );
-  validateProductImage(ctx, input.image_url);
+  await validateProductImage(ctx, input.image_url);
   const operationDate = input.operation_date || today();
   ensure(
     operationDate <= today() && operationDate >= o.order_date,
@@ -1084,7 +1124,9 @@ export function recordOperation(
     "Người kiểm QC được xác định từ tài khoản đang thao tác; không được chọn người khác.",
   );
   if (input.worker_id && input.worker_id !== ctx.user.employee_id) {
-    const performer = getEmployees().find((e) => e.id === input.worker_id);
+    const performer = (await getEmployees()).find(
+      (e) => e.id === input.worker_id,
+    );
     ensure(
       performer &&
         (performer.line_id === o.line_id ||
@@ -1105,9 +1147,11 @@ export function recordOperation(
       422,
       "Số kiểm vượt số đã may.",
     );
-    db.prepare(
-      "UPDATE order_variants SET qc_inspected_qty=qc_inspected_qty+?,qc_passed_qty=qc_passed_qty+?,defect_qty=defect_qty+? WHERE id=?",
-    ).run(input.quantity, passed, input.quantity - passed, v.id);
+    await db
+      .prepare(
+        "UPDATE order_variants SET qc_inspected_qty=qc_inspected_qty+?,qc_passed_qty=qc_passed_qty+?,defect_qty=defect_qty+? WHERE id=?",
+      )
+      .run(input.quantity, passed, input.quantity - passed, v.id);
   } else if (input.action === "rework") {
     ensure(
       v.reworked_qty + input.quantity <=
@@ -1115,76 +1159,88 @@ export function recordOperation(
       422,
       "Số sửa vượt số lỗi đang chờ.",
     );
-    db.prepare(
-      "UPDATE order_variants SET reworked_qty=reworked_qty+? WHERE id=?",
-    ).run(input.quantity, v.id);
+    await db
+      .prepare(
+        "UPDATE order_variants SET reworked_qty=reworked_qty+? WHERE id=?",
+      )
+      .run(input.quantity, v.id);
   } else if (input.action === "reinspect") {
     ensure(
       v.reinspected_qty + input.quantity <= v.reworked_qty,
       422,
       "Số kiểm lại vượt số đã sửa.",
     );
-    db.prepare(
-      "UPDATE order_variants SET reinspected_qty=reinspected_qty+?,repassed_qty=repassed_qty+?,qc_passed_qty=qc_passed_qty+? WHERE id=?",
-    ).run(input.quantity, passed, passed, v.id);
+    await db
+      .prepare(
+        "UPDATE order_variants SET reinspected_qty=reinspected_qty+?,repassed_qty=repassed_qty+?,qc_passed_qty=qc_passed_qty+? WHERE id=?",
+      )
+      .run(input.quantity, passed, passed, v.id);
   } else if (input.action === "pack") {
     ensure(
       v.packed_qty + input.quantity <= v.qc_passed_qty,
       422,
       "Chỉ đóng gói số lượng đã QC đạt.",
     );
-    db.prepare(
-      "UPDATE order_variants SET packed_qty=packed_qty+? WHERE id=?",
-    ).run(input.quantity, v.id);
+    await db
+      .prepare("UPDATE order_variants SET packed_qty=packed_qty+? WHERE id=?")
+      .run(input.quantity, v.id);
   } else {
     ensure(
       v.delivered_qty + input.quantity <= v.packed_qty,
       422,
       "Chỉ giao số lượng đã đóng gói.",
     );
-    db.prepare(
-      "UPDATE order_variants SET delivered_qty=delivered_qty+? WHERE id=?",
-    ).run(input.quantity, v.id);
+    await db
+      .prepare(
+        "UPDATE order_variants SET delivered_qty=delivered_qty+? WHERE id=?",
+      )
+      .run(input.quantity, v.id);
   }
-  db.prepare(
-    "INSERT INTO operation_records(order_id,action,color,size,quantity,passed,packages,operation_date,worker_id,notes,image_url,actor_id,represented_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-  ).run(
-    id,
-    input.action,
-    v.color,
-    v.size,
-    input.quantity,
-    ["qc", "reinspect"].includes(input.action) ? passed : null,
-    input.packages || 0,
-    operationDate,
-    inspection ? ctx.user.employee_id : input.worker_id || ctx.user.employee_id,
-    input.notes || "",
-    input.image_url || null,
-    ctx.actor.id,
-    ctx.representing ? ctx.user.id : null,
-  );
-  if (quality)
-    db.prepare(
-      "INSERT INTO qc_records(order_id,color,size,inspected_qty,passed_qty,defect_qty,defect_type,rework_qty,reinspected_qty,repassed_qty,inspector) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-    ).run(
+  await db
+    .prepare(
+      "INSERT INTO operation_records(order_id,action,color,size,quantity,passed,packages,operation_date,worker_id,notes,image_url,actor_id,represented_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    )
+    .run(
       id,
+      input.action,
       v.color,
       v.size,
-      input.action === "qc" ? input.quantity : 0,
-      input.action === "qc" ? passed : 0,
-      input.action === "qc" ? input.quantity - passed : 0,
-      input.defect_type || null,
-      input.action === "rework" ? input.quantity : 0,
-      input.action === "reinspect" ? input.quantity : 0,
-      input.action === "reinspect" ? passed : 0,
-      inspection ? ctx.user.name : actorLabel(ctx),
+      input.quantity,
+      ["qc", "reinspect"].includes(input.action) ? passed : null,
+      input.packages || 0,
+      operationDate,
+      inspection
+        ? ctx.user.employee_id
+        : input.worker_id || ctx.user.employee_id,
+      input.notes || "",
+      input.image_url || null,
+      ctx.actor.id,
+      ctx.representing ? ctx.user.id : null,
     );
-  db.prepare("UPDATE orders SET version=version+1 WHERE id=?").run(id);
-  audit(
+  if (quality)
+    await db
+      .prepare(
+        "INSERT INTO qc_records(order_id,color,size,inspected_qty,passed_qty,defect_qty,defect_type,rework_qty,reinspected_qty,repassed_qty,inspector) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+      )
+      .run(
+        id,
+        v.color,
+        v.size,
+        input.action === "qc" ? input.quantity : 0,
+        input.action === "qc" ? passed : 0,
+        input.action === "qc" ? input.quantity - passed : 0,
+        input.defect_type || null,
+        input.action === "rework" ? input.quantity : 0,
+        input.action === "reinspect" ? input.quantity : 0,
+        input.action === "reinspect" ? passed : 0,
+        inspection ? ctx.user.name : actorLabel(ctx),
+      );
+  await db.prepare("UPDATE orders SET version=version+1 WHERE id=?").run(id);
+  await audit(
     ctx,
     "Ghi nhận công đoạn",
     `${id} ${v.color}/${v.size}: ${input.action} +${input.quantity}`,
     o.line_id,
   );
-  return getOrderById(id);
+  return await getOrderById(id);
 }

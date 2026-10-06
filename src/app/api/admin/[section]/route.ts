@@ -20,28 +20,32 @@ import {
   randomUUID,
 } from "@/lib/server/auth";
 import { body, text, line, password } from "@/lib/server/validation";
+import { initializeDatabase } from "@/lib/server/migrate";
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ section: string }> },
 ) {
   try {
-    const ctx = authenticate(request);
+    await initializeDatabase();
+    const ctx = await authenticate(request);
     const { section } = await params;
     requireAdmin(ctx, section === "roles" ? "roles.manage" : "users.manage");
     ensure(["roles", "users"].includes(section), 404, "Không tìm thấy.");
     return ok({
-      roles: getRoles(),
+      roles: await getRoles(),
       users:
         section === "users"
-          ? (
-              db
-                .prepare("SELECT id FROM accounts ORDER BY created_at DESC")
-                .all() as { id: string }[]
-            ).map((r) => account(r.id))
+          ? await Promise.all(
+              (
+                (await db
+                  .prepare("SELECT id FROM accounts ORDER BY created_at DESC")
+                  .all()) as { id: string }[]
+              ).map(async (r) => await account(r.id)),
+            )
           : [],
-      employees: getEmployees(),
-      lines: getLines(),
+      employees: await getEmployees(),
+      lines: await getLines(),
     });
   } catch (e) {
     return failure(e);
@@ -52,7 +56,8 @@ export async function POST(
   { params }: { params: Promise<{ section: string }> },
 ) {
   try {
-    const ctx = authenticate(request);
+    await initializeDatabase();
+    const ctx = await authenticate(request);
     guardWrite(request, ctx);
     const { section } = await params;
     requireAdmin(ctx, section === "roles" ? "roles.manage" : "users.manage");
@@ -80,7 +85,7 @@ export async function POST(
         .strict()
         .parse(await body(request));
       const existing = input.id
-        ? getRoles().find((r) => r.id === input.id)
+        ? (await getRoles()).find((r) => r.id === input.id)
         : null;
       ensure(!input.id || existing, 404, "Không tìm thấy vai trò.");
       ensure(
@@ -117,27 +122,27 @@ export async function POST(
         422,
         "Mỗi quyền chỉ được cấu hình một lần.",
       );
-      const duplicate = db
+      const duplicate = (await db
         .prepare("SELECT id FROM roles WHERE name=?")
-        .get(input.name) as { id: string } | undefined;
+        .get(input.name)) as { id: string } | undefined;
       ensure(
         !duplicate || duplicate.id === input.id,
         422,
         "Tên vai trò đã tồn tại.",
       );
       const id = input.id || randomUUID();
-      db.transaction(() => {
-        db.prepare(
-          "INSERT INTO roles(id,name,position) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,position=excluded.position",
-        ).run(id, input.name, input.position);
-        db.prepare("DELETE FROM role_grants WHERE role_id=?").run(id);
+      await db.transaction(async () => {
+        await db
+          .prepare(
+            "INSERT INTO roles(id,name,position) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,position=excluded.position",
+          )
+          .run(id, input.name, input.position);
+        await db.prepare("DELETE FROM role_grants WHERE role_id=?").run(id);
         for (const g of input.grants)
-          db.prepare("INSERT INTO role_grants VALUES (?,?,?)").run(
-            id,
-            g.permission,
-            g.scope,
-          );
-        audit(ctx, "Cấu hình vai trò", input.name);
+          await db
+            .prepare("INSERT INTO role_grants VALUES (?,?,?)")
+            .run(id, g.permission, g.scope);
+        await audit(ctx, "Cấu hình vai trò", input.name);
       })();
       return ok({ id });
     }
@@ -156,7 +161,7 @@ export async function POST(
       })
       .strict()
       .parse(await body(request));
-    const target = account(input.id);
+    const target = await account(input.id);
     ensure(target, 404, "Không tìm thấy tài khoản.");
     ensure(
       target.id !== ctx.actor.id,
@@ -171,48 +176,57 @@ export async function POST(
     // The admin role is protected; all subsequent administrators are assigned via offline setup.
     if (input.roleIds)
       ensure(
-        input.roleIds.every((id) =>
-          getRoles().some(
-            (r) => r.id === id && r.position < top && !r.protected,
-          ),
-        ),
+        (
+          await Promise.all(
+            input.roleIds.map(async (id) =>
+              (await getRoles()).some(
+                (r) => r.id === id && r.position < top && !r.protected,
+              ),
+            ),
+          )
+        ).every(Boolean),
         403,
         "Không được cấp vai trò bằng hoặc cao hơn bạn.",
       );
     if (input.roleIds)
       ensure(
-        input.roleIds.every((id) =>
-          getRoles()
-            .find((r) => r.id === id)
-            ?.grants.every((g) =>
-              ctx.actor.roles
-                .flatMap((r) => r.grants)
-                .some(
-                  (owned) =>
-                    owned.permission === g.permission &&
-                    (owned.scope === "all" || owned.scope === g.scope),
+        (
+          await Promise.all(
+            input.roleIds.map(async (id) =>
+              (await getRoles())
+                .find((r) => r.id === id)
+                ?.grants.every((g) =>
+                  ctx.actor.roles
+                    .flatMap((r) => r.grants)
+                    .some(
+                      (owned) =>
+                        owned.permission === g.permission &&
+                        (owned.scope === "all" || owned.scope === g.scope),
+                    ),
                 ),
             ),
-        ),
+          )
+        ).every(Boolean),
         403,
         "Không thể gán vai trò có quyền vượt quyền của bạn.",
       );
-    db.transaction(() => {
+    await db.transaction(async () => {
       if (input.action === "reset") {
         ensure(input.temporaryPassword, 422, "Cần nhập mật khẩu tạm.");
-        db.prepare(
-          "UPDATE accounts SET password_hash=?,must_change_password=1 WHERE id=?",
-        ).run(hashPassword(input.temporaryPassword), target.id);
+        await db
+          .prepare(
+            "UPDATE accounts SET password_hash=?,must_change_password=1 WHERE id=?",
+          )
+          .run(hashPassword(input.temporaryPassword), target.id);
       } else if (input.action === "lock" || input.action === "unlock") {
         ensure(
           input.action === "lock" || target.status === "locked",
           422,
           "Tài khoản chưa bị khóa.",
         );
-        db.prepare("UPDATE accounts SET status=? WHERE id=?").run(
-          input.action === "lock" ? "locked" : "active",
-          target.id,
-        );
+        await db
+          .prepare("UPDATE accounts SET status=? WHERE id=?")
+          .run(input.action === "lock" ? "locked" : "active", target.id);
       } else {
         ensure(
           input.roleIds?.length && input.lineIds?.length,
@@ -233,29 +247,33 @@ export async function POST(
             : input.employeeId;
         if (input.createEmployee) {
           employeeId = `NV-${randomUUID().slice(0, 8)}`;
-          db.prepare(
-            "INSERT INTO employees(id,name,line_id,role,phone) VALUES (?,?,?,?,?)",
-          ).run(
-            employeeId,
-            input.name || target.name,
-            input.homeLineId || input.lineIds[0],
-            "Nhân viên",
-            "",
-          );
+          await db
+            .prepare(
+              "INSERT INTO employees(id,name,line_id,role,phone) VALUES (?,?,?,?,?)",
+            )
+            .run(
+              employeeId,
+              input.name || target.name,
+              input.homeLineId || input.lineIds[0],
+              "Nhân viên",
+              "",
+            );
         }
         ensure(
           employeeId &&
-            db.prepare("SELECT 1 FROM employees WHERE id=?").get(employeeId),
+            (await db
+              .prepare("SELECT 1 FROM employees WHERE id=?")
+              .get(employeeId)),
           422,
           "Liên kết tài khoản với nhân viên.",
         );
-        const used = db
+        const used = await db
           .prepare("SELECT id FROM accounts WHERE employee_id=? AND id!=?")
           .get(employeeId, target.id);
         ensure(!used, 422, "Nhân viên đã liên kết tài khoản khác.");
-        const emp = db
+        const emp = (await db
           .prepare("SELECT line_id FROM employees WHERE id=?")
-          .get(employeeId) as { line_id: number };
+          .get(employeeId)) as { line_id: number };
         const homeLineId =
           input.homeLineId ||
           (input.lineIds.includes(emp.line_id)
@@ -267,10 +285,17 @@ export async function POST(
           "Chuyền làm việc phải nằm trong các chuyền được giao.",
         );
         ensure(
-          db.prepare("SELECT 1 FROM lines WHERE id=?").get(homeLineId) &&
-            input.lineIds.every((id) =>
-              db.prepare("SELECT 1 FROM lines WHERE id=?").get(id),
-            ),
+          (await db
+            .prepare("SELECT 1 FROM lines WHERE id=?")
+            .get(homeLineId)) &&
+            (
+              await Promise.all(
+                input.lineIds.map(
+                  async (id) =>
+                    await db.prepare("SELECT 1 FROM lines WHERE id=?").get(id),
+                ),
+              )
+            ).every(Boolean),
           422,
           "Chuyền không tồn tại.",
         );
@@ -281,38 +306,41 @@ export async function POST(
           lineIds: target.line_ids,
           roleIds: target.roles.map((r) => r.id),
         };
-        db.prepare("UPDATE employees SET name=?,line_id=? WHERE id=?").run(
-          input.name || target.name,
-          homeLineId,
-          employeeId,
-        );
-        audit(
+        await db
+          .prepare("UPDATE employees SET name=?,line_id=? WHERE id=?")
+          .run(input.name || target.name, homeLineId, employeeId);
+        await audit(
           ctx,
           "Điều chỉnh hồ sơ và chuyền",
           `${target.username}: Trước ${JSON.stringify(before)}; Sau ${JSON.stringify({ name: input.name || target.name, employeeId, homeLineId, lineIds: input.lineIds, roleIds: input.roleIds })}`,
           homeLineId,
         );
-        db.prepare(
-          "UPDATE accounts SET status='active',name=?,employee_id=?,line_ids=? WHERE id=?",
-        ).run(
-          input.name || target.name,
-          employeeId,
-          JSON.stringify([...new Set(input.lineIds)]),
-          target.id,
-        );
-        db.prepare("DELETE FROM account_roles WHERE account_id=?").run(
-          target.id,
-        );
-        for (const id of new Set(input.roleIds))
-          db.prepare("INSERT INTO account_roles VALUES (?,?)").run(
+        await db
+          .prepare(
+            "UPDATE accounts SET status='active',name=?,employee_id=?,line_ids=? WHERE id=?",
+          )
+          .run(
+            input.name || target.name,
+            employeeId,
+            JSON.stringify([...new Set(input.lineIds)]),
             target.id,
-            id,
           );
+        await db
+          .prepare("DELETE FROM account_roles WHERE account_id=?")
+          .run(target.id);
+        for (const id of new Set(input.roleIds))
+          await db
+            .prepare("INSERT INTO account_roles VALUES (?,?)")
+            .run(target.id, id);
       }
-      revoke(target.id);
-      audit(ctx, "Quản lý tài khoản", `${input.action}: ${target.username}`);
+      await revoke(target.id);
+      await audit(
+        ctx,
+        "Quản lý tài khoản",
+        `${input.action}: ${target.username}`,
+      );
     })();
-    return ok({ user: account(target.id) });
+    return ok({ user: await account(target.id) });
   } catch (e) {
     return failure(e);
   }

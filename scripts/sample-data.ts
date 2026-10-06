@@ -1,26 +1,26 @@
 import { db } from "../src/lib/db";
 import { LUUTA_STAGES } from "../src/lib/types";
 // Explicit, idempotent sample seed; never run during application startup.
-export function seedSampleData() {
-  const countLines = db
+export async function seedSampleData() {
+  const countLines = (await db
     .prepare("SELECT COUNT(*) as count FROM lines")
-    .get() as {
+    .get()) as {
     count: number;
   };
 
   if (countLines.count === 0) {
-    db.transaction(() => {
+    await db.transaction(async () => {
       // 1. Seed 5 Chuyền sản xuất
       const insertLine = db.prepare(`
     INSERT INTO lines (id, name, leader_name, workers_count, capacity_per_day)
     VALUES (?, ?, ?, ?, ?)
   `);
 
-      insertLine.run(1, "Chuyền 1", "Nguyễn Thị Hoa", 8, 35);
-      insertLine.run(2, "Chuyền 2", "Trần Văn Bình", 10, 45);
-      insertLine.run(3, "Chuyền 3", "Lê Thu Hà", 7, 30);
-      insertLine.run(4, "Chuyền 4", "Phạm Minh Đạt", 9, 40);
-      insertLine.run(5, "Chuyền 5", "Vũ Thị Mai", 8, 35);
+      await insertLine.run(1, "Chuyền 1", "Nguyễn Thị Hoa", 8, 35);
+      await insertLine.run(2, "Chuyền 2", "Trần Văn Bình", 10, 45);
+      await insertLine.run(3, "Chuyền 3", "Lê Thu Hà", 7, 30);
+      await insertLine.run(4, "Chuyền 4", "Phạm Minh Đạt", 9, 40);
+      await insertLine.run(5, "Chuyền 5", "Vũ Thị Mai", 8, 35);
 
       // 2. Seed Nhân viên
       const insertEmp = db.prepare(`
@@ -42,7 +42,7 @@ export function seedSampleData() {
       ];
 
       for (const emp of initialEmployees) {
-        insertEmp.run(...emp);
+        await insertEmp.run(...emp);
       }
 
       // 3. Seed Đơn hàng mẫu của LUUTA
@@ -62,7 +62,7 @@ export function seedSampleData() {
   `);
 
       // LU-001: Đầm lụa xếp ly A (111 sản phẩm theo đúng bảng ví dụ size x màu của LUUTA)
-      insertOrder.run({
+      await insertOrder.run({
         id: "LU-001",
         customer: "Thời Trang Elise",
         product_code: "DL-01",
@@ -238,7 +238,7 @@ export function seedSampleData() {
       ];
 
       for (const item of v001) {
-        insertVariant.run({
+        await insertVariant.run({
           order_id: "LU-001",
           color: item.color,
           size: item.size,
@@ -252,7 +252,7 @@ export function seedSampleData() {
       }
 
       // LU-002: Áo Blazer Form Rộng (80 cái) - Đang ở khâu Cắt
-      insertOrder.run({
+      await insertOrder.run({
         id: "LU-002",
         customer: "Local Brand Hades",
         product_code: "BZ-02",
@@ -313,7 +313,7 @@ export function seedSampleData() {
         },
       ];
       for (const item of v002) {
-        insertVariant.run({
+        await insertVariant.run({
           order_id: "LU-002",
           color: item.color,
           size: item.size,
@@ -327,7 +327,7 @@ export function seedSampleData() {
       }
 
       // LU-003: Đầm suông Linen (50 cái) - Đang trễ ở khâu sửa hàng
-      insertOrder.run({
+      await insertOrder.run({
         id: "LU-003",
         customer: "Thời Trang Bella",
         product_code: "DL-03",
@@ -378,7 +378,7 @@ export function seedSampleData() {
         },
       ];
       for (const item of v003) {
-        insertVariant.run({
+        await insertVariant.run({
           order_id: "LU-003",
           color: item.color,
           size: item.size,
@@ -392,7 +392,7 @@ export function seedSampleData() {
       }
 
       // LU-004: Áo sơ mi lụa công sở (45 cái) - Đang chờ giao
-      insertOrder.run({
+      await insertOrder.run({
         id: "LU-004",
         customer: "Đồng Phục V-Tech",
         product_code: "SM-04",
@@ -443,7 +443,7 @@ export function seedSampleData() {
         },
       ];
       for (const item of v004) {
-        insertVariant.run({
+        await insertVariant.run({
           order_id: "LU-004",
           color: item.color,
           size: item.size,
@@ -486,7 +486,7 @@ export function seedSampleData() {
             started = "2026-10-04 08:00";
           }
 
-          insertStage.run({
+          await insertStage.run({
             order_id: ord.id,
             stage_key: s.key,
             stage_name: s.label,
@@ -614,7 +614,7 @@ export function seedSampleData() {
       ];
 
       for (const log of initialLogs) {
-        insertLog.run(log);
+        await insertLog.run(log);
       }
 
       // 6. Seed Audit Logs
@@ -623,19 +623,19 @@ export function seedSampleData() {
     VALUES (?, ?, ?, ?)
   `);
 
-      insertAudit.run(
+      await insertAudit.run(
         "Nguyễn B",
         "Cập nhật sản lượng",
         "LU-001 – Đầm A – May – Đen/M – +6 sản phẩm",
         "2026-10-05 17:32:00",
       );
-      insertAudit.run(
+      await insertAudit.run(
         "Trợ lý sản xuất",
         "Sửa Deadline",
         "Sửa Deadline LU-001 từ 08/10 → 10/10",
         "2026-10-05 18:10:00",
       );
-      insertAudit.run(
+      await insertAudit.run(
         "Tổ trưởng Hoa",
         "Cập nhật chuyền 1",
         "Nhận đơn LU-001 vào chuyền may",
@@ -648,7 +648,7 @@ export function seedSampleData() {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-      insertQc.run(
+      await insertQc.run(
         "LU-003",
         "Be",
         "M",

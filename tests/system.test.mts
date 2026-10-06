@@ -5,23 +5,38 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import ExcelJS from "exceljs";
+const { Pool } = await import("pg");
+if (!process.env.TEST_DATABASE_URL)
+  throw new Error(
+    "TEST_DATABASE_URL must point to a disposable PostgreSQL test server",
+  );
+const adminPool = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
+const testDatabase = "luuta_test_" + randomUUID().replaceAll("-", "");
+const restoredDatabase = testDatabase + "_restore";
+await adminPool.query(`CREATE DATABASE "${testDatabase}"`);
+const testUrl = new URL(process.env.TEST_DATABASE_URL);
+testUrl.pathname = "/" + testDatabase;
+process.env.DATABASE_URL = testUrl.toString();
+const { readSnapshot } = await import("../src/lib/server/snapshot");
 const directory = mkdtempSync(join(tmpdir(), "luuta-tests-"));
-process.env.DATABASE_PATH = join(directory, "test.db");
+process.env.BACKUP_DIR = join(directory, "backups");
 process.env.SESSION_COOKIE_SECURE = "false";
 process.env.APP_ORIGIN = "http://localhost:3003";
 const { db, getOrderById } = await import("../src/lib/db");
+await (await import("../src/lib/server/migrate")).initializeDatabase();
 assert.equal(
-  (db.prepare("SELECT COUNT(*) n FROM orders").get() as { n: number }).n,
+  ((await db.prepare("SELECT COUNT(*) n FROM orders").get()) as { n: number })
+    .n,
   0,
 );
 const { seedSampleData } = await import("../scripts/sample-data");
-seedSampleData();
-const seeded = db
+await seedSampleData();
+const seeded = await db
   .prepare("SELECT SUM(total_pay) total FROM production_logs")
   .get();
-seedSampleData();
+await seedSampleData();
 assert.deepEqual(
-  db.prepare("SELECT SUM(total_pay) total FROM production_logs").get(),
+  await db.prepare("SELECT SUM(total_pay) total FROM production_logs").get(),
   seeded,
 );
 const auth = await import("../src/lib/server/auth");
@@ -45,32 +60,36 @@ const { day } = await import("../src/lib/client");
 const { permits, canRecordProduction } = await import("../src/lib/permissions");
 const testPassword = "Local-Test-Password-42!";
 const people: Record<string, { id: string; cookie: string; csrf: string }> = {};
-function person(
+async function person(
   username: string,
   role: string,
   employee: string | null,
   lineIds: number[],
 ) {
   const id = randomUUID();
-  db.prepare(
-    "INSERT INTO accounts(id,username,name,password_hash,status,employee_id,line_ids) VALUES (?,?,?,?,'active',?,?)",
-  ).run(
-    id,
-    username,
-    username,
-    auth.hashPassword(testPassword),
-    employee,
-    JSON.stringify(lineIds),
-  );
-  db.prepare("INSERT INTO account_roles VALUES (?,?)").run(id, role);
-  return newSession(id);
+  await db
+    .prepare(
+      "INSERT INTO accounts(id,username,name,password_hash,status,employee_id,line_ids) VALUES (?,?,?,?,'active',?,?)",
+    )
+    .run(
+      id,
+      username,
+      username,
+      auth.hashPassword(testPassword),
+      employee,
+      JSON.stringify(lineIds),
+    );
+  await db.prepare("INSERT INTO account_roles VALUES (?,?)").run(id, role);
+  return await newSession(id);
 }
-function newSession(id: string) {
+async function newSession(id: string) {
   const token = randomUUID();
   const csrf = randomUUID();
-  db.prepare(
-    "INSERT INTO sessions(token_hash,account_id,csrf,expires_at) VALUES (?,?,?,?)",
-  ).run(auth.hashToken(token), id, csrf, Date.now() + 86400000);
+  await db
+    .prepare(
+      "INSERT INTO sessions(token_hash,account_id,csrf,expires_at) VALUES (?,?,?,?)",
+    )
+    .run(auth.hashToken(token), id, csrf, Date.now() + 86400000);
   return { id, cookie: `luuta_session=${token}`, csrf };
 }
 function request(
@@ -101,65 +120,84 @@ function request(
     body: input === undefined ? undefined : JSON.stringify(input),
   });
 }
-const context = (who: string) => auth.authenticate(request("/api/orders", who));
-const params = (key: string, value: string) =>
+const context = async (who: string) =>
+  await auth.authenticate(request("/api/orders", who));
+const params = async (key: string, value: string) =>
   ({ params: Promise.resolve({ [key]: value }) }) as {
     params: Promise<{ action: string; section: string; id: string }>;
   };
-function fixture(stage = "may", quantity = 5) {
-  const id = business.createOrder(context("admin"), {
-    customer: '=HYPERLINK("danger")',
-    product_name: "Sản phẩm kiểm thử",
-    product_code: "TEST",
-    deadline: "2027-10-12",
-    order_date: "2026-01-01",
-    line_id: 1,
-    priority: "normal",
-    notes: "",
-    variants: [{ color: "Đen", size: "M", quantity }],
-  }).id;
-  db.prepare("UPDATE orders SET current_stage=? WHERE id=?").run(stage, id);
-  db.prepare("UPDATE order_variants SET cut_qty=? WHERE order_id=?").run(
-    stage === "cat" ? 0 : quantity,
-    id,
-  );
-  db.prepare("INSERT INTO order_rates VALUES (?,?,?)").run(id, "May", 12000);
-  db.prepare("INSERT INTO order_rates VALUES (?,?,?)").run(id, "Cắt", 5000);
-  return getOrderById(id)!;
+async function fixture(stage = "may", quantity = 5) {
+  const id = (
+    await business.createOrder(await context("admin"), {
+      customer: '=HYPERLINK("danger")',
+      product_name: "Sản phẩm kiểm thử",
+      product_code: "TEST",
+      deadline: "2027-10-12",
+      order_date: "2026-01-01",
+      line_id: 1,
+      priority: "normal",
+      notes: "",
+      variants: [{ color: "Đen", size: "M", quantity }],
+    })
+  ).id;
+  await db
+    .prepare("UPDATE orders SET current_stage=? WHERE id=?")
+    .run(stage, id);
+  await db
+    .prepare("UPDATE order_variants SET cut_qty=? WHERE order_id=?")
+    .run(stage === "cat" ? 0 : quantity, id);
+  await db
+    .prepare("INSERT INTO order_rates VALUES (?,?,?)")
+    .run(id, "May", 12000);
+  await db
+    .prepare("INSERT INTO order_rates VALUES (?,?,?)")
+    .run(id, "Cắt", 5000);
+  return (await getOrderById(id))!;
 }
-before(() => {
-  db.prepare(
-    "INSERT INTO employees(id,name,line_id,role,phone) VALUES (?,?,?,?,?)",
-  ).run("TEST-W1", "Nhân viên A", 1, "May", "");
-  db.prepare(
-    "INSERT INTO employees(id,name,line_id,role,phone) VALUES (?,?,?,?,?)",
-  ).run("TEST-W2", "Nhân viên B", 2, "May", "");
-  people.admin = person("testadmin", "admin", null, []);
-  people.worker = person("workerone", "worker", "TEST-W1", [1]);
-  people.other = person("workertwo", "worker", "TEST-W2", [2]);
-  people.leader = person("leaderone", "leader", null, [1]);
+before(async () => {
+  await db
+    .prepare(
+      "INSERT INTO employees(id,name,line_id,role,phone) VALUES (?,?,?,?,?)",
+    )
+    .run("TEST-W1", "Nhân viên A", 1, "May", "");
+  await db
+    .prepare(
+      "INSERT INTO employees(id,name,line_id,role,phone) VALUES (?,?,?,?,?)",
+    )
+    .run("TEST-W2", "Nhân viên B", 2, "May", "");
+  people.admin = await person("testadmin", "admin", null, []);
+  people.worker = await person("workerone", "worker", "TEST-W1", [1]);
+  people.other = await person("workertwo", "worker", "TEST-W2", [2]);
+  people.leader = await person("leaderone", "leader", null, [1]);
 });
-after(() => {
-  db.close();
+after(async () => {
+  await db.close();
+  await adminPool.query(
+    `DROP DATABASE IF EXISTS "${restoredDatabase}" WITH (FORCE)`,
+  );
+  await adminPool.query(`DROP DATABASE "${testDatabase}" WITH (FORCE)`);
+  await adminPool.end();
   rmSync(directory, { recursive: true, force: true });
 });
 test("migration is versioned, repeatable, and preserves historical wages", async () => {
-  const before = db
+  const before = await db
     .prepare("SELECT SUM(total_pay) total FROM production_logs")
     .get();
   const { migrate } = await import("../src/lib/server/migrate");
-  migrate();
+  await migrate();
   assert.deepEqual(
-    db.prepare("SELECT SUM(total_pay) total FROM production_logs").get(),
+    await db.prepare("SELECT SUM(total_pay) total FROM production_logs").get(),
     before,
   );
   assert.equal(
     (
-      db.prepare("SELECT COUNT(*) qty FROM schema_migrations").get() as {
+      (await db
+        .prepare("SELECT COUNT(*) qty FROM schema_migrations")
+        .get()) as {
         qty: number;
       }
     ).qty,
-    9,
+    10,
   );
 });
 test("password hashes have different salts and support verification", () => {
@@ -188,12 +226,12 @@ test("registration stays pending and cannot login until approved", async () => {
       name: "Người mới",
       password: testPassword,
     }),
-    params("action", "register"),
+    await params("action", "register"),
   );
   assert.equal(response.status, 201);
-  const row = db
+  const row = (await db
     .prepare("SELECT status FROM accounts WHERE username=?")
-    .get("newworker") as { status: string };
+    .get("newworker")) as { status: string };
   assert.equal(row.status, "pending");
   assert.equal(
     (
@@ -202,19 +240,19 @@ test("registration stays pending and cannot login until approved", async () => {
           username: "newworker",
           password: testPassword,
         }),
-        params("action", "login"),
+        await params("action", "login"),
       )
     ).status,
     403,
   );
 });
 test("approval links existing employee, grants roles, and revokes sessions", async () => {
-  const row = db
+  const row = (await db
     .prepare("SELECT id FROM accounts WHERE username=?")
-    .get("newworker") as { id: string };
-  db.prepare(
-    "INSERT INTO employees(id,name,line_id,role) VALUES (?,?,?,?)",
-  ).run("TEST-W3", "Người mới", 1, "May");
+    .get("newworker")) as { id: string };
+  await db
+    .prepare("INSERT INTO employees(id,name,line_id,role) VALUES (?,?,?,?)")
+    .run("TEST-W3", "Người mới", 1, "May");
   const r = await adminRoutes.POST(
     request("/api/admin/users", "admin", {
       id: row.id,
@@ -223,16 +261,16 @@ test("approval links existing employee, grants roles, and revokes sessions", asy
       lineIds: [1],
       roleIds: ["worker"],
     }),
-    params("section", "users"),
+    await params("section", "users"),
   );
   assert.equal(r.status, 200);
-  assert.equal(auth.account(row.id)?.status, "active");
+  assert.equal((await auth.account(row.id))?.status, "active");
   const login = await authRoutes.POST(
     request("/api/auth/login", undefined, {
       username: "newworker",
       password: testPassword,
     }),
-    params("action", "login"),
+    await params("action", "login"),
   );
   assert.equal(login.status, 200);
   assert.match(login.headers.get("set-cookie") || "", /HttpOnly/i);
@@ -247,7 +285,7 @@ test("login throttling blocks repeated invalid passwords", async () => {
             username: "unknownuser",
             password: "wrong",
           }),
-          params("action", "login"),
+          await params("action", "login"),
         )
       ).status,
       401,
@@ -259,20 +297,20 @@ test("login throttling blocks repeated invalid passwords", async () => {
           username: "unknownuser",
           password: "wrong",
         }),
-        params("action", "login"),
+        await params("action", "login"),
       )
     ).status,
     429,
   );
 });
-test("sessions expire and only token hashes are persisted", () => {
-  const p = newSession(people.worker.id);
-  db.prepare("UPDATE sessions SET expires_at=0 WHERE token_hash=?").run(
-    auth.hashToken(p.cookie.slice(14)),
-  );
-  assert.throws(
-    () =>
-      auth.authenticate(
+test("sessions expire and only token hashes are persisted", async () => {
+  const p = await newSession(people.worker.id);
+  await db
+    .prepare("UPDATE sessions SET expires_at=0 WHERE token_hash=?")
+    .run(auth.hashToken(p.cookie.slice(14)));
+  await assert.rejects(
+    async () =>
+      await auth.authenticate(
         new Request("http://localhost:3003/api/orders", {
           headers: { cookie: p.cookie },
         }),
@@ -281,7 +319,7 @@ test("sessions expire and only token hashes are persisted", () => {
   );
   assert(
     !JSON.stringify(
-      db.prepare("SELECT token_hash FROM sessions").all(),
+      await db.prepare("SELECT token_hash FROM sessions").all(),
     ).includes(people.worker.cookie.slice(14)),
   );
 });
@@ -321,7 +359,7 @@ test("worker cannot read another employee salary by changing query IDs", async (
     (
       await detailRoutes.GET(
         request("/api/orders/LU-002", "worker"),
-        params("id", "LU-002"),
+        await params("id", "LU-002"),
       )
     ).status,
     403,
@@ -344,12 +382,11 @@ test("production-only roles cannot read monetary fields", async () => {
     403,
   );
 });
-test("multiple roles combine permission scopes without widening each grant", () => {
-  db.prepare("INSERT INTO account_roles VALUES (?,?)").run(
-    people.worker.id,
-    "leader",
-  );
-  const user = auth.account(people.worker.id)!;
+test("multiple roles combine permission scopes without widening each grant", async () => {
+  await db
+    .prepare("INSERT INTO account_roles VALUES (?,?)")
+    .run(people.worker.id, "leader");
+  const user = (await auth.account(people.worker.id))!;
   assert(
     permits(user, "production.create", { employeeId: "TEST-W3", lineId: 1 }),
   );
@@ -357,12 +394,14 @@ test("multiple roles combine permission scopes without widening each grant", () 
     !permits(user, "production.create", { employeeId: "TEST-W2", lineId: 2 }),
   );
   assert(!permits(user, "payroll.view", { employeeId: "TEST-W3", lineId: 1 }));
-  db.prepare(
-    "DELETE FROM account_roles WHERE account_id=? AND role_id='leader'",
-  ).run(people.worker.id);
+  await db
+    .prepare(
+      "DELETE FROM account_roles WHERE account_id=? AND role_id='leader'",
+    )
+    .run(people.worker.id);
 });
 test("employees cannot spoof wage, identity, or another line in production payload", async () => {
-  const o = fixture();
+  const o = await fixture();
   const base = {
     log_date: day(),
     employee_id: "TEST-W1",
@@ -397,7 +436,7 @@ test("employees cannot spoof wage, identity, or another line in production paylo
   );
 });
 test("production uses server rate, transactions, version checks, and idempotency", async () => {
-  const o = fixture();
+  const o = await fixture();
   const input = {
     log_date: day(),
     employee_id: "TEST-W1",
@@ -420,7 +459,7 @@ test("production uses server rate, transactions, version checks, and idempotency
   );
   assert.equal(b.status, 201);
   assert.equal((await b.json()).data.id, data.data.id);
-  assert.equal(getOrderById(o.id)?.variants?.[0].sewn_qty, 2);
+  assert.equal((await getOrderById(o.id))?.variants?.[0].sewn_qty, 2);
   assert.equal(
     (
       await productionRoutes.POST(
@@ -431,7 +470,7 @@ test("production uses server rate, transactions, version checks, and idempotency
   );
   const changed = {
     ...input,
-    version: getOrderById(o.id)!.version,
+    version: (await getOrderById(o.id))!.version,
     quantity: 4,
   };
   assert.equal(
@@ -442,53 +481,55 @@ test("production uses server rate, transactions, version checks, and idempotency
     ).status,
     422,
   );
-  assert.equal(getOrderById(o.id)?.variants?.[0].sewn_qty, 2);
+  assert.equal((await getOrderById(o.id))?.variants?.[0].sewn_qty, 2);
 });
 test("strict workflow prevents skipping, QC shortfall, and incomplete delivery", async () => {
-  const o = fixture("cat");
-  const move = (stage: string) =>
-    detailRoutes.PATCH(
+  const o = await fixture("cat");
+  const move = async (stage: string) =>
+    await detailRoutes.PATCH(
       request(
         `/api/orders/${o.id}`,
         "admin",
-        { version: getOrderById(o.id)!.version, stage },
+        { version: (await getOrderById(o.id))!.version, stage },
         { method: "PATCH" },
       ),
-      params("id", o.id),
+      await params("id", o.id),
     );
   assert.equal((await move("hoan_thanh")).status, 422);
   assert.equal((await move("may")).status, 422);
-  db.prepare("UPDATE orders SET current_stage='qc' WHERE id=?").run(o.id);
+  await db.prepare("UPDATE orders SET current_stage='qc' WHERE id=?").run(o.id);
   assert.equal((await move("dong_goi")).status, 422);
-  db.prepare("UPDATE orders SET current_stage='giao_hang' WHERE id=?").run(
-    o.id,
-  );
+  await db
+    .prepare("UPDATE orders SET current_stage='giao_hang' WHERE id=?")
+    .run(o.id);
   assert.equal((await move("hoan_thanh")).status, 422);
 });
 test("QC, rework, repeated QC, packing and delivery preserve per-variant bounds", async () => {
-  const o = fixture("qc", 5);
-  db.prepare("UPDATE order_variants SET sewn_qty=5 WHERE order_id=?").run(o.id);
+  const o = await fixture("qc", 5);
+  await db
+    .prepare("UPDATE order_variants SET sewn_qty=5 WHERE order_id=?")
+    .run(o.id);
   const op = async (action: string, quantity: number, passed?: number) =>
-    operationRoutes.POST(
+    await operationRoutes.POST(
       request(`/api/orders/${o.id}/operations`, "admin", {
-        version: getOrderById(o.id)!.version,
+        version: (await getOrderById(o.id))!.version,
         color: "Đen",
         size: "M",
         action,
         quantity,
         ...(passed !== undefined ? { passed } : {}),
       }),
-      params("id", o.id),
+      await params("id", o.id),
     );
   const move = async (stage: string) =>
-    detailRoutes.PATCH(
+    await detailRoutes.PATCH(
       request(
         `/api/orders/${o.id}`,
         "admin",
-        { version: getOrderById(o.id)!.version, stage },
+        { version: (await getOrderById(o.id))!.version, stage },
         { method: "PATCH" },
       ),
-      params("id", o.id),
+      await params("id", o.id),
     );
   assert.equal((await op("qc", 5, 3)).status, 200);
   assert.equal((await move("dong_goi")).status, 422);
@@ -507,7 +548,7 @@ test("QC, rework, repeated QC, packing and delivery preserve per-variant bounds"
   assert.equal((await move("giao_hang")).status, 200);
   assert.equal((await op("deliver", 5)).status, 200);
   assert.equal((await move("hoan_thanh")).status, 200);
-  assert.equal(getOrderById(o.id)?.status, "completed");
+  assert.equal((await getOrderById(o.id))?.status, "completed");
 });
 test("role management cannot mutate self, protected admin, or grant equal hierarchy", async () => {
   assert.equal(
@@ -517,7 +558,7 @@ test("role management cannot mutate self, protected admin, or grant equal hierar
           id: people.admin.id,
           action: "lock",
         }),
-        params("section", "users"),
+        await params("section", "users"),
       )
     ).status,
     403,
@@ -532,7 +573,7 @@ test("role management cannot mutate self, protected admin, or grant equal hierar
           lineIds: [1],
           roleIds: ["admin"],
         }),
-        params("section", "users"),
+        await params("section", "users"),
       )
     ).status,
     403,
@@ -546,7 +587,7 @@ test("role management cannot mutate self, protected admin, or grant equal hierar
           position: 99,
           grants: [],
         }),
-        params("section", "roles"),
+        await params("section", "roles"),
       )
     ).status,
     403,
@@ -555,7 +596,7 @@ test("role management cannot mutate self, protected admin, or grant equal hierar
     (
       await adminRoutes.GET(
         request("/api/admin/users", "worker"),
-        params("section", "users"),
+        await params("section", "users"),
       )
     ).status,
     403,
@@ -567,17 +608,17 @@ test("representation uses worker ceiling and records actor plus represented iden
       accountId: people.worker.id,
       password: testPassword,
     }),
-    params("action", "represent"),
+    await params("action", "represent"),
   );
   assert.equal(start.status, 200);
-  const ctx = context("admin");
+  const ctx = await context("admin");
   assert(ctx.representing);
   assert.equal(ctx.user.id, people.worker.id);
   assert.equal(
     (
       await adminRoutes.GET(
         request("/api/admin/users", "admin"),
-        params("section", "users"),
+        await params("section", "users"),
       )
     ).status,
     403,
@@ -590,7 +631,7 @@ test("representation uses worker ceiling and records actor plus represented iden
     ).status,
     403,
   );
-  const o = fixtureForRepresent();
+  const o = await fixtureForRepresent();
   const r = await productionRoutes.POST(
     request("/api/production/log", "admin", {
       log_date: day(),
@@ -604,26 +645,26 @@ test("representation uses worker ceiling and records actor plus represented iden
     }),
   );
   assert.equal(r.status, 201);
-  const audit = db
+  const audit = (await db
     .prepare(
       "SELECT actor_id,represented_id FROM audit_logs WHERE action='Nhập sản lượng' ORDER BY id DESC LIMIT 1",
     )
-    .get() as { actor_id: string; represented_id: string };
+    .get()) as { actor_id: string; represented_id: string };
   assert.equal(audit.actor_id, people.admin.id);
   assert.equal(audit.represented_id, people.worker.id);
   assert.equal(
     (
       await authRoutes.POST(
         request("/api/auth/stop-represent", "admin", {}),
-        params("action", "stop-represent"),
+        await params("action", "stop-represent"),
       )
     ).status,
     200,
   );
-  function fixtureForRepresent() {
-    const actor = auth.account(people.admin.id)!;
+  async function fixtureForRepresent() {
+    const actor = (await auth.account(people.admin.id))!;
     const raw = { ...ctx, user: actor, representing: false };
-    const o = business.createOrder(raw, {
+    const o = await business.createOrder(raw, {
       customer: "Test",
       product_name: "Represent",
       product_code: "R",
@@ -634,16 +675,16 @@ test("representation uses worker ceiling and records actor plus represented iden
       notes: "",
       variants: [{ color: "Đen", size: "M", quantity: 2 }],
     });
-    db.prepare("UPDATE orders SET current_stage='may' WHERE id=?").run(o.id);
-    db.prepare("UPDATE order_variants SET cut_qty=2 WHERE order_id=?").run(
-      o.id,
-    );
-    db.prepare("INSERT INTO order_rates VALUES (?,?,?)").run(
-      o.id,
-      "May",
-      10000,
-    );
-    return getOrderById(o.id)!;
+    await db
+      .prepare("UPDATE orders SET current_stage='may' WHERE id=?")
+      .run(o.id);
+    await db
+      .prepare("UPDATE order_variants SET cut_qty=2 WHERE order_id=?")
+      .run(o.id);
+    await db
+      .prepare("INSERT INTO order_rates VALUES (?,?,?)")
+      .run(o.id, "May", 10000);
+    return (await getOrderById(o.id))!;
   }
 });
 test("Excel export retains literal text, respects all filters and employee boundaries", async () => {
@@ -690,38 +731,38 @@ test("password reset forces change and account lock revokes all sessions", async
       action: "reset",
       temporaryPassword: "New-Temporary-42!",
     }),
-    params("section", "users"),
+    await params("section", "users"),
   );
   assert.equal(result.status, 200);
-  assert.equal(auth.account(id)?.must_change_password, 1);
-  assert.throws(() => context("other"), /đăng nhập/);
-  const p = newSession(id);
+  assert.equal((await auth.account(id))?.must_change_password, 1);
+  await assert.rejects(async () => await context("other"), /đăng nhập/);
+  const p = await newSession(id);
   people.other = p;
-  assert.throws(() => context("other"), /đổi mật khẩu/);
+  await assert.rejects(async () => await context("other"), /đổi mật khẩu/);
   const change = await authRoutes.POST(
     request("/api/auth/password", "other", {
       currentPassword: "New-Temporary-42!",
       newPassword: "Changed-Password-42!",
     }),
-    params("action", "password"),
+    await params("action", "password"),
   );
   assert.equal(change.status, 200);
-  assert.equal(auth.account(id)?.must_change_password, 0);
-  assert.throws(() => context("other"), /đăng nhập/);
-  people.other = newSession(id);
+  assert.equal((await auth.account(id))?.must_change_password, 0);
+  await assert.rejects(async () => await context("other"), /đăng nhập/);
+  people.other = await newSession(id);
   assert.equal(
     (
       await adminRoutes.POST(
         request("/api/admin/users", "admin", { id, action: "lock" }),
-        params("section", "users"),
+        await params("section", "users"),
       )
     ).status,
     200,
   );
-  assert.throws(() => context("other"), /đăng nhập/);
+  await assert.rejects(async () => await context("other"), /đăng nhập/);
 });
 test("month locks prevent production writes without partial updates", async () => {
-  const o = fixture("may", 5);
+  const o = await fixture("may", 5);
   assert.equal(
     (
       await payrollRoutes.POST(
@@ -747,29 +788,33 @@ test("month locks prevent production writes without partial updates", async () =
     ).status,
     409,
   );
-  assert.equal(getOrderById(o.id)?.variants?.[0].sewn_qty, 0);
+  assert.equal((await getOrderById(o.id))?.variants?.[0].sewn_qty, 0);
 });
 
 test("administration needs whole-workshop scope and cannot assign stronger business grants", async () => {
-  db.prepare(
-    "INSERT INTO roles(id,name,position) VALUES ('limited-admin','Limited',90)",
-  ).run();
-  db.prepare(
-    "INSERT INTO role_grants VALUES ('limited-admin','users.manage','self')",
-  ).run();
-  people.limited = person("limitedadmin", "limited-admin", null, []);
+  await db
+    .prepare(
+      "INSERT INTO roles(id,name,position) VALUES ('limited-admin','Limited',90)",
+    )
+    .run();
+  await db
+    .prepare(
+      "INSERT INTO role_grants VALUES ('limited-admin','users.manage','self')",
+    )
+    .run();
+  people.limited = await person("limitedadmin", "limited-admin", null, []);
   assert.equal(
     (
       await adminRoutes.GET(
         request("/api/admin/users", "limited"),
-        params("section", "users"),
+        await params("section", "users"),
       )
     ).status,
     403,
   );
-  db.prepare(
-    "UPDATE role_grants SET scope='all' WHERE role_id='limited-admin'",
-  ).run();
+  await db
+    .prepare("UPDATE role_grants SET scope='all' WHERE role_id='limited-admin'")
+    .run();
   assert.equal(
     (
       await adminRoutes.POST(
@@ -779,7 +824,7 @@ test("administration needs whole-workshop scope and cannot assign stronger busin
           roleIds: ["director"],
           lineIds: [2],
         }),
-        params("section", "users"),
+        await params("section", "users"),
       )
     ).status,
     403,
@@ -792,7 +837,7 @@ test("administration needs whole-workshop scope and cannot assign stronger busin
           position: 20,
           grants: [{ permission: "users.manage", scope: "self" }],
         }),
-        params("section", "roles"),
+        await params("section", "roles"),
       )
     ).status,
     422,
@@ -800,16 +845,20 @@ test("administration needs whole-workshop scope and cannot assign stronger busin
 });
 
 test("personal audit scope excludes another employee and Excel totals match filtered SQLite data", async () => {
-  db.prepare(
-    "INSERT INTO roles(id,name,position) VALUES ('personal-audit','Personal audit',15)",
-  ).run();
-  db.prepare(
-    "INSERT INTO role_grants VALUES ('personal-audit','audit.view','self')",
-  ).run();
-  db.prepare("INSERT INTO account_roles VALUES (?, 'personal-audit')").run(
-    people.worker.id,
-  );
-  const rows = business.auditFor(context("worker"));
+  await db
+    .prepare(
+      "INSERT INTO roles(id,name,position) VALUES ('personal-audit','Personal audit',15)",
+    )
+    .run();
+  await db
+    .prepare(
+      "INSERT INTO role_grants VALUES ('personal-audit','audit.view','self')",
+    )
+    .run();
+  await db
+    .prepare("INSERT INTO account_roles VALUES (?, 'personal-audit')")
+    .run(people.worker.id);
+  const rows = await business.auditFor(await context("worker"));
   assert(rows.length > 0);
   assert(
     rows.every((row) =>
@@ -832,11 +881,11 @@ test("personal audit scope excludes another employee and Excel totals match filt
       salary += Number(row.getCell(12).value);
     }
   });
-  const expected = db
+  const expected = (await db
     .prepare(
       "SELECT SUM(quantity) qty, SUM(total_pay) pay FROM production_logs WHERE employee_id=? AND month=?",
     )
-    .get("TEST-W1", month) as { qty: number; pay: number };
+    .get("TEST-W1", month)) as { qty: number; pay: number };
   assert.equal(quantity, expected.qty || 0);
   assert.equal(salary, expected.pay || 0);
   const summary = workbook.getWorksheet("Tổng hợp lương")!;
@@ -849,7 +898,7 @@ test("product images validate content and dimensions, require CSRF and scoped pe
   })
     .png()
     .toBuffer();
-  const upload = (
+  const upload = async (
     who: string | undefined,
     data: Uint8Array,
     type = "image/png",
@@ -859,7 +908,7 @@ test("product images validate content and dimensions, require CSRF and scoped pe
     const form = new FormData();
     form.set("file", new Blob([new Uint8Array(data)], { type }), "product.png");
     form.set("line_id", String(lineId));
-    return imageRoutes.POST(
+    return await imageRoutes.POST(
       new Request("http://localhost:3003/api/product-images", {
         method: "POST",
         headers: {
@@ -893,13 +942,17 @@ test("product images validate content and dimensions, require CSRF and scoped pe
     (await upload("admin", new Uint8Array(5 * 1024 * 1024 + 1))).status,
     413,
   );
-  db.prepare(
-    "INSERT INTO roles(id,name,position) VALUES ('image-editor','Image editor',20)",
-  ).run();
-  db.prepare(
-    "INSERT INTO role_grants VALUES ('image-editor','orders.edit','lines')",
-  ).run();
-  people.imageeditor = person("imageeditor", "image-editor", null, [1]);
+  await db
+    .prepare(
+      "INSERT INTO roles(id,name,position) VALUES ('image-editor','Image editor',20)",
+    )
+    .run();
+  await db
+    .prepare(
+      "INSERT INTO role_grants VALUES ('image-editor','orders.edit','lines')",
+    )
+    .run();
+  people.imageeditor = await person("imageeditor", "image-editor", null, [1]);
   assert.equal(
     (await upload("imageeditor", valid, "image/png", 2)).status,
     403,
@@ -929,13 +982,17 @@ test("product images validate content and dimensions, require CSRF and scoped pe
   } = await uploaded.json();
   const imageId = url.split("/").pop();
   assert.equal(
-    (await imageDetailRoutes.GET(request(url, "worker"), params("id", imageId)))
-      .status,
+    (
+      await imageDetailRoutes.GET(
+        request(url, "worker"),
+        await params("id", imageId),
+      )
+    ).status,
     403,
   );
   const read = await imageDetailRoutes.GET(
     request(url, "admin"),
-    params("id", imageId),
+    await params("id", imageId),
   );
   assert.equal(read.status, 200);
   assert.equal(read.headers.get("cache-control"), "private, no-store");
@@ -953,28 +1010,32 @@ test("product images validate content and dimensions, require CSRF and scoped pe
           accountId: people.worker.id,
           password: testPassword,
         }),
-        params("action", "represent"),
+        await params("action", "represent"),
       )
     ).status,
     200,
   );
   assert.equal(
-    (await imageDetailRoutes.GET(request(url, "admin"), params("id", imageId)))
-      .status,
+    (
+      await imageDetailRoutes.GET(
+        request(url, "admin"),
+        await params("id", imageId),
+      )
+    ).status,
     403,
   );
   assert.equal(
     (
       await authRoutes.POST(
         request("/api/auth/stop-represent", "admin", {}),
-        params("action", "stop-represent"),
+        await params("action", "stop-represent"),
       )
     ).status,
     200,
   );
-  db.prepare("INSERT INTO account_roles VALUES (?,'image-editor')").run(
-    people.worker.id,
-  );
+  await db
+    .prepare("INSERT INTO account_roles VALUES (?,'image-editor')")
+    .run(people.worker.id);
   assert.equal(
     (
       await authRoutes.POST(
@@ -982,7 +1043,7 @@ test("product images validate content and dimensions, require CSRF and scoped pe
           accountId: people.worker.id,
           password: testPassword,
         }),
-        params("action", "represent"),
+        await params("action", "represent"),
       )
     ).status,
     200,
@@ -993,9 +1054,9 @@ test("product images validate content and dimensions, require CSRF and scoped pe
   const representedId = representedUrl.split("/").pop();
   assert.equal(
     (
-      db
+      (await db
         .prepare("SELECT owner_id FROM product_images WHERE id=?")
-        .get(representedId) as { owner_id: string }
+        .get(representedId)) as { owner_id: string }
     ).owner_id,
     people.worker.id,
   );
@@ -1003,7 +1064,7 @@ test("product images validate content and dimensions, require CSRF and scoped pe
     (
       await imageDetailRoutes.GET(
         request(representedUrl, "admin"),
-        params("id", representedId),
+        await params("id", representedId),
       )
     ).status,
     200,
@@ -1012,34 +1073,36 @@ test("product images validate content and dimensions, require CSRF and scoped pe
     (
       await authRoutes.POST(
         request("/api/auth/stop-represent", "admin", {}),
-        params("action", "stop-represent"),
+        await params("action", "stop-represent"),
       )
     ).status,
     200,
   );
-  db.prepare(
-    "DELETE FROM account_roles WHERE account_id=? AND role_id='image-editor'",
-  ).run(people.worker.id);
+  await db
+    .prepare(
+      "DELETE FROM account_roles WHERE account_id=? AND role_id='image-editor'",
+    )
+    .run(people.worker.id);
   assert.equal(
     (
       await imageDetailRoutes.GET(
         request(representedUrl, "admin"),
-        params("id", representedId),
+        await params("id", representedId),
       )
     ).status,
     403,
   );
-  const o = fixture();
+  const o = await fixture();
   const attach = await detailRoutes.PATCH(
     request(`/api/orders/${o.id}`, "admin", {
       version: o.version,
       image_url: url,
     }),
-    params("id", o.id),
+    await params("id", o.id),
   );
   assert.equal(attach.status, 200);
-  assert.equal(getOrderById(o.id)?.image_url, url);
-  const blankOrder = fixture();
+  assert.equal((await getOrderById(o.id))?.image_url, url);
+  const blankOrder = await fixture();
   assert.equal(
     (
       await detailRoutes.PATCH(
@@ -1047,7 +1110,7 @@ test("product images validate content and dimensions, require CSRF and scoped pe
           version: blankOrder.version,
           image_url: url,
         }),
-        params("id", blankOrder.id),
+        await params("id", blankOrder.id),
       )
     ).status,
     422,
@@ -1066,30 +1129,39 @@ test("product images validate content and dimensions, require CSRF and scoped pe
   );
   assert.equal(create.status, 201);
   const created = await create.json();
-  assert.equal(getOrderById(created.data.id)?.image_url, url);
+  assert.equal((await getOrderById(created.data.id))?.image_url, url);
 
   assert.equal(
-    (await imageDetailRoutes.GET(request(url), params("id", imageId))).status,
+    (await imageDetailRoutes.GET(request(url), await params("id", imageId)))
+      .status,
     401,
   );
   assert.equal(
-    (await imageDetailRoutes.GET(request(url, "worker"), params("id", imageId)))
-      .status,
+    (
+      await imageDetailRoutes.GET(
+        request(url, "worker"),
+        await params("id", imageId),
+      )
+    ).status,
     200,
   );
   assert.equal(
-    (await imageDetailRoutes.GET(request(url, "other"), params("id", imageId)))
-      .status,
+    (
+      await imageDetailRoutes.GET(
+        request(url, "other"),
+        await params("id", imageId),
+      )
+    ).status,
     401,
   );
-  const otherActive = person("imageother", "worker", null, [2]);
+  const otherActive = await person("imageother", "worker", null, [2]);
 
   people.imagereader = otherActive;
   assert.equal(
     (
       await imageDetailRoutes.GET(
         request(url, "imagereader"),
-        params("id", imageId),
+        await params("id", imageId),
       )
     ).status,
     403,
@@ -1098,10 +1170,10 @@ test("product images validate content and dimensions, require CSRF and scoped pe
     (
       await detailRoutes.PATCH(
         request(`/api/orders/${o.id}`, "worker", {
-          version: getOrderById(o.id)!.version,
+          version: (await getOrderById(o.id))!.version,
           image_url: null,
         }),
-        params("id", o.id),
+        await params("id", o.id),
       )
     ).status,
     403,
@@ -1110,10 +1182,10 @@ test("product images validate content and dimensions, require CSRF and scoped pe
     (
       await detailRoutes.PATCH(
         request(`/api/orders/${o.id}`, "admin", {
-          version: getOrderById(o.id)!.version,
+          version: (await getOrderById(o.id))!.version,
           image_url: "https://example.com/photo.jpg",
         }),
-        params("id", o.id),
+        await params("id", o.id),
       )
     ).status,
     422,
@@ -1122,15 +1194,15 @@ test("product images validate content and dimensions, require CSRF and scoped pe
     (
       await detailRoutes.PATCH(
         request(`/api/orders/${o.id}`, "admin", {
-          version: getOrderById(o.id)!.version,
+          version: (await getOrderById(o.id))!.version,
           image_url: null,
         }),
-        params("id", o.id),
+        await params("id", o.id),
       )
     ).status,
     200,
   );
-  assert.equal(getOrderById(o.id)?.image_url, null);
+  assert.equal((await getOrderById(o.id))?.image_url, null);
 });
 
 test("custom colors and sizes persist, codes generate and remain editable with scoped permissions", async () => {
@@ -1156,7 +1228,7 @@ test("custom colors and sizes persist, codes generate and remain editable with s
   );
   assert.equal(response.status, 201);
   const created = (await response.json()).data;
-  const o = getOrderById(created.id)!;
+  const o = (await getOrderById(created.id))!;
   assert.match(o.product_code, /^SP-/);
   assert.equal(o.variants![0].size, "Theo số đo 92/70");
   assert.equal(o.variants![0].color_hex, "#f9a8d4");
@@ -1169,7 +1241,7 @@ test("custom colors and sizes persist, codes generate and remain editable with s
           { version: o.version, product_code: "CUSTOM" },
           { method: "PATCH" },
         ),
-        params("id", o.id),
+        await params("id", o.id),
       )
     ).status,
     403,
@@ -1183,12 +1255,12 @@ test("custom colors and sizes persist, codes generate and remain editable with s
           { version: o.version, product_code: "CUSTOM" },
           { method: "PATCH" },
         ),
-        params("id", o.id),
+        await params("id", o.id),
       )
     ).status,
     200,
   );
-  assert.equal(getOrderById(o.id)!.product_code, "CUSTOM");
+  assert.equal((await getOrderById(o.id))!.product_code, "CUSTOM");
   assert.equal(
     (
       await orderRoutes.POST(
@@ -1213,7 +1285,7 @@ test("custom colors and sizes persist, codes generate and remain editable with s
   assert.equal(parseMoney("1,234,567"), 1234567);
 });
 
-test("scheduled backups use real SQLite snapshots, date archives and admin-only downloads", async () => {
+test("scheduled backups use consistent PostgreSQL snapshots, date archives and admin-only downloads", async () => {
   const routes = await import("../src/app/api/admin/backups/route");
   const backup = await import("../src/lib/server/backup");
   assert.equal((await routes.GET(request("/api/admin/backups"))).status, 401);
@@ -1246,12 +1318,16 @@ test("scheduled backups use real SQLite snapshots, date archives and admin-only 
     ).status,
     403,
   );
-  backup.configureBackup({ enabled: true, intervalHours: 1, windowDays: 30 });
-  const due = backup.backupConfig().nextAt;
+  await backup.configureBackup({
+    enabled: true,
+    intervalHours: 1,
+    windowDays: 30,
+  });
+  const due = (await backup.backupConfig()).nextAt;
   assert.equal(await backup.checkBackupDue(due - 1), undefined);
   const files = await backup.checkBackupDue(due);
   assert.ok(files);
-  assert.equal(backup.backupConfig().lastAt, due);
+  assert.equal((await backup.backupConfig()).lastAt, due);
   const { gunzipSync } = await import("node:zlib");
   const archive = JSON.parse(
     gunzipSync((await backup.readBackup(files.archive))!).toString(),
@@ -1264,21 +1340,27 @@ test("scheduled backups use real SQLite snapshots, date archives and admin-only 
         r.log_date >= archive.from && r.log_date <= archive.until,
     ),
   );
-  const Database = (await import("better-sqlite3")).default;
-  const snapshot = new Database(join(directory, "backups", files.snapshot), {
-    readonly: true,
-  });
+  const snapshot = await readSnapshot(
+    join(directory, "backups", files.snapshot),
+  );
+  const sorted = (rows: Record<string, unknown>[]) =>
+    rows.sort((a, b) => String(a.id).localeCompare(String(b.id)));
   assert.deepEqual(
-    snapshot
-      .prepare("SELECT id,total_pay FROM production_logs ORDER BY id")
-      .all(),
-    db.prepare("SELECT id,total_pay FROM production_logs ORDER BY id").all(),
+    sorted(snapshot.tables.production_logs),
+    sorted(
+      JSON.parse(
+        JSON.stringify(await db.prepare("SELECT * FROM production_logs").all()),
+      ),
+    ),
   );
   assert.deepEqual(
-    snapshot.prepare("SELECT id,data FROM product_images ORDER BY id").all(),
-    db.prepare("SELECT id,data FROM product_images ORDER BY id").all(),
+    sorted(snapshot.tables.product_images),
+    sorted(
+      JSON.parse(
+        JSON.stringify(await db.prepare("SELECT * FROM product_images").all()),
+      ),
+    ),
   );
-  snapshot.close();
   assert.equal(
     (
       await routes.GET(
@@ -1301,14 +1383,18 @@ test("scheduled backups use real SQLite snapshots, date archives and admin-only 
     404,
   );
   assert.equal(await backup.checkBackupDue(due), undefined);
-  backup.configureBackup({ enabled: false, intervalHours: 24, windowDays: 30 });
+  await backup.configureBackup({
+    enabled: false,
+    intervalHours: 24,
+    windowDays: 30,
+  });
   assert.equal(await backup.checkBackupDue(due + 99999999), undefined);
 });
 
 test("prices above previous business cap save, unsafe wages reject without partial updates", async () => {
-  const o = fixture();
-  const setRate = (price: number) =>
-    ratesRoutes.POST(
+  const o = await fixture();
+  const setRate = async (price: number) =>
+    await ratesRoutes.POST(
       request("/api/rates", "admin", {
         order_id: o.id,
         stage: "May",
@@ -1318,18 +1404,18 @@ test("prices above previous business cap save, unsafe wages reject without parti
   assert.equal((await setRate(1234567890)).status, 200);
   assert.equal(
     (
-      db
+      (await db
         .prepare(
           "SELECT unit_price FROM order_rates WHERE order_id=? AND stage='May'",
         )
-        .get(o.id) as { unit_price: number }
+        .get(o.id)) as { unit_price: number }
     ).unit_price,
     1234567890,
   );
   assert.equal((await setRate(-1)).status, 422);
   assert.equal((await setRate(Number.MAX_SAFE_INTEGER + 1)).status, 422);
   assert.equal((await setRate(Number.MAX_SAFE_INTEGER)).status, 200);
-  const before = db
+  const before = await db
     .prepare("SELECT sewn_qty FROM order_variants WHERE order_id=?")
     .get(o.id);
   const response = await productionRoutes.POST(
@@ -1347,7 +1433,7 @@ test("prices above previous business cap save, unsafe wages reject without parti
   assert.equal(response.status, 422);
   assert.match((await response.json()).error, /tính chính xác/);
   assert.deepEqual(
-    db
+    await db
       .prepare("SELECT sewn_qty FROM order_variants WHERE order_id=?")
       .get(o.id),
     before,
@@ -1355,19 +1441,19 @@ test("prices above previous business cap save, unsafe wages reject without parti
 });
 
 test("exceptional transitions require scoped permission and reason, preserve quantities and wages, and audit both steps", async () => {
-  const o = fixture();
-  const patch = (who: string, payload: unknown, key?: string) =>
-    detailRoutes.PATCH(
+  const o = await fixture();
+  const patch = async (who: string, payload: unknown, key?: string) =>
+    await detailRoutes.PATCH(
       request("/api/orders/" + o.id, who, payload, { method: "PATCH", key }),
-      params("id", o.id),
+      await params("id", o.id),
     );
-  const snapshot = () => ({
-    variants: db
+  const snapshot = async () => ({
+    variants: await db
       .prepare("SELECT * FROM order_variants WHERE order_id=?")
       .all(o.id),
-    wages: db.prepare("SELECT * FROM production_logs").all(),
+    wages: await db.prepare("SELECT * FROM production_logs").all(),
   });
-  const before = snapshot();
+  const before = await snapshot();
   assert.equal(
     (await patch("admin", { version: o.version, stage: "cat" })).status,
     422,
@@ -1402,9 +1488,9 @@ test("exceptional transitions require scoped permission and reason, preserve qua
     };
   assert.equal((await patch("admin", payload, key)).status, 200);
   assert.equal((await patch("admin", payload, key)).status, 200);
-  let current = getOrderById(o.id)!;
+  let current = (await getOrderById(o.id))!;
   assert.equal(current.current_stage, "cat");
-  assert.deepEqual(snapshot(), before);
+  assert.deepEqual(await snapshot(), before);
   assert.equal((await patch("admin", { ...payload, stage: "qc" })).status, 409);
   assert.equal(
     (
@@ -1417,8 +1503,8 @@ test("exceptional transitions require scoped permission and reason, preserve qua
     ).status,
     200,
   );
-  current = getOrderById(o.id)!;
-  assert.deepEqual(snapshot(), before);
+  current = (await getOrderById(o.id))!;
+  assert.deepEqual(await snapshot(), before);
   assert.equal(
     (
       await patch("admin", {
@@ -1430,16 +1516,18 @@ test("exceptional transitions require scoped permission and reason, preserve qua
     ).status,
     422,
   );
-  const log = db
+  const log = (await db
     .prepare(
       "SELECT details FROM audit_logs WHERE action='Chuyển bước ngoại lệ' AND details LIKE ? ORDER BY id LIMIT 1",
     )
-    .get(o.id + ":%") as { details: string };
+    .get(o.id + ":%")) as { details: string };
   assert.match(log.details, /May → Cắt/);
   assert.match(log.details, /Báo cáo nhầm bước May/);
-  db.prepare(
-    "UPDATE orders SET current_stage='hoan_thanh',status='completed' WHERE id=?",
-  ).run(o.id);
+  await db
+    .prepare(
+      "UPDATE orders SET current_stage='hoan_thanh',status='completed' WHERE id=?",
+    )
+    .run(o.id);
   assert.equal(
     (
       await patch("admin", {
@@ -1451,12 +1539,12 @@ test("exceptional transitions require scoped permission and reason, preserve qua
     ).status,
     200,
   );
-  assert.notEqual(getOrderById(o.id)!.status, "completed");
+  assert.notEqual((await getOrderById(o.id))!.status, "completed");
 });
 
 test("deadline risk follows remaining quantities, measured throughput and time instead of stored seed status", async () => {
   const { assessOrders } = await import("../src/lib/progress");
-  const raw = fixture();
+  const raw = await fixture();
   const line = {
     id: 1,
     name: "Chuyền 1",
@@ -1506,14 +1594,16 @@ test("deadline risk follows remaining quantities, measured throughput and time i
 });
 
 test("packing and delivery retain dated records, notes, worker, packages and operate after wage lock", async () => {
-  const o = fixture("dong_goi");
-  db.prepare(
-    "UPDATE order_variants SET sewn_qty=quantity,qc_inspected_qty=quantity,qc_passed_qty=quantity WHERE order_id=?",
-  ).run(o.id);
-  const record = (payload: unknown) =>
-    operationRoutes.POST(
+  const o = await fixture("dong_goi");
+  await db
+    .prepare(
+      "UPDATE order_variants SET sewn_qty=quantity,qc_inspected_qty=quantity,qc_passed_qty=quantity WHERE order_id=?",
+    )
+    .run(o.id);
+  const record = async (payload: unknown) =>
+    await operationRoutes.POST(
       request("/api/orders/" + o.id + "/operations", "admin", payload),
-      params("id", o.id),
+      await params("id", o.id),
     );
   assert.equal(
     (
@@ -1547,11 +1637,11 @@ test("packing and delivery retain dated records, notes, worker, packages and ope
     ).status,
     200,
   );
-  const packing = db
+  const packing = (await db
     .prepare(
       "SELECT * FROM operation_records WHERE order_id=? AND action='pack'",
     )
-    .get(o.id) as {
+    .get(o.id)) as {
     quantity: number;
     packages: number;
     notes: string;
@@ -1560,10 +1650,10 @@ test("packing and delivery retain dated records, notes, worker, packages and ope
   assert.equal(packing.packages, 2);
   assert.equal(packing.notes, "Kiện mẫu");
   assert.equal(packing.operation_date, day());
-  let current = getOrderById(o.id)!;
-  db.prepare("UPDATE orders SET current_stage='giao_hang' WHERE id=?").run(
-    o.id,
-  );
+  let current = (await getOrderById(o.id))!;
+  await db
+    .prepare("UPDATE orders SET current_stage='giao_hang' WHERE id=?")
+    .run(o.id);
   assert.equal(
     (
       await record({
@@ -1579,12 +1669,12 @@ test("packing and delivery retain dated records, notes, worker, packages and ope
     ).status,
     200,
   );
-  current = getOrderById(o.id)!;
+  current = (await getOrderById(o.id))!;
   assert.equal(current.variants![0].delivered_qty, 2);
   assert.equal(current.delivered_complete, false);
   const details = await detailRoutes.GET(
     request("/api/orders/" + o.id, "admin"),
-    params("id", o.id),
+    await params("id", o.id),
   );
   assert.equal((await details.json()).data.operations.length, 2);
   const file = await exportRoutes.GET(
@@ -1598,7 +1688,7 @@ test("packing and delivery retain dated records, notes, worker, packages and ope
 
 test("stage dossiers record real status and people, skips do not complete untouched stages, shipping bypass preserves QC", async () => {
   const routes = await import("../src/app/api/orders/[id]/stages/route");
-  const o = fixture("nhan_don");
+  const o = await fixture("nhan_don");
   const payload = {
     version: o.version,
     stage: "nhan_don",
@@ -1614,7 +1704,7 @@ test("stage dossiers record real status and people, skips do not complete untouc
         request("/api/orders/" + o.id + "/stages", "worker", payload, {
           method: "PATCH",
         }),
-        params("id", o.id),
+        await params("id", o.id),
       )
     ).status,
     403,
@@ -1625,21 +1715,21 @@ test("stage dossiers record real status and people, skips do not complete untouc
         request("/api/orders/" + o.id + "/stages", "admin", payload, {
           method: "PATCH",
         }),
-        params("id", o.id),
+        await params("id", o.id),
       )
     ).status,
     200,
   );
-  let current = getOrderById(o.id)!;
+  let current = (await getOrderById(o.id))!;
   assert.equal(
     current.stages!.find((s) => s.stage_key === "nhan_don")!.status,
     "has_issue",
   );
   assert.equal(
     (
-      db
+      (await db
         .prepare("SELECT COUNT(*) n FROM stage_events WHERE order_id=?")
-        .get(o.id) as { n: number }
+        .get(o.id)) as { n: number }
     ).n,
     1,
   );
@@ -1657,12 +1747,12 @@ test("stage dossiers record real status and people, skips do not complete untouc
           },
           { method: "PATCH" },
         ),
-        params("id", o.id),
+        await params("id", o.id),
       )
     ).status,
     200,
   );
-  current = getOrderById(o.id)!;
+  current = (await getOrderById(o.id))!;
   assert.equal(
     current.stages!.find((s) => s.stage_key === "kiem_rap")!.status,
     "pending",
@@ -1681,7 +1771,7 @@ test("stage dossiers record real status and people, skips do not complete untouc
           },
           { method: "PATCH" },
         ),
-        params("id", o.id),
+        await params("id", o.id),
       )
     ).status,
     422,
@@ -1689,7 +1779,7 @@ test("stage dossiers record real status and people, skips do not complete untouc
 });
 
 test("privileged payroll corrections preserve before/after history, respect downstream quantities and locked periods", async () => {
-  const o = fixture();
+  const o = await fixture();
   const created = await productionRoutes.POST(
     request("/api/production/log", "admin", {
       version: o.version,
@@ -1745,9 +1835,9 @@ test("privileged payroll corrections preserve before/after history, respect down
     ).status,
     200,
   );
-  const adjusted = db
+  const adjusted = (await db
     .prepare("SELECT * FROM production_logs WHERE id=?")
-    .get(log.id) as {
+    .get(log.id)) as {
     quantity: number;
     total_pay: number;
     version: number;
@@ -1756,12 +1846,12 @@ test("privileged payroll corrections preserve before/after history, respect down
   assert.equal(adjusted.quantity, 2);
   assert.equal(adjusted.total_pay, 90000);
   assert.equal(adjusted.is_locked, 1);
-  assert.equal(getOrderById(o.id)!.variants![0].sewn_qty, 2);
-  const history = db
+  assert.equal((await getOrderById(o.id))!.variants![0].sewn_qty, 2);
+  const history = (await db
     .prepare(
       "SELECT before_json,after_json,reason FROM production_adjustments WHERE log_id=?",
     )
-    .get(log.id) as { before_json: string; after_json: string };
+    .get(log.id)) as { before_json: string; after_json: string };
   assert.equal(JSON.parse(history.before_json).quantity, 3);
   assert.equal(JSON.parse(history.after_json).quantity, 2);
   assert.equal(
@@ -1772,9 +1862,9 @@ test("privileged payroll corrections preserve before/after history, respect down
     ).status,
     409,
   );
-  db.prepare(
-    "UPDATE order_variants SET qc_inspected_qty=2 WHERE order_id=?",
-  ).run(o.id);
+  await db
+    .prepare("UPDATE order_variants SET qc_inspected_qty=2 WHERE order_id=?")
+    .run(o.id);
   assert.equal(
     (
       await productionRoutes.PATCH(
@@ -1788,14 +1878,14 @@ test("privileged payroll corrections preserve before/after history, respect down
     ).status,
     422,
   );
-  assert.equal(getOrderById(o.id)!.variants![0].sewn_qty, 2);
+  assert.equal((await getOrderById(o.id))!.variants![0].sewn_qty, 2);
 });
 
 test("composite report filters match exported totals and sequential codes are assigned by server", async () => {
-  const ctx = context("admin");
-  const logs = business.logsFor(ctx);
+  const ctx = await context("admin");
+  const logs = await business.logsFor(ctx);
   const row = logs.find((l) => l.quantity > 0)!;
-  const filtered = business.filterLogs(logs, {
+  const filtered = await business.filterLogs(logs, {
     from: row.log_date,
     to: row.log_date,
     product: row.order_id,
@@ -1886,10 +1976,10 @@ test("multiple garment colors persist as one variant and one quantity in API, SQ
   assert.equal(o.total_quantity, 7);
   assert.equal(o.variants.length, 1);
   assert.deepEqual(o.variants[0].colors, colors);
-  assert.deepEqual(getOrderById(o.id)!.variants![0].colors, colors);
+  assert.deepEqual((await getOrderById(o.id))!.variants![0].colors, colors);
   const detail = await detailRoutes.GET(
     request("/api/orders/" + o.id, "worker"),
-    params("id", o.id),
+    await params("id", o.id),
   );
   assert.deepEqual((await detail.json()).data.variants[0].colors, colors);
   const file = await exportRoutes.GET(
@@ -1933,10 +2023,10 @@ test("QA: all six default roles enforce API scope and administrator boundaries",
   ]) {
     const who = `qa-${role}`;
     const employeeId = `QA-${role}`;
-    db.prepare(
-      "INSERT INTO employees(id,name,line_id,role) VALUES (?,?,?,?)",
-    ).run(employeeId, who, 1, role);
-    people[who] = person(who, role, employeeId, [1]);
+    await db
+      .prepare("INSERT INTO employees(id,name,line_id,role) VALUES (?,?,?,?)")
+      .run(employeeId, who, 1, role);
+    people[who] = await person(who, role, employeeId, [1]);
     const response = await orderRoutes.GET(request("/api/orders", who));
     assert.equal(response.status, 200, `${role}: đọc đơn`);
     const orders = (await response.json()).data.orders;
@@ -1948,7 +2038,7 @@ test("QA: all six default roles enforce API scope and administrator boundaries",
       );
     const users = await adminRoutes.GET(
       request("/api/admin/users", who),
-      params("section", "users"),
+      await params("section", "users"),
     );
     assert.equal(
       users.status,
@@ -1967,13 +2057,13 @@ test("QA: all six default roles enforce API scope and administrator boundaries",
       ["admin", "director", "assistant"].includes(role) ? 200 : 403,
       `${role}: cấu hình giá`,
     );
-    assert.equal(auth.account(people[who].id)!.roles.length, 1);
+    assert.equal((await auth.account(people[who].id))!.roles.length, 1);
   }
 });
 
 test("QA: director assistant and QC representative views use target roles and remain escapable", async () => {
   const actor = "qa-represent-admin";
-  people[actor] = person(actor, "admin", null, []);
+  people[actor] = await person(actor, "admin", null, []);
   for (const role of ["director", "assistant", "qc"]) {
     const target = people[`qa-${role}`];
     const start = await authRoutes.POST(
@@ -1981,10 +2071,10 @@ test("QA: director assistant and QC representative views use target roles and re
         accountId: target.id,
         password: testPassword,
       }),
-      params("action", "represent"),
+      await params("action", "represent"),
     );
     assert.equal(start.status, 200, `Đại diện ${role}`);
-    const ctx = context(actor);
+    const ctx = await context(actor);
     assert.equal(ctx.actor.id, people[actor].id);
     assert.equal(ctx.user.id, target.id);
     assert.deepEqual(
@@ -1996,7 +2086,7 @@ test("QA: director assistant and QC representative views use target roles and re
       (
         await adminRoutes.GET(
           request("/api/admin/users", actor),
-          params("section", "users"),
+          await params("section", "users"),
         )
       ).status,
       403,
@@ -2008,32 +2098,32 @@ test("QA: director assistant and QC representative views use target roles and re
             currentPassword: testPassword,
             newPassword: "QA-Replacement-Password-42!",
           }),
-          params("action", "password"),
+          await params("action", "password"),
         )
       ).status,
       403,
     );
     const stop = await authRoutes.POST(
       request("/api/auth/stop-represent", actor, {}),
-      params("action", "stop-represent"),
+      await params("action", "stop-represent"),
     );
     assert.equal(stop.status, 200);
-    assert.equal(context(actor).user.id, people[actor].id);
-    const audit = db
+    assert.equal((await context(actor)).user.id, people[actor].id);
+    const audit = (await db
       .prepare(
         "SELECT actor_id,represented_id FROM audit_logs WHERE action='Bắt đầu đại diện' AND actor_id=? ORDER BY id DESC LIMIT 1",
       )
-      .get(people[actor].id) as { actor_id: string; represented_id: string };
+      .get(people[actor].id)) as { actor_id: string; represented_id: string };
     assert.equal(audit.represented_id, target.id);
   }
 });
 
 test("QA: QC role cannot pack or deliver and wrong-stage inspection changes no quantities", async () => {
-  const o = fixture("may", 5);
-  db.prepare(
-    "UPDATE order_variants SET cut_qty=5,sewn_qty=5 WHERE order_id=?",
-  ).run(o.id);
-  const before = getOrderById(o.id)!;
+  const o = await fixture("may", 5);
+  await db
+    .prepare("UPDATE order_variants SET cut_qty=5,sewn_qty=5 WHERE order_id=?")
+    .run(o.id);
+  const before = (await getOrderById(o.id))!;
   for (const action of ["qc", "pack", "deliver"]) {
     const response = await operationRoutes.POST(
       request(`/api/orders/${o.id}/operations`, "qa-qc", {
@@ -2044,18 +2134,20 @@ test("QA: QC role cannot pack or deliver and wrong-stage inspection changes no q
         quantity: 1,
         passed: 1,
       }),
-      params("id", o.id),
+      await params("id", o.id),
     );
     assert.equal(response.status, action === "qc" ? 422 : 403);
-    assert.deepEqual(getOrderById(o.id)!.variants, before.variants);
-    assert.equal(getOrderById(o.id)!.version, before.version);
+    assert.deepEqual((await getOrderById(o.id))!.variants, before.variants);
+    assert.equal((await getOrderById(o.id))!.version, before.version);
   }
 });
 
 test("QA ACL-01: QC cannot move cutting into sewing even when quantities are complete", async () => {
-  const o = fixture("cat", 5);
-  db.prepare("UPDATE order_variants SET cut_qty=5 WHERE order_id=?").run(o.id);
-  const before = getOrderById(o.id)!;
+  const o = await fixture("cat", 5);
+  await db
+    .prepare("UPDATE order_variants SET cut_qty=5 WHERE order_id=?")
+    .run(o.id);
+  const before = (await getOrderById(o.id))!;
   const response = await detailRoutes.PATCH(
     request(
       `/api/orders/${o.id}`,
@@ -2063,11 +2155,11 @@ test("QA ACL-01: QC cannot move cutting into sewing even when quantities are com
       { version: before.version, stage: "may" },
       { method: "PATCH" },
     ),
-    params("id", o.id),
+    await params("id", o.id),
   );
   assert.equal(response.status, 403);
-  assert.equal(getOrderById(o.id)!.current_stage, "cat");
-  assert.equal(getOrderById(o.id)!.version, before.version);
+  assert.equal((await getOrderById(o.id))!.current_stage, "cat");
+  assert.equal((await getOrderById(o.id))!.version, before.version);
 });
 
 test("QA journey: roles execute new multi-variant order through rework, partial delivery and locked wages", async () => {
@@ -2101,27 +2193,27 @@ test("QA journey: roles execute new multi-variant order through rework, partial 
       ).status,
       200,
     );
-  const move = (stage: string, who = "qa-assistant") =>
-    detailRoutes.PATCH(
+  const move = async (stage: string, who = "qa-assistant") =>
+    await detailRoutes.PATCH(
       request(
         `/api/orders/${id}`,
         who,
-        { version: getOrderById(id)!.version, stage },
+        { version: (await getOrderById(id))!.version, stage },
         { method: "PATCH" },
       ),
-      params("id", id),
+      await params("id", id),
     );
   for (const stage of ["kiem_npl", "kiem_rap", "cat"])
     assert.equal((await move(stage)).status, 200);
-  const production = (
+  const production = async (
     stage: string,
     color: string,
     size: string,
     quantity: number,
     key = randomUUID(),
-    version = getOrderById(id)!.version,
+    version?: number,
   ) =>
-    productionRoutes.POST(
+    await productionRoutes.POST(
       request(
         "/api/production/log",
         "qa-worker",
@@ -2133,7 +2225,7 @@ test("QA journey: roles execute new multi-variant order through rework, partial 
           color,
           size,
           quantity,
-          version,
+          version: version ?? (await getOrderById(id))!.version,
         },
         { key },
       ),
@@ -2142,15 +2234,16 @@ test("QA journey: roles execute new multi-variant order through rework, partial 
   assert.equal((await production("Cắt", "Trắng", "L", 3)).status, 201);
   assert.equal((await move("may", "qa-leader")).status, 200);
   assert.equal((await production("May", "Đen", "M", 3)).status, 201);
-  const version = getOrderById(id)!.version,
+  const version = (await getOrderById(id))!.version,
     key = randomUUID();
   const retries = await Promise.all([
-    production("May", "Đen", "M", 2, key, version),
-    production("May", "Đen", "M", 2, key, version),
+    await production("May", "Đen", "M", 2, key, version),
+    await production("May", "Đen", "M", 2, key, version),
   ]);
   assert.ok(retries.every((r) => r.status === 201));
   assert.equal(
-    getOrderById(id)!.variants!.find((v) => v.color === "Đen")!.sewn_qty,
+    (await getOrderById(id))!.variants!.find((v) => v.color === "Đen")!
+      .sewn_qty,
     5,
   );
   assert.equal((await production("May", "Trắng", "L", 3)).status, 201);
@@ -2165,21 +2258,21 @@ test("QA journey: roles execute new multi-variant order through rework, partial 
     200,
   );
   assert.equal((await move("qc")).status, 200);
-  const op = (
+  const op = async (
     action: string,
     color: string,
     size: string,
     quantity: number,
     passed?: number,
   ) =>
-    operationRoutes.POST(
+    await operationRoutes.POST(
       request(
         `/api/orders/${id}/operations`,
         ["qc", "rework", "reinspect"].includes(action)
           ? "qa-qc"
           : "qa-assistant",
         {
-          version: getOrderById(id)!.version,
+          version: (await getOrderById(id))!.version,
           action,
           color,
           size,
@@ -2192,7 +2285,7 @@ test("QA journey: roles execute new multi-variant order through rework, partial 
           ...(action === "qc" ? { defect_type: "Lỗi đường may" } : {}),
         },
       ),
-      params("id", id),
+      await params("id", id),
     );
   assert.equal((await op("qc", "Đen", "M", 5, 4)).status, 200);
   assert.equal((await op("qc", "Trắng", "L", 3, 3)).status, 200);
@@ -2208,18 +2301,19 @@ test("QA journey: roles execute new multi-variant order through rework, partial 
   assert.equal((await op("deliver", "Đen", "M", 5)).status, 200);
   assert.equal((await op("deliver", "Trắng", "L", 2)).status, 200);
   assert.equal(
-    getOrderById(id)!.variants!.find((v) => v.color === "Trắng")!.delivered_qty,
+    (await getOrderById(id))!.variants!.find((v) => v.color === "Trắng")!
+      .delivered_qty,
     2,
   );
   assert.equal((await move("hoan_thanh")).status, 422);
   assert.equal((await op("deliver", "Trắng", "L", 1)).status, 200);
   assert.equal((await move("hoan_thanh")).status, 200);
-  const result = getOrderById(id)!;
+  const result = (await getOrderById(id))!;
   assert.equal(result.status, "completed");
   assert.ok(result.variants!.every((v) => v.delivered_qty === v.quantity));
-  const logs = db
+  const logs = (await db
     .prepare("SELECT * FROM production_logs WHERE order_id=?")
-    .all(id) as { quantity: number; total_pay: number; is_locked: number }[];
+    .all(id)) as { quantity: number; total_pay: number; is_locked: number }[];
   assert.equal(logs.length, 5);
   assert.equal(
     logs.reduce((n, r) => n + r.total_pay, 0),
@@ -2241,48 +2335,53 @@ test("QA journey: roles execute new multi-variant order through rework, partial 
 test("QA restore: full snapshot boots APIs from a separate restored database and preserves images wages and permissions", async () => {
   const backup = await import("../src/lib/server/backup");
   const files = await backup.runBackup();
-  const { copyFileSync } = await import("node:fs");
   const { execFileSync } = await import("node:child_process");
-  const Database = (await import("better-sqlite3")).default;
-  const sourcePath = join(directory, "backups", files.snapshot),
-    restoredPath = join(directory, "restored.db");
-  copyFileSync(sourcePath, restoredPath);
-  const source = new Database(sourcePath, { readonly: true }),
-    restored = new Database(restoredPath, { readonly: true });
+  const sourcePath = join(directory, "backups", files.snapshot);
+  await adminPool.query(`CREATE DATABASE "${restoredDatabase}"`);
+  const restoredUrl = new URL(testUrl);
+  restoredUrl.pathname = "/" + restoredDatabase;
+  const restoreEnv = { ...process.env, DATABASE_URL: restoredUrl.toString() };
+  execFileSync(
+    process.execPath,
+    ["--import", "tsx", "scripts/restore.ts", sourcePath],
+    { env: restoreEnv },
+  );
+  const restoredPool = new Pool({ connectionString: restoredUrl.toString() });
+  const source = await readSnapshot(sourcePath);
   try {
-    assert.equal(restored.pragma("integrity_check", { simple: true }), "ok");
-    assert.deepEqual(restored.pragma("foreign_key_check"), []);
-    const tables = source
-      .prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
-      )
-      .all() as { name: string }[];
-    for (const { name } of tables) {
-      assert.ok(/^[a-z_]+$/.test(name));
-      assert.deepEqual(
-        restored.prepare(`SELECT * FROM ${name} ORDER BY rowid`).all(),
-        source.prepare(`SELECT * FROM ${name} ORDER BY rowid`).all(),
-        name,
+    for (const [name, rows] of Object.entries(source.tables)) {
+      const actual = JSON.parse(
+        JSON.stringify(
+          (await restoredPool.query(`SELECT * FROM "${name}"`)).rows,
+        ),
       );
+      const normalize = (items: unknown[]) =>
+        items
+          .map((r) => JSON.stringify(r, Object.keys(r as object).sort()))
+          .sort();
+      assert.deepEqual(normalize(actual), normalize(rows), name);
     }
+    // Sequences are advanced after explicit IDs are restored.
+    const added = await restoredPool.query(
+      "INSERT INTO audit_logs(user_name,action,details) VALUES ('QA','restore','sequence') RETURNING id",
+    );
+    assert.ok(
+      Number(added.rows[0].id) >
+        Math.max(...source.tables.audit_logs.map((r) => Number(r.id))),
+    );
   } finally {
-    source.close();
-    restored.close();
+    await restoredPool.end();
   }
-  const probe = `const {db}=require('./src/lib/db.ts');const orders=require('./src/app/api/orders/route.ts');const payroll=require('./src/app/api/payroll/route.ts');(async()=>{const req=(url)=>new Request('http://localhost:3003'+url,{headers:{cookie:${JSON.stringify(people["qa-worker"].cookie)}}});const a=await orders.GET(req('/api/orders'));const b=await payroll.GET(req('/api/payroll?month=2024-02'));console.log(JSON.stringify({ordersStatus:a.status,orders:(await a.json()).data.orders,payrollStatus:b.status,payroll:(await b.json()).data,migrations:db.prepare('SELECT COUNT(*) n FROM schema_migrations').get().n}));db.close();})().catch(()=>process.exit(1));`;
+  const probe = `const {db}=require('./src/lib/db.ts');const orders=require('./src/app/api/orders/route.ts');const payroll=require('./src/app/api/payroll/route.ts');(async()=>{const req=(url)=>new Request('http://localhost:3003'+url,{headers:{cookie:${JSON.stringify(people["qa-worker"].cookie)}}});const a=await orders.GET(req('/api/orders'));const b=await payroll.GET(req('/api/payroll?month=2024-02'));console.log(JSON.stringify({ordersStatus:a.status,orders:(await a.json()).data.orders,payrollStatus:b.status,payroll:(await b.json()).data,migrations:(await db.prepare('SELECT COUNT(*) n FROM schema_migrations').get()).n}));await db.close();})().catch(()=>process.exit(1));`;
   const output = execFileSync(
     process.execPath,
     ["--import", "tsx", "-e", probe],
-    {
-      cwd: process.cwd(),
-      env: { ...process.env, DATABASE_PATH: restoredPath },
-      encoding: "utf8",
-    },
+    { env: restoreEnv, encoding: "utf8" },
   );
   const data = JSON.parse(output);
   assert.equal(data.ordersStatus, 200);
   assert.equal(data.payrollStatus, 200);
-  assert.equal(data.migrations, 9);
+  assert.equal(data.migrations, 10);
   assert.ok(
     data.orders.length > 0 &&
       data.orders.every((o: { line_id: number }) => o.line_id === 1),
@@ -2303,8 +2402,8 @@ test("QA restore: full snapshot boots APIs from a separate restored database and
 
 test("QA ACL-01 dossier: QC cannot edit a cutting stage dossier", async () => {
   const routes = await import("../src/app/api/orders/[id]/stages/route");
-  const o = fixture("cat", 5);
-  const before = db
+  const o = await fixture("cat", 5);
+  const before = await db
     .prepare("SELECT * FROM order_stages WHERE order_id=? ORDER BY id")
     .all(o.id);
   const response = await routes.PATCH(
@@ -2322,11 +2421,11 @@ test("QA ACL-01 dossier: QC cannot edit a cutting stage dossier", async () => {
       },
       { method: "PATCH" },
     ),
-    params("id", o.id),
+    await params("id", o.id),
   );
   assert.equal(response.status, 403);
   assert.deepEqual(
-    db
+    await db
       .prepare("SELECT * FROM order_stages WHERE order_id=? ORDER BY id")
       .all(o.id),
     before,
@@ -2335,19 +2434,26 @@ test("QA ACL-01 dossier: QC cannot edit a cutting stage dossier", async () => {
 
 test("QA personnel: account keeps its own profile when leader transfers and manages existing crew", async () => {
   const employeeId = "QA-TRANSFER-LEADER";
-  db.prepare(
-    "INSERT INTO employees(id,name,line_id,role) VALUES (?,?,1,'Tổ trưởng')",
-  ).run(employeeId, "Tổ trưởng điều chuyển");
-  people.transferLeader = person("transfer-leader", "leader", employeeId, [1]);
+  await db
+    .prepare(
+      "INSERT INTO employees(id,name,line_id,role) VALUES (?,?,1,'Tổ trưởng')",
+    )
+    .run(employeeId, "Tổ trưởng điều chuyển");
+  people.transferLeader = await person(
+    "transfer-leader",
+    "leader",
+    employeeId,
+    [1],
+  );
   const id = people.transferLeader.id;
-  const beforeWages = db
+  const beforeWages = await db
     .prepare(
       "SELECT id,employee_id,line_id,total_pay FROM production_logs ORDER BY id",
     )
     .all();
-  const crew = db
+  const crew = (await db
     .prepare("SELECT id FROM employees WHERE line_id=4 ORDER BY id")
-    .all() as { id: string }[];
+    .all()) as { id: string }[];
   const r = await adminRoutes.POST(
     request("/api/admin/users", "admin", {
       id,
@@ -2357,23 +2463,25 @@ test("QA personnel: account keeps its own profile when leader transfers and mana
       lineIds: [4],
       homeLineId: 4,
     }),
-    params("section", "users"),
+    await params("section", "users"),
   );
   assert.equal(r.status, 200);
-  assert.equal(auth.account(id)!.employee_id, employeeId);
-  assert.deepEqual(auth.account(id)!.line_ids, [4]);
+  assert.equal((await auth.account(id))!.employee_id, employeeId);
+  assert.deepEqual((await auth.account(id))!.line_ids, [4]);
   assert.deepEqual(
-    db.prepare("SELECT name,line_id FROM employees WHERE id=?").get(employeeId),
+    await db
+      .prepare("SELECT name,line_id FROM employees WHERE id=?")
+      .get(employeeId),
     { name: "Tổ trưởng mới của chuyền 4", line_id: 4 },
   );
   assert.deepEqual(
-    db
+    await db
       .prepare("SELECT id FROM employees WHERE line_id=4 AND id<>? ORDER BY id")
       .all(employeeId),
     crew,
   );
   assert.deepEqual(
-    db
+    await db
       .prepare(
         "SELECT id,employee_id,line_id,total_pay FROM production_logs ORDER BY id",
       )
@@ -2381,10 +2489,10 @@ test("QA personnel: account keeps its own profile when leader transfers and mana
     beforeWages,
   );
   assert.equal(
-    db.prepare("SELECT 1 FROM sessions WHERE account_id=?").get(id),
+    await db.prepare("SELECT 1 FROM sessions WHERE account_id=?").get(id),
     undefined,
   );
-  people.transferLeader = newSession(id);
+  people.transferLeader = await newSession(id);
   const result = await orderRoutes.GET(
     request("/api/orders", "transferLeader"),
   );
@@ -2412,10 +2520,10 @@ test("QA personnel: account keeps its own profile when leader transfers and mana
         homeLineId: 4,
         ...attack,
       }),
-      params("section", "users"),
+      await params("section", "users"),
     );
     assert.equal(bad.status, 422);
-    assert.equal(auth.account(id)!.employee_id, employeeId);
+    assert.equal((await auth.account(id))!.employee_id, employeeId);
   }
   const invalid = await adminRoutes.POST(
     request("/api/admin/users", "admin", {
@@ -2425,32 +2533,32 @@ test("QA personnel: account keeps its own profile when leader transfers and mana
       lineIds: [4],
       homeLineId: 1,
     }),
-    params("section", "users"),
+    await params("section", "users"),
   );
   assert.equal(invalid.status, 422);
   assert.equal(
     (
-      db
+      (await db
         .prepare("SELECT line_id FROM employees WHERE id=?")
-        .get(employeeId) as { line_id: number }
+        .get(employeeId)) as { line_id: number }
     ).line_id,
     4,
   );
-  const audit = db
+  const audit = (await db
     .prepare(
       "SELECT details FROM audit_logs WHERE action='Điều chỉnh hồ sơ và chuyền' AND details LIKE '%transfer-leader%' ORDER BY id DESC LIMIT 1",
     )
-    .get() as { details: string };
+    .get()) as { details: string };
   assert.match(audit.details, /Trước/);
   assert.match(audit.details, /Sau/);
 });
 
-test("worker entry availability follows assigned lines and personal production scope", () => {
-  db.prepare(
-    "INSERT INTO employees(id,name,line_id,role) VALUES (?,?,1,?)",
-  ).run("QA-UI-WORKER", "Nhân viên QA giao diện", "Nhân viên");
-  const sample = person("ui-worker", "worker", "QA-UI-WORKER", [1, 4]);
-  const user = auth.account(sample.id)!;
+test("worker entry availability follows assigned lines and personal production scope", async () => {
+  await db
+    .prepare("INSERT INTO employees(id,name,line_id,role) VALUES (?,?,1,?)")
+    .run("QA-UI-WORKER", "Nhân viên QA giao diện", "Nhân viên");
+  const sample = await person("ui-worker", "worker", "QA-UI-WORKER", [1, 4]);
+  const user = (await auth.account(sample.id))!;
   const own = { id: "QA-UI-WORKER", line_id: 1 };
   assert.equal(canRecordProduction(user, own, { line_id: 1 }), true);
   assert.equal(canRecordProduction(user, own, { line_id: 4 }), true);
@@ -2460,7 +2568,7 @@ test("worker entry availability follows assigned lines and personal production s
   );
   const removedScope = { ...user, line_ids: [4] };
   assert.equal(canRecordProduction(removedScope, own, { line_id: 1 }), false);
-  const admin = auth.account(people.admin.id)!;
+  const admin = (await auth.account(people.admin.id))!;
   assert.equal(
     canRecordProduction(admin, { id: "NV-08", line_id: 4 }, { line_id: 4 }),
     true,
@@ -2477,13 +2585,15 @@ test("worker entry availability follows assigned lines and personal production s
 });
 
 test("multi-person work items pay separately and complete garments only after every required part", async () => {
-  const order = fixture("may", 5);
+  const order = await fixture("may", 5);
   for (const n of [1, 2, 3]) {
     const employee = `QA-PART-${n}`;
-    db.prepare(
-      "INSERT INTO employees(id,name,line_id,role) VALUES (?,?,1,'May')",
-    ).run(employee, employee);
-    people[`part${n}`] = person(`part${n}`, "worker", employee, [1]);
+    await db
+      .prepare(
+        "INSERT INTO employees(id,name,line_id,role) VALUES (?,?,1,'May')",
+      )
+      .run(employee, employee);
+    people[`part${n}`] = await person(`part${n}`, "worker", employee, [1]);
   }
   const plan = {
     order_id: order.id,
@@ -2503,7 +2613,7 @@ test("multi-person work items pay separately and complete garments only after ev
     (await ratesRoutes.POST(request("/api/rates", "admin", plan))).status,
     200,
   );
-  const parts = getOrderById(order.id)!.work_items!;
+  const parts = (await getOrderById(order.id))!.work_items!;
   assert.equal(parts.length, 3);
   assert.equal(
     (await ratesRoutes.POST(request("/api/rates", "admin", plan))).status,
@@ -2515,7 +2625,7 @@ test("multi-person work items pay separately and complete garments only after ev
     quantity: number,
     extra: object = {},
   ) =>
-    productionRoutes.POST(
+    await productionRoutes.POST(
       request("/api/production/log", who, {
         log_date: "2023-07-01",
         employee_id: `QA-PART-${who.slice(-1)}`,
@@ -2525,27 +2635,27 @@ test("multi-person work items pay separately and complete garments only after ev
         stage: "May",
         work_item_id: parts[index].id,
         quantity,
-        version: getOrderById(order.id)!.version,
+        version: (await getOrderById(order.id))!.version,
         ...extra,
       }),
     );
   assert.equal((await record("part1", 0, 5)).status, 201);
-  assert.equal(getOrderById(order.id)!.variants![0].sewn_qty, 0);
+  assert.equal((await getOrderById(order.id))!.variants![0].sewn_qty, 0);
   assert.equal((await record("part2", 1, 2)).status, 201);
   assert.equal((await record("part1", 1, 3)).status, 201);
-  assert.equal(getOrderById(order.id)!.variants![0].sewn_qty, 0);
+  assert.equal((await getOrderById(order.id))!.variants![0].sewn_qty, 0);
   assert.equal((await record("part3", 2, 3)).status, 201);
-  assert.equal(getOrderById(order.id)!.variants![0].sewn_qty, 3);
+  assert.equal((await getOrderById(order.id))!.variants![0].sewn_qty, 3);
   assert.equal(
     (
       await detailRoutes.PATCH(
         request(
           `/api/orders/${order.id}`,
           "admin",
-          { version: getOrderById(order.id)!.version, stage: "qc" },
+          { version: (await getOrderById(order.id))!.version, stage: "qc" },
           { method: "PATCH" },
         ),
-        params("id", order.id),
+        await params("id", order.id),
       )
     ).status,
     422,
@@ -2560,16 +2670,16 @@ test("multi-person work items pay separately and complete garments only after ev
     422,
   );
   assert.equal((await record("part2", 0, 1, { unit_price: 1 })).status, 422);
-  const started = { ...plan, version: getOrderById(order.id)!.version };
+  const started = { ...plan, version: (await getOrderById(order.id))!.version };
   assert.equal(
     (await ratesRoutes.POST(request("/api/rates", "admin", started))).status,
     422,
   );
-  const old = db
+  const old = (await db
     .prepare(
       "SELECT * FROM production_logs WHERE order_id=? AND work_item_id=?",
     )
-    .get(order.id, parts[2].id) as {
+    .get(order.id, parts[2].id)) as {
     id: number;
     unit_price: number;
     version: number;
@@ -2590,9 +2700,9 @@ test("multi-person work items pay separately and complete garments only after ev
   );
   assert.equal(
     (
-      db
+      (await db
         .prepare("SELECT unit_price FROM production_logs WHERE id=?")
-        .get(old.id) as { unit_price: number }
+        .get(old.id)) as { unit_price: number }
     ).unit_price,
     3000,
   );
@@ -2615,14 +2725,14 @@ test("multi-person work items pay separately and complete garments only after ev
     ).status,
     200,
   );
-  assert.equal(getOrderById(order.id)!.variants![0].sewn_qty, 2);
+  assert.equal((await getOrderById(order.id))!.variants![0].sewn_qty, 2);
   assert.equal((await record("part3", 2, 3)).status, 201);
-  assert.equal(getOrderById(order.id)!.variants![0].sewn_qty, 5);
-  const totals = db
+  assert.equal((await getOrderById(order.id))!.variants![0].sewn_qty, 5);
+  const totals = (await db
     .prepare(
       "SELECT SUM(quantity) work,SUM(completed_quantity) garments,SUM(total_pay) pay FROM production_logs WHERE order_id=?",
     )
-    .get(order.id) as { work: number; garments: number; pay: number };
+    .get(order.id)) as { work: number; garments: number; pay: number };
   assert.deepEqual(totals, { work: 15, garments: 5, pay: 33000 });
   const response = await productionRoutes.GET(
     request("/api/production/log?month=2023-07", "part2"),
@@ -2641,12 +2751,14 @@ test("multi-person work items pay separately and complete garments only after ev
     book.getWorksheet("Chi tiết sản lượng")!.getCell("M2").value,
     "May tay",
   );
-  db.prepare(
-    "UPDATE order_variants SET qc_inspected_qty=5,qc_passed_qty=5 WHERE order_id=?",
-  ).run(order.id);
-  const correction = db
+  await db
+    .prepare(
+      "UPDATE order_variants SET qc_inspected_qty=5,qc_passed_qty=5 WHERE order_id=?",
+    )
+    .run(order.id);
+  const correction = (await db
     .prepare("SELECT version FROM production_logs WHERE id=?")
-    .get(old.id) as { version: number };
+    .get(old.id)) as { version: number };
   assert.equal(
     (
       await productionRoutes.PATCH(
@@ -2666,11 +2778,11 @@ test("multi-person work items pay separately and complete garments only after ev
     ).status,
     422,
   );
-  assert.equal(getOrderById(order.id)!.variants![0].sewn_qty, 5);
+  assert.equal((await getOrderById(order.id))!.variants![0].sewn_qty, 5);
 });
 
 test("cutting work items enforce per-part input, duplicate protection, locked month and downstream bounds", async () => {
-  const order = fixture("cat", 4);
+  const order = await fixture("cat", 4);
   const plan = {
     order_id: order.id,
     stage: "Cắt",
@@ -2698,7 +2810,7 @@ test("cutting work items enforce per-part input, duplicate protection, locked mo
     (await ratesRoutes.POST(request("/api/rates", "admin", plan))).status,
     200,
   );
-  const parts = getOrderById(order.id)!.work_items!;
+  const parts = (await getOrderById(order.id))!.work_items!;
   const payload = {
     log_date: "2023-08-01",
     employee_id: "QA-PART-1",
@@ -2708,14 +2820,14 @@ test("cutting work items enforce per-part input, duplicate protection, locked mo
     stage: "Cắt",
     quantity: 4,
     work_item_id: parts[0].id,
-    version: getOrderById(order.id)!.version,
+    version: (await getOrderById(order.id))!.version,
   };
   const key = randomUUID();
   const replies = await Promise.all([
-    productionRoutes.POST(
+    await productionRoutes.POST(
       request("/api/production/log", "part1", payload, { key }),
     ),
-    productionRoutes.POST(
+    await productionRoutes.POST(
       request("/api/production/log", "part1", payload, { key }),
     ),
   ]);
@@ -2725,13 +2837,13 @@ test("cutting work items enforce per-part input, duplicate protection, locked mo
   );
   assert.equal(
     (
-      db
+      (await db
         .prepare("SELECT COUNT(*) n FROM production_logs WHERE order_id=?")
-        .get(order.id) as { n: number }
+        .get(order.id)) as { n: number }
     ).n,
     1,
   );
-  assert.equal(getOrderById(order.id)!.variants![0].cut_qty, 0);
+  assert.equal((await getOrderById(order.id))!.variants![0].cut_qty, 0);
   assert.equal(
     (
       await productionRoutes.POST(
@@ -2747,7 +2859,7 @@ test("cutting work items enforce per-part input, duplicate protection, locked mo
           ...payload,
           work_item_id: parts[1].id,
           quantity: 5,
-          version: getOrderById(order.id)!.version,
+          version: (await getOrderById(order.id))!.version,
         }),
       )
     ).status,
@@ -2767,7 +2879,7 @@ test("cutting work items enforce per-part input, duplicate protection, locked mo
         request("/api/production/log", "part1", {
           ...payload,
           work_item_id: parts[1].id,
-          version: getOrderById(order.id)!.version,
+          version: (await getOrderById(order.id))!.version,
         }),
       )
     ).status,
@@ -2780,23 +2892,23 @@ test("cutting work items enforce per-part input, duplicate protection, locked mo
           ...payload,
           work_item_id: parts[1].id,
           log_date: "2023-09-01",
-          version: getOrderById(order.id)!.version,
+          version: (await getOrderById(order.id))!.version,
         }),
       )
     ).status,
     201,
   );
-  assert.equal(getOrderById(order.id)!.variants![0].cut_qty, 4);
+  assert.equal((await getOrderById(order.id))!.variants![0].cut_qty, 4);
   assert.equal(
     (
       await detailRoutes.PATCH(
         request(
           `/api/orders/${order.id}`,
           "admin",
-          { version: getOrderById(order.id)!.version, stage: "may" },
+          { version: (await getOrderById(order.id))!.version, stage: "may" },
           { method: "PATCH" },
         ),
-        params("id", order.id),
+        await params("id", order.id),
       )
     ).status,
     200,
@@ -2805,7 +2917,7 @@ test("cutting work items enforce per-part input, duplicate protection, locked mo
 
 test("work item plans and personal work records survive full snapshots and dated archives", async () => {
   const backup = await import("../src/lib/server/backup");
-  backup.configureBackup({
+  await backup.configureBackup({
     enabled: false,
     intervalHours: 24,
     windowDays: 3650,
@@ -2821,43 +2933,41 @@ test("work item plans and personal work records survive full snapshots and dated
       (p: { work_item_name?: string }) => p.work_item_name === "May thân",
     ),
   );
-  const Database = (await import("better-sqlite3")).default;
-  const restored = new Database(join(directory, "backups", files.snapshot), {
-    readonly: true,
-  });
-  try {
-    assert.deepEqual(
-      restored.prepare("SELECT * FROM order_work_items ORDER BY id").all(),
-      db.prepare("SELECT * FROM order_work_items ORDER BY id").all(),
-    );
-    assert.deepEqual(
-      restored
+  const restored = await readSnapshot(
+    join(directory, "backups", files.snapshot),
+  );
+  const normalize = (rows: unknown[]) => JSON.parse(JSON.stringify(rows));
+  assert.deepEqual(
+    restored.tables.order_work_items.sort(
+      (a, b) => Number(a.id) - Number(b.id),
+    ),
+    normalize(
+      await db.prepare("SELECT * FROM order_work_items ORDER BY id").all(),
+    ),
+  );
+  assert.deepEqual(
+    restored.tables.production_logs
+      .filter((r) => r.work_item_id !== null)
+      .sort((a, b) => Number(a.id) - Number(b.id)),
+    normalize(
+      await db
         .prepare(
           "SELECT * FROM production_logs WHERE work_item_id IS NOT NULL ORDER BY id",
         )
         .all(),
-      db
-        .prepare(
-          "SELECT * FROM production_logs WHERE work_item_id IS NOT NULL ORDER BY id",
-        )
-        .all(),
-    );
-    assert.equal(restored.pragma("integrity_check", { simple: true }), "ok");
-    assert.deepEqual(restored.pragma("foreign_key_check"), []);
-  } finally {
-    restored.close();
-  }
+    ),
+  );
 });
 
 test("employees support assigned lines using their own identity and the order line in reports", async () => {
   const employee = "QA-SUPPORT";
-  db.prepare(
-    "INSERT INTO employees(id,name,line_id,role) VALUES (?,?,1,'May')",
-  ).run(employee, "Nhân viên hỗ trợ");
-  people.support = person("support-worker", "worker", employee, [1, 4]);
-  people.supportLeader = person("support-leader", "leader", null, [4]);
-  const order = fixture("cat", 5);
-  db.prepare("UPDATE orders SET line_id=4 WHERE id=?").run(order.id);
+  await db
+    .prepare("INSERT INTO employees(id,name,line_id,role) VALUES (?,?,1,'May')")
+    .run(employee, "Nhân viên hỗ trợ");
+  people.support = await person("support-worker", "worker", employee, [1, 4]);
+  people.supportLeader = await person("support-leader", "leader", null, [4]);
+  const order = await fixture("cat", 5);
+  await db.prepare("UPDATE orders SET line_id=4 WHERE id=?").run(order.id);
   const input = {
     order_id: order.id,
     employee_id: employee,
@@ -2866,7 +2976,7 @@ test("employees support assigned lines using their own identity and the order li
     size: "M",
     quantity: 2,
     log_date: "2023-10-01",
-    version: getOrderById(order.id)!.version,
+    version: (await getOrderById(order.id))!.version,
   };
   const response = await productionRoutes.POST(
     request("/api/production/log", "support", input),
@@ -2878,13 +2988,15 @@ test("employees support assigned lines using their own identity and the order li
   assert.equal(result.total_pay, 10000);
   assert.equal(
     (
-      db.prepare("SELECT line_id FROM employees WHERE id=?").get(employee) as {
+      (await db
+        .prepare("SELECT line_id FROM employees WHERE id=?")
+        .get(employee)) as {
         line_id: number;
       }
     ).line_id,
     1,
   );
-  const other = fixture("cat", 3);
+  const other = await fixture("cat", 3);
   assert.equal(
     (
       await productionRoutes.POST(
@@ -2925,7 +3037,7 @@ test("employees support assigned lines using their own identity and the order li
   assert.ok(listedEmployee);
   assert.equal(
     canRecordProduction(
-      auth.account(people.supportLeader.id)!,
+      (await auth.account(people.supportLeader.id))!,
       listedEmployee,
       {
         line_id: 4,
@@ -2948,14 +3060,14 @@ test("employees support assigned lines using their own identity and the order li
         request("/api/production/log", "support", {
           ...input,
           employee_id: "NV-08",
-          version: getOrderById(order.id)!.version,
+          version: (await getOrderById(order.id))!.version,
         }),
       )
     ).status,
     403,
   );
-  const outside = fixture("cat", 3);
-  db.prepare("UPDATE orders SET line_id=2 WHERE id=?").run(outside.id);
+  const outside = await fixture("cat", 3);
+  await db.prepare("UPDATE orders SET line_id=2 WHERE id=?").run(outside.id);
   assert.equal(
     (
       await productionRoutes.POST(
@@ -2968,38 +3080,38 @@ test("employees support assigned lines using their own identity and the order li
     ).status,
     403,
   );
-  db.prepare("UPDATE accounts SET line_ids='[1]' WHERE id=?").run(
-    people.support.id,
-  );
+  await db
+    .prepare("UPDATE accounts SET line_ids='[1]' WHERE id=?")
+    .run(people.support.id);
   assert.equal(
     (
       await productionRoutes.POST(
         request("/api/production/log", "support", {
           ...input,
-          version: getOrderById(order.id)!.version,
+          version: (await getOrderById(order.id))!.version,
         }),
       )
     ).status,
     403,
   );
-  assert.equal(getOrderById(order.id)!.variants![0].cut_qty, 2);
+  assert.equal((await getOrderById(order.id))!.variants![0].cut_qty, 2);
 });
 
 test("global QC opens an actionable form and records inspection across home lines including representation", async () => {
   const employee = "QA-QC-GLOBAL";
-  db.prepare(
-    "INSERT INTO employees(id,name,line_id,role) VALUES (?,?,1,'QC')",
-  ).run(employee, "QC toàn xưởng");
-  people.globalQc = person("global-qc-ui", "qc", employee, [1]);
-  const order = fixture("qc", 3);
-  db.prepare("UPDATE orders SET line_id=4 WHERE id=?").run(order.id);
-  db.prepare("UPDATE order_variants SET sewn_qty=3 WHERE order_id=?").run(
-    order.id,
-  );
+  await db
+    .prepare("INSERT INTO employees(id,name,line_id,role) VALUES (?,?,1,'QC')")
+    .run(employee, "QC toàn xưởng");
+  people.globalQc = await person("global-qc-ui", "qc", employee, [1]);
+  const order = await fixture("qc", 3);
+  await db.prepare("UPDATE orders SET line_id=4 WHERE id=?").run(order.id);
+  await db
+    .prepare("UPDATE order_variants SET sewn_qty=3 WHERE order_id=?")
+    .run(order.id);
   const { availableOperations, remainingOperation } =
     await import("../src/lib/workflow");
-  const session = auth.sessionData(context("globalQc"));
-  const current = getOrderById(order.id)!;
+  const session = auth.sessionData(await context("globalQc"));
+  const current = (await getOrderById(order.id))!;
   assert.equal(availableOperations(session.user, current)[0].key, "qc");
   assert.equal(remainingOperation(current.variants![0], "qc"), 3);
   const React = await import("react");
@@ -3034,11 +3146,10 @@ test("global QC opens an actionable form and records inspection across home line
     worker_id: employee,
   };
   for (const action of ["qc", "reinspect"]) {
-    db.prepare("UPDATE orders SET current_stage=? WHERE id=?").run(
-      action === "qc" ? "qc" : "qc_lai",
-      order.id,
-    );
-    const before = getOrderById(order.id)!;
+    await db
+      .prepare("UPDATE orders SET current_stage=? WHERE id=?")
+      .run(action === "qc" ? "qc" : "qc_lai", order.id);
+    const before = (await getOrderById(order.id))!;
     assert.equal(
       (
         await operationRoutes.POST(
@@ -3047,24 +3158,26 @@ test("global QC opens an actionable form and records inspection across home line
             action,
             worker_id: "NV-08",
           }),
-          params("id", order.id),
+          await params("id", order.id),
         )
       ).status,
       403,
     );
-    assert.deepEqual(getOrderById(order.id)!.variants, before.variants);
+    assert.deepEqual((await getOrderById(order.id))!.variants, before.variants);
   }
-  db.prepare("UPDATE orders SET current_stage='qc' WHERE id=?").run(order.id);
+  await db
+    .prepare("UPDATE orders SET current_stage='qc' WHERE id=?")
+    .run(order.id);
   assert.equal(
     (
       await operationRoutes.POST(
         request(`/api/orders/${order.id}/operations`, "globalQc", input),
-        params("id", order.id),
+        await params("id", order.id),
       )
     ).status,
     200,
   );
-  const partly = getOrderById(order.id)!;
+  const partly = (await getOrderById(order.id))!;
   assert.equal(remainingOperation(partly.variants![0], "qc"), 1);
   assert.equal(
     (
@@ -3075,12 +3188,12 @@ test("global QC opens an actionable form and records inspection across home line
           quantity: 2,
           passed: 2,
         }),
-        params("id", order.id),
+        await params("id", order.id),
       )
     ).status,
     422,
   );
-  people.qcUiAdmin = person("qc-ui-admin", "admin", null, []);
+  people.qcUiAdmin = await person("qc-ui-admin", "admin", null, []);
   assert.equal(
     (
       await authRoutes.POST(
@@ -3088,7 +3201,7 @@ test("global QC opens an actionable form and records inspection across home line
           accountId: people.globalQc.id,
           password: testPassword,
         }),
-        params("action", "represent"),
+        await params("action", "represent"),
       )
     ).status,
     200,
@@ -3102,16 +3215,16 @@ test("global QC opens an actionable form and records inspection across home line
           quantity: 1,
           passed: 1,
         }),
-        params("id", order.id),
+        await params("id", order.id),
       )
     ).status,
     200,
   );
-  const record = db
+  const record = (await db
     .prepare(
       "SELECT actor_id,represented_id,worker_id FROM operation_records WHERE order_id=? ORDER BY id DESC LIMIT 1",
     )
-    .get(order.id) as {
+    .get(order.id)) as {
     actor_id: string;
     represented_id: string;
     worker_id: string;
@@ -3121,13 +3234,13 @@ test("global QC opens an actionable form and records inspection across home line
     represented_id: people.globalQc.id,
     worker_id: employee,
   });
-  const inspector = db
+  const inspector = (await db
     .prepare(
       "SELECT inspector FROM qc_records WHERE order_id=? ORDER BY id DESC LIMIT 1",
     )
-    .get(order.id) as { inspector: string };
+    .get(order.id)) as { inspector: string };
   assert.equal(inspector.inspector, session.user.name);
-  const done = getOrderById(order.id)!;
+  const done = (await getOrderById(order.id))!;
   assert.equal(remainingOperation(done.variants![0], "qc"), 0);
   const doneHtml = render(done);
   assert.match(doneHtml, /Màu–size này đã xử lý đủ/);
@@ -3152,7 +3265,7 @@ test("global QC opens an actionable form and records inspection across home line
           quantity: 1,
           passed: 1,
         }),
-        params("id", order.id),
+        await params("id", order.id),
       )
     ).status,
     403,
@@ -3160,20 +3273,22 @@ test("global QC opens an actionable form and records inspection across home line
 });
 
 test("QC fully passed: director moves directly to packing and repair explains the optional branch", async () => {
-  const order = fixture("qc", 3);
-  db.prepare(
-    "UPDATE order_variants SET sewn_qty=3,qc_inspected_qty=3,qc_passed_qty=3,defect_qty=0 WHERE order_id=?",
-  ).run(order.id);
-  const before = getOrderById(order.id)!;
-  const move = (stage: string) =>
-    detailRoutes.PATCH(
+  const order = await fixture("qc", 3);
+  await db
+    .prepare(
+      "UPDATE order_variants SET sewn_qty=3,qc_inspected_qty=3,qc_passed_qty=3,defect_qty=0 WHERE order_id=?",
+    )
+    .run(order.id);
+  const before = (await getOrderById(order.id))!;
+  const move = async (stage: string) =>
+    await detailRoutes.PATCH(
       request(
         `/api/orders/${order.id}`,
         "qa-director",
         { version: before.version, stage },
         { method: "PATCH" },
       ),
-      params("id", order.id),
+      await params("id", order.id),
     );
   const repair = await move("sua_hang");
   assert.equal(repair.status, 422);
@@ -3181,20 +3296,18 @@ test("QC fully passed: director moves directly to packing and repair explains th
     JSON.stringify(await repair.json()),
     /Hãy chuyển thẳng sang Đóng gói/,
   );
-  assert.equal(getOrderById(order.id)!.version, before.version);
+  assert.equal((await getOrderById(order.id))!.version, before.version);
   const packing = await move("dong_goi");
   assert.equal(packing.status, 200);
-  assert.equal(getOrderById(order.id)!.current_stage, "dong_goi");
-  assert.deepEqual(getOrderById(order.id)!.variants, before.variants);
+  assert.equal((await getOrderById(order.id))!.current_stage, "dong_goi");
+  assert.deepEqual((await getOrderById(order.id))!.variants, before.variants);
 });
 
 test("Packing wages explain missing physical confirmation and prevent double payment", async () => {
-  const order = fixture("dong_goi", 3);
-  db.prepare("INSERT INTO order_rates VALUES (?,?,?)").run(
-    order.id,
-    "Đóng gói",
-    200000,
-  );
+  const order = await fixture("dong_goi", 3);
+  await db
+    .prepare("INSERT INTO order_rates VALUES (?,?,?)")
+    .run(order.id, "Đóng gói", 200000);
   const input = {
     order_id: order.id,
     employee_id: "TEST-W1",
@@ -3205,11 +3318,11 @@ test("Packing wages explain missing physical confirmation and prevent double pay
     quantity: 3,
     version: order.version,
   };
-  const post = () =>
-    productionRoutes.POST(
+  const post = async () =>
+    await productionRoutes.POST(
       request("/api/production/log", "worker", {
         ...input,
-        version: getOrderById(order.id)!.version,
+        version: (await getOrderById(order.id))!.version,
       }),
     );
   const blocked = await post();
@@ -3218,10 +3331,10 @@ test("Packing wages explain missing physical confirmation and prevent double pay
     JSON.stringify(await blocked.json()),
     /Đã xác nhận đóng gói 0, đã ghi công 0/,
   );
-  assert.equal(getOrderById(order.id)!.version, order.version);
-  db.prepare("UPDATE order_variants SET packed_qty=3 WHERE order_id=?").run(
-    order.id,
-  );
+  assert.equal((await getOrderById(order.id))!.version, order.version);
+  await db
+    .prepare("UPDATE order_variants SET packed_qty=3 WHERE order_id=?")
+    .run(order.id);
   assert.equal((await post()).status, 201);
   const duplicate = await post();
   assert.equal(duplicate.status, 422);
@@ -3232,28 +3345,31 @@ test("Packing wages explain missing physical confirmation and prevent double pay
 });
 
 test("Employees pack and earn once atomically, sharing a batch without exceeding QC", async () => {
-  db.prepare(
-    "INSERT INTO employees(id,name,line_id,role,phone) VALUES ('PACK-OUT','Outside',2,'May','')",
-  ).run();
-  people.packOutside = person("packOutside", "worker", "PACK-OUT", [2]);
-  const order = fixture("dong_goi", 3);
-  db.prepare("UPDATE orders SET order_date=? WHERE id=?").run(
-    "2022-06-01",
-    order.id,
-  );
-  db.prepare(
-    "UPDATE order_variants SET sewn_qty=3,qc_inspected_qty=3,qc_passed_qty=3 WHERE order_id=?",
-  ).run(order.id);
-  db.prepare("INSERT INTO order_rates VALUES (?,?,?)").run(
-    order.id,
-    "Đóng gói",
-    200000,
-  );
-  db.prepare(
-    "INSERT INTO employees(id,name,line_id,role,phone) VALUES ('PACK-W2','Packer B',1,'Đóng gói','')",
-  ).run();
-  people.packerB = person("packerB", "worker", "PACK-W2", [1]);
-  const makeInput = (employee: string, qty: number) => ({
+  await db
+    .prepare(
+      "INSERT INTO employees(id,name,line_id,role,phone) VALUES ('PACK-OUT','Outside',2,'May','')",
+    )
+    .run();
+  people.packOutside = await person("packOutside", "worker", "PACK-OUT", [2]);
+  const order = await fixture("dong_goi", 3);
+  await db
+    .prepare("UPDATE orders SET order_date=? WHERE id=?")
+    .run("2022-06-01", order.id);
+  await db
+    .prepare(
+      "UPDATE order_variants SET sewn_qty=3,qc_inspected_qty=3,qc_passed_qty=3 WHERE order_id=?",
+    )
+    .run(order.id);
+  await db
+    .prepare("INSERT INTO order_rates VALUES (?,?,?)")
+    .run(order.id, "Đóng gói", 200000);
+  await db
+    .prepare(
+      "INSERT INTO employees(id,name,line_id,role,phone) VALUES ('PACK-W2','Packer B',1,'Đóng gói','')",
+    )
+    .run();
+  people.packerB = await person("packerB", "worker", "PACK-W2", [1]);
+  const makeInput = async (employee: string, qty: number) => ({
     order_id: order.id,
     employee_id: employee,
     log_date: "2022-06-15",
@@ -3261,38 +3377,46 @@ test("Employees pack and earn once atomically, sharing a batch without exceeding
     size: "M",
     stage: "Đóng gói",
     quantity: qty,
-    version: getOrderById(order.id)!.version,
+    version: (await getOrderById(order.id))!.version,
     record_packing: true,
   });
-  const input = makeInput("TEST-W1", 2);
+  const input = await makeInput("TEST-W1", 2);
   const key = randomUUID();
-  const send = () =>
-    productionRoutes.POST(
+  const send = async () =>
+    await productionRoutes.POST(
       request("/api/production/log", "worker", input, { key }),
     );
   assert.equal((await send()).status, 201);
   assert.equal((await send()).status, 201);
-  assert.equal(getOrderById(order.id)!.variants![0].packed_qty, 2);
+  assert.equal((await getOrderById(order.id))!.variants![0].packed_qty, 2);
   assert.equal(
     (
       await productionRoutes.POST(
-        request("/api/production/log", "packerB", makeInput("PACK-W2", 2)),
+        request(
+          "/api/production/log",
+          "packerB",
+          await makeInput("PACK-W2", 2),
+        ),
       )
     ).status,
     422,
   );
-  assert.equal(getOrderById(order.id)!.variants![0].packed_qty, 2);
+  assert.equal((await getOrderById(order.id))!.variants![0].packed_qty, 2);
   assert.equal(
     (
       await productionRoutes.POST(
-        request("/api/production/log", "packerB", makeInput("PACK-W2", 1)),
+        request(
+          "/api/production/log",
+          "packerB",
+          await makeInput("PACK-W2", 1),
+        ),
       )
     ).status,
     201,
   );
-  assert.equal(getOrderById(order.id)!.variants![0].packed_qty, 3);
+  assert.equal((await getOrderById(order.id))!.variants![0].packed_qty, 3);
   assert.deepEqual(
-    db
+    await db
       .prepare(
         "SELECT COUNT(*) n,SUM(quantity) qty,SUM(total_pay) pay FROM production_logs WHERE order_id=?",
       )
@@ -3300,7 +3424,7 @@ test("Employees pack and earn once atomically, sharing a batch without exceeding
     { n: 2, qty: 3, pay: 600000 },
   );
   assert.deepEqual(
-    db
+    await db
       .prepare(
         "SELECT COUNT(*) n,SUM(quantity) qty FROM operation_records WHERE order_id=? AND action='pack'",
       )
@@ -3310,7 +3434,11 @@ test("Employees pack and earn once atomically, sharing a batch without exceeding
   assert.equal(
     (
       await productionRoutes.POST(
-        request("/api/production/log", "packOutside", makeInput("PACK-OUT", 1)),
+        request(
+          "/api/production/log",
+          "packOutside",
+          await makeInput("PACK-OUT", 1),
+        ),
       )
     ).status,
     403,
@@ -3319,12 +3447,10 @@ test("Employees pack and earn once atomically, sharing a batch without exceeding
     request("/api/production/log", "worker", input),
   );
   assert.equal(stale.status, 409);
-  const notReady = fixture("qc", 1);
-  db.prepare("INSERT INTO order_rates VALUES (?,?,?)").run(
-    notReady.id,
-    "Đóng gói",
-    200000,
-  );
+  const notReady = await fixture("qc", 1);
+  await db
+    .prepare("INSERT INTO order_rates VALUES (?,?,?)")
+    .run(notReady.id, "Đóng gói", 200000);
   assert.equal(
     (
       await productionRoutes.POST(
@@ -3338,24 +3464,32 @@ test("Employees pack and earn once atomically, sharing a batch without exceeding
     ).status,
     422,
   );
-  assert.equal(getOrderById(notReady.id)!.variants![0].packed_qty, 0);
+  assert.equal((await getOrderById(notReady.id))!.variants![0].packed_qty, 0);
 });
 
 test("Assigned delivery employee records own partial shipments without management rights", async () => {
-  db.prepare(
-    "INSERT INTO employees(id,name,line_id,role,phone) VALUES ('SHIP-W','Shipper',1,'Giao hàng','')",
-  ).run();
-  db.prepare(
-    "INSERT INTO roles(id,name,position) VALUES ('ship-only','Giao hàng test',11)",
-  ).run();
-  db.prepare(
-    "INSERT INTO role_grants VALUES ('ship-only','delivery.record','lines')",
-  ).run();
-  people.shipper = person("shipper", "ship-only", "SHIP-W", [1]);
-  const order = fixture("giao_hang", 3);
-  db.prepare(
-    "UPDATE order_variants SET qc_passed_qty=3,packed_qty=3 WHERE order_id=?",
-  ).run(order.id);
+  await db
+    .prepare(
+      "INSERT INTO employees(id,name,line_id,role,phone) VALUES ('SHIP-W','Shipper',1,'Giao hàng','')",
+    )
+    .run();
+  await db
+    .prepare(
+      "INSERT INTO roles(id,name,position) VALUES ('ship-only','Giao hàng test',11)",
+    )
+    .run();
+  await db
+    .prepare(
+      "INSERT INTO role_grants VALUES ('ship-only','delivery.record','lines')",
+    )
+    .run();
+  people.shipper = await person("shipper", "ship-only", "SHIP-W", [1]);
+  const order = await fixture("giao_hang", 3);
+  await db
+    .prepare(
+      "UPDATE order_variants SET qc_passed_qty=3,packed_qty=3 WHERE order_id=?",
+    )
+    .run(order.id);
   const input = {
     version: order.version,
     color: "Đen",
@@ -3365,10 +3499,10 @@ test("Assigned delivery employee records own partial shipments without managemen
     operation_date: "2026-01-15",
     notes: "Giao đợt 1",
   };
-  const send = (who: string, data: unknown, key?: string) =>
-    operationRoutes.POST(
+  const send = async (who: string, data: unknown, key?: string) =>
+    await operationRoutes.POST(
       request(`/api/orders/${order.id}/operations`, who, data, { key }),
-      params("id", order.id),
+      await params("id", order.id),
     );
   assert.equal((await send("worker", input)).status, 403);
   assert.equal(
@@ -3378,14 +3512,14 @@ test("Assigned delivery employee records own partial shipments without managemen
   const key = randomUUID();
   assert.equal((await send("shipper", input, key)).status, 200);
   assert.equal((await send("shipper", input, key)).status, 200);
-  assert.equal(getOrderById(order.id)!.variants![0].delivered_qty, 2);
-  const next = { ...input, version: getOrderById(order.id)!.version };
+  assert.equal((await getOrderById(order.id))!.variants![0].delivered_qty, 2);
+  const next = { ...input, version: (await getOrderById(order.id))!.version };
   assert.equal((await send("shipper", next)).status, 422);
   assert.equal((await send("shipper", { ...next, quantity: 1 })).status, 200);
-  assert.equal(getOrderById(order.id)!.variants![0].delivered_qty, 3);
-  assert.equal(getOrderById(order.id)!.current_stage, "giao_hang");
+  assert.equal((await getOrderById(order.id))!.variants![0].delivered_qty, 3);
+  assert.equal((await getOrderById(order.id))!.current_stage, "giao_hang");
   assert.deepEqual(
-    db
+    await db
       .prepare(
         "SELECT COUNT(*) n,SUM(quantity) qty FROM operation_records WHERE order_id=? AND worker_id='SHIP-W'",
       )
@@ -3394,24 +3528,24 @@ test("Assigned delivery employee records own partial shipments without managemen
   );
   assert.equal(
     (
-      db
+      (await db
         .prepare("SELECT COUNT(*) n FROM production_logs WHERE order_id=?")
-        .get(order.id) as { n: number }
+        .get(order.id)) as { n: number }
     ).n,
     0,
   );
   const fresh = {
     ...input,
-    version: getOrderById(order.id)!.version,
+    version: (await getOrderById(order.id))!.version,
     quantity: 1,
   };
   assert.equal(
     (await send("shipper", { ...fresh, action: "pack" })).status,
     403,
   );
-  db.prepare("UPDATE accounts SET line_ids='[2]' WHERE id=?").run(
-    people.shipper.id,
-  );
+  await db
+    .prepare("UPDATE accounts SET line_ids='[2]' WHERE id=?")
+    .run(people.shipper.id);
   assert.equal((await send("shipper", fresh)).status, 403);
 });
 
@@ -3421,12 +3555,12 @@ test("Large order lists render bounded rows with stage actions and line paginati
   const { OrderWorkspace } = await import("../src/components/OrderWorkspace");
   const { LinesPanel } = await import("../src/components/RequirementPanels");
   const { OperationsPanel } = await import("../src/components/RecordsPanel");
-  const base = fixture("qc", 3);
+  const base = await fixture("qc", 3);
   const orders = Array.from({ length: 120 }, (_, i) => ({
     ...base,
     id: `UX-${String(i + 1).padStart(3, "0")}`,
   }));
-  const session = auth.sessionData(context("admin"));
+  const session = auth.sessionData(await context("admin"));
   const noop = () => {};
   const html = renderToStaticMarkup(
     React.createElement(OrderWorkspace, {
@@ -3449,7 +3583,7 @@ test("Large order lists render bounded rows with stage actions and line paginati
   const linesHtml = renderToStaticMarkup(
     React.createElement(LinesPanel, {
       orders,
-      lines: getLines(),
+      lines: await getLines(),
       onOpen: noop,
     }),
   );
@@ -3474,13 +3608,13 @@ test("UX USE-22: missing rate blocks production with an actionable explanation",
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { ProductionForm } = await import("../src/components/ProductionForms");
   const { getEmployees } = await import("../src/lib/db");
-  const order = fixture("may", 3);
+  const order = await fixture("may", 3);
   const html = renderToStaticMarkup(
     React.createElement(ProductionForm, {
       orders: [order],
-      employees: getEmployees(),
+      employees: await getEmployees(),
       rates: [],
-      session: auth.sessionData(context("worker")),
+      session: auth.sessionData(await context("worker")),
       api: async () => {
         throw Error("Must not submit");
       },
@@ -3530,9 +3664,9 @@ test("UX USE-22: zero rates and hidden monetary permissions do not block valid w
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { ProductionForm } = await import("../src/components/ProductionForms");
   const { getEmployees } = await import("../src/lib/db");
-  const order = fixture("may", 3);
-  const session = auth.sessionData(context("worker"));
-  const render = (
+  const order = await fixture("may", 3);
+  const session = auth.sessionData(await context("worker"));
+  const render = async (
     o: typeof order,
     rates: Array<{ order_id: string; stage: string; unit_price: number }>,
     who = session,
@@ -3540,7 +3674,7 @@ test("UX USE-22: zero rates and hidden monetary permissions do not block valid w
     renderToStaticMarkup(
       React.createElement(ProductionForm, {
         orders: [o],
-        employees: getEmployees(),
+        employees: await getEmployees(),
         rates,
         session: who,
         api: async () => {
@@ -3553,7 +3687,9 @@ test("UX USE-22: zero rates and hidden monetary permissions do not block valid w
     html.match(/<button[^>]*type="submit"[^>]*>/)?.[0] || "";
   assert.doesNotMatch(
     submit(
-      render(order, [{ order_id: order.id, stage: "May", unit_price: 0 }]),
+      await render(order, [
+        { order_id: order.id, stage: "May", unit_price: 0 },
+      ]),
     ),
     /disabled/,
   );
@@ -3569,8 +3705,8 @@ test("UX USE-22: zero rates and hidden monetary permissions do not block valid w
       })),
     },
   };
-  assert.doesNotMatch(submit(render(order, [], hidden)), /disabled/);
-  const wrong = render({ ...order, current_stage: "nhan_don" }, [
+  assert.doesNotMatch(submit(await render(order, [], hidden)), /disabled/);
+  const wrong = await render({ ...order, current_stage: "nhan_don" }, [
     { order_id: order.id, stage: "Cắt", unit_price: 5000 },
   ]);
   assert.match(submit(wrong), /disabled/);
@@ -3591,7 +3727,7 @@ test("UX USE-24: client retries network failure with the same key and clears val
         status: 200,
       });
     }) as typeof fetch;
-    const api = apiFor(auth.sessionData(context("worker")), () => {});
+    const api = apiFor(auth.sessionData(await context("worker")), () => {});
     await assert.rejects(api("/api/production/log", { qaRetry: 1 }));
     await api("/api/production/log", { qaRetry: 1 });
     assert.equal(keys[0], keys[1]);
@@ -3610,18 +3746,16 @@ test("UX USE-24: client retries network failure with the same key and clears val
 });
 
 test("UX USE-31: locked month saves packing with pending wages and no change to locked payroll", async () => {
-  const order = fixture("dong_goi", 3);
-  db.prepare("UPDATE orders SET order_date='2021-01-01' WHERE id=?").run(
-    order.id,
-  );
-  db.prepare("UPDATE order_variants SET qc_passed_qty=3 WHERE order_id=?").run(
-    order.id,
-  );
-  db.prepare("INSERT INTO order_rates VALUES (?,?,?)").run(
-    order.id,
-    "Đóng gói",
-    200000,
-  );
+  const order = await fixture("dong_goi", 3);
+  await db
+    .prepare("UPDATE orders SET order_date='2021-01-01' WHERE id=?")
+    .run(order.id);
+  await db
+    .prepare("UPDATE order_variants SET qc_passed_qty=3 WHERE order_id=?")
+    .run(order.id);
+  await db
+    .prepare("INSERT INTO order_rates VALUES (?,?,?)")
+    .run(order.id, "Đóng gói", 200000);
   const lock = await payrollRoutes.POST(
     request("/api/payroll", "qa-director", { month: "2021-01" }),
   );
@@ -3643,31 +3777,31 @@ test("UX USE-31: locked month saves packing with pending wages and no change to 
   assert.equal((await response.json()).data.pay_status, "pending");
   const physicalOnly = await operationRoutes.POST(
     request(`/api/orders/${order.id}/operations`, "worker", {
-      version: getOrderById(order.id)!.version,
+      version: (await getOrderById(order.id))!.version,
       color: "Đen",
       size: "M",
       action: "pack",
       quantity: 1,
       operation_date: "2021-01-15",
     }),
-    params("id", order.id),
+    await params("id", order.id),
   );
   assert.equal(physicalOnly.status, 403);
 
-  assert.equal(getOrderById(order.id)!.variants![0].packed_qty, 1);
+  assert.equal((await getOrderById(order.id))!.variants![0].packed_qty, 1);
   assert.equal(
     (
-      db
+      (await db
         .prepare("SELECT COUNT(*) n FROM operation_records WHERE order_id=?")
-        .get(order.id) as { n: number }
+        .get(order.id)) as { n: number }
     ).n,
     1,
   );
   assert.equal(
     (
-      db
+      (await db
         .prepare("SELECT COUNT(*) n FROM production_logs WHERE order_id=?")
-        .get(order.id) as { n: number }
+        .get(order.id)) as { n: number }
     ).n,
     0,
   );
@@ -3675,18 +3809,16 @@ test("UX USE-31: locked month saves packing with pending wages and no change to 
 
 test("Pending packing reserves quantities and settles once into an explicitly selected open period", async () => {
   const pendingRoutes = await import("../src/app/api/production/pending/route");
-  const order = fixture("dong_goi", 3);
-  db.prepare("UPDATE orders SET order_date='2021-01-01' WHERE id=?").run(
-    order.id,
-  );
-  db.prepare("UPDATE order_variants SET qc_passed_qty=3 WHERE order_id=?").run(
-    order.id,
-  );
-  db.prepare("INSERT INTO order_rates VALUES (?,?,?)").run(
-    order.id,
-    "Đóng gói",
-    200000,
-  );
+  const order = await fixture("dong_goi", 3);
+  await db
+    .prepare("UPDATE orders SET order_date='2021-01-01' WHERE id=?")
+    .run(order.id);
+  await db
+    .prepare("UPDATE order_variants SET qc_passed_qty=3 WHERE order_id=?")
+    .run(order.id);
+  await db
+    .prepare("INSERT INTO order_rates VALUES (?,?,?)")
+    .run(order.id, "Đóng gói", 200000);
   const input = {
     order_id: order.id,
     version: order.version,
@@ -3699,27 +3831,27 @@ test("Pending packing reserves quantities and settles once into an explicitly se
     record_packing: true,
   };
   const key = randomUUID();
-  const record = () =>
-    productionRoutes.POST(
+  const record = async () =>
+    await productionRoutes.POST(
       request("/api/production/log", "worker", input, { key }),
     );
   const first = await record();
   assert.equal(first.status, 201);
   const pendingId = (await first.json()).data.pending_id;
   assert.equal((await record()).status, 201);
-  assert.equal(getOrderById(order.id)!.variants![0].packed_qty, 2);
+  assert.equal((await getOrderById(order.id))!.variants![0].packed_qty, 2);
   assert.equal(
     (
-      db
+      (await db
         .prepare("SELECT COUNT(*) n FROM pending_packing_pay WHERE order_id=?")
-        .get(order.id) as { n: number }
+        .get(order.id)) as { n: number }
     ).n,
     1,
   );
   const wagesOnly = await productionRoutes.POST(
     request("/api/production/log", "worker", {
       ...input,
-      version: getOrderById(order.id)!.version,
+      version: (await getOrderById(order.id))!.version,
       record_packing: false,
       log_date: "2021-02-01",
     }),
@@ -3776,15 +3908,19 @@ test("Pending packing reserves quantities and settles once into an explicitly se
     ).status,
     422,
   );
-  db.prepare(
-    "UPDATE order_rates SET unit_price=999999 WHERE order_id=? AND stage='Đóng gói'",
-  ).run(order.id);
-  db.prepare(
-    "UPDATE orders SET current_stage='hoan_thanh',status='completed' WHERE id=?",
-  ).run(order.id);
+  await db
+    .prepare(
+      "UPDATE order_rates SET unit_price=999999 WHERE order_id=? AND stage='Đóng gói'",
+    )
+    .run(order.id);
+  await db
+    .prepare(
+      "UPDATE orders SET current_stage='hoan_thanh',status='completed' WHERE id=?",
+    )
+    .run(order.id);
   const payKey = randomUUID();
-  const commit = () =>
-    pendingRoutes.POST(
+  const commit = async () =>
+    await pendingRoutes.POST(
       request("/api/production/pending", "qa-director", settle, {
         key: payKey,
       }),
@@ -3801,7 +3937,7 @@ test("Pending packing reserves quantities and settles once into an explicitly se
     ).status,
     409,
   );
-  const log = db
+  const log = await db
     .prepare(
       "SELECT quantity,unit_price,total_pay,log_date,month,employee_id FROM production_logs WHERE id=?",
     )
@@ -3814,22 +3950,22 @@ test("Pending packing reserves quantities and settles once into an explicitly se
     month: "2021-02",
     employee_id: "TEST-W1",
   });
-  assert.equal(getOrderById(order.id)!.variants![0].packed_qty, 2);
+  assert.equal((await getOrderById(order.id))!.variants![0].packed_qty, 2);
   assert.equal(
     (
-      db
+      (await db
         .prepare(
           "SELECT COUNT(*) n FROM production_logs WHERE order_id=? AND month='2021-01'",
         )
-        .get(order.id) as { n: number }
+        .get(order.id)) as { n: number }
     ).n,
     0,
   );
   assert.ok(
-    db.prepare("SELECT 1 FROM payroll_locks WHERE month='2021-01'").get(),
+    await db.prepare("SELECT 1 FROM payroll_locks WHERE month='2021-01'").get(),
   );
   assert.deepEqual(
-    db
+    await db
       .prepare(
         "SELECT work_date,settled_log_id FROM pending_packing_pay WHERE id=?",
       )
@@ -3844,46 +3980,47 @@ test("Pending packing privacy, price snapshot, representation and backups preser
     (await pendingRoutes.GET(request("/api/production/pending"))).status,
     401,
   );
-  const order = fixture("dong_goi", 2);
-  db.prepare("UPDATE orders SET order_date='2021-01-01' WHERE id=?").run(
-    order.id,
-  );
-  db.prepare("UPDATE order_variants SET qc_passed_qty=2 WHERE order_id=?").run(
-    order.id,
-  );
-  db.prepare("INSERT INTO order_rates VALUES (?,?,?)").run(
-    order.id,
-    "Đóng gói",
-    100000,
-  );
-  db.prepare(
-    "INSERT INTO employees(id,name,line_id,role,phone) VALUES ('PEND-PRIVATE','Private worker',1,'Đóng gói','')",
-  ).run();
-  db.prepare(
-    "INSERT INTO roles(id,name,position) VALUES ('pending-private','Pending no salary',9)",
-  ).run();
+  const order = await fixture("dong_goi", 2);
+  await db
+    .prepare("UPDATE orders SET order_date='2021-01-01' WHERE id=?")
+    .run(order.id);
+  await db
+    .prepare("UPDATE order_variants SET qc_passed_qty=2 WHERE order_id=?")
+    .run(order.id);
+  await db
+    .prepare("INSERT INTO order_rates VALUES (?,?,?)")
+    .run(order.id, "Đóng gói", 100000);
+  await db
+    .prepare(
+      "INSERT INTO employees(id,name,line_id,role,phone) VALUES ('PEND-PRIVATE','Private worker',1,'Đóng gói','')",
+    )
+    .run();
+  await db
+    .prepare(
+      "INSERT INTO roles(id,name,position) VALUES ('pending-private','Pending no salary',9)",
+    )
+    .run();
   for (const [permission, scope] of [
     ["production.create", "self"],
     ["production.view", "self"],
     ["orders.view", "lines"],
   ])
-    db.prepare("INSERT INTO role_grants VALUES ('pending-private',?,?)").run(
-      permission,
-      scope,
-    );
-  people.pendingPrivate = person(
+    await db
+      .prepare("INSERT INTO role_grants VALUES ('pending-private',?,?)")
+      .run(permission, scope);
+  people.pendingPrivate = await person(
     "pendingPrivate",
     "pending-private",
     "PEND-PRIVATE",
     [1],
   );
-  people.pendingAdmin = person("pendingAdmin", "admin", null, []);
+  people.pendingAdmin = await person("pendingAdmin", "admin", null, []);
   const represented = await authRoutes.POST(
     request("/api/auth/represent", "pendingAdmin", {
       password: testPassword,
       accountId: people.pendingPrivate.id,
     }),
-    params("action", "represent"),
+    await params("action", "represent"),
   );
   assert.equal(represented.status, 200);
   const input = {
@@ -3911,7 +4048,7 @@ test("Pending packing privacy, price snapshot, representation and backups preser
   assert.equal(row.unit_price, null);
   assert.equal(row.total_pay, null);
   assert.deepEqual(
-    db
+    await db
       .prepare(
         "SELECT actor_id,represented_id,worker_id FROM operation_records WHERE order_id=?",
       )
@@ -3925,15 +4062,15 @@ test("Pending packing privacy, price snapshot, representation and backups preser
   const failed = await productionRoutes.POST(
     request("/api/production/log", "pendingPrivate", {
       ...input,
-      version: getOrderById(order.id)!.version,
+      version: (await getOrderById(order.id))!.version,
       quantity: 2,
     }),
   );
   assert.equal(failed.status, 422);
-  assert.equal(getOrderById(order.id)!.variants![0].packed_qty, 1);
+  assert.equal((await getOrderById(order.id))!.variants![0].packed_qty, 1);
   const { runBackup, configureBackup } =
     await import("../src/lib/server/backup");
-  configureBackup({ enabled: false, intervalHours: 24, windowDays: 30 });
+  await configureBackup({ enabled: false, intervalHours: 24, windowDays: 30 });
   const files = await runBackup(Date.parse("2021-01-25T12:00:00Z"));
   const { readFileSync } = await import("node:fs");
   const { gunzipSync } = await import("node:zlib");
@@ -3945,20 +4082,120 @@ test("Pending packing privacy, price snapshot, representation and backups preser
   assert.ok(
     archive.pendingPackingPay.some((p: { id: number }) => p.id === pendingId),
   );
-  const Database = (await import("better-sqlite3")).default;
-  const restored = new Database(join(directory, "backups", files.snapshot), {
-    readonly: true,
-  });
-  try {
-    assert.ok(
-      restored
-        .prepare(
-          "SELECT 1 FROM pending_packing_pay WHERE id=? AND settled_log_id IS NULL",
-        )
-        .get(pendingId),
-    );
-    assert.deepEqual(restored.pragma("foreign_key_check"), []);
-  } finally {
-    restored.close();
-  }
+  const restored = await readSnapshot(
+    join(directory, "backups", files.snapshot),
+  );
+  assert.ok(
+    restored.tables.pending_packing_pay.some(
+      (r) => r.id === pendingId && r.settled_log_id === null,
+    ),
+  );
+});
+
+test("PostgreSQL concurrent writes share a transaction lock and enforce stale versions", async () => {
+  const order = await fixture("may", 5);
+  const input = {
+    order_id: order.id,
+    employee_id: "TEST-W1",
+    log_date: "2026-06-01",
+    stage: "May",
+    color: "Đen",
+    size: "M",
+    quantity: 3,
+    version: order.version,
+  };
+  const results = await Promise.all(
+    Array.from({ length: 4 }, () =>
+      productionRoutes.POST(request("/api/production/log", "worker", input)),
+    ),
+  );
+  assert.deepEqual(results.map((r) => r.status).sort(), [201, 409, 409, 409]);
+  assert.equal((await getOrderById(order.id))!.variants![0].sewn_qty, 3);
+  assert.equal(
+    (
+      (await db
+        .prepare("SELECT COUNT(*) n FROM production_logs WHERE order_id=?")
+        .get(order.id)) as { n: number }
+    ).n,
+    1,
+  );
+});
+
+test("PostgreSQL concurrent retries return the same saved result exactly once", async () => {
+  const order = await fixture("may", 5);
+  const key = randomUUID();
+  const input = {
+    order_id: order.id,
+    employee_id: "TEST-W1",
+    log_date: "2026-06-01",
+    stage: "May",
+    color: "Đen",
+    size: "M",
+    quantity: 2,
+    version: order.version,
+  };
+  const results = await Promise.all(
+    Array.from({ length: 4 }, () =>
+      productionRoutes.POST(
+        request("/api/production/log", "worker", input, { key }),
+      ),
+    ),
+  );
+  const rows = await Promise.all(results.map((r) => r.json()));
+  assert.ok(results.every((r) => r.status === 201));
+  assert.equal(new Set(rows.map((r) => r.data.id)).size, 1);
+  assert.equal((await getOrderById(order.id))!.variants![0].sewn_qty, 2);
+});
+
+test("PostgreSQL rollback, binding and concurrent login counters retain guarantees", async () => {
+  const { bind } = await import("../src/lib/server/database");
+  assert.deepEqual(
+    bind("SELECT '?' literal, ? value, '@name' literal2", ["O'Reilly"]),
+    {
+      text: "SELECT '?' literal, $1 value, '@name' literal2",
+      values: ["O'Reilly"],
+    },
+  );
+  const key = "rollback-" + randomUUID();
+  await assert.rejects(
+    db.transaction(async () => {
+      await db
+        .prepare("INSERT INTO app_settings VALUES (?,?)")
+        .run(key, "temporary");
+      throw new Error("rollback");
+    })(),
+    /rollback/,
+  );
+  assert.equal(
+    await db.prepare("SELECT 1 FROM app_settings WHERE key=?").get(key),
+    undefined,
+  );
+  const attempts = await Promise.allSettled(
+    Array.from({ length: 10 }, () => auth.limit(key, 5)),
+  );
+  assert.equal(attempts.filter((r) => r.status === "fulfilled").length, 5);
+  assert.equal(
+    (
+      (await db
+        .prepare("SELECT count FROM auth_attempts WHERE key=?")
+        .get(key)) as { count: number }
+    ).count,
+    5,
+  );
+});
+
+test("PostgreSQL snapshots refuse to replace a populated database", async () => {
+  const { captureSnapshot, restoreSnapshot } =
+    await import("../src/lib/server/snapshot");
+  const snapshot = await captureSnapshot();
+  const before = await db
+    .prepare("SELECT COUNT(*) n,SUM(total_pay) wages FROM production_logs")
+    .get();
+  await assert.rejects(restoreSnapshot(snapshot), /empty database/);
+  assert.deepEqual(
+    await db
+      .prepare("SELECT COUNT(*) n,SUM(total_pay) wages FROM production_logs")
+      .get(),
+    before,
+  );
 });

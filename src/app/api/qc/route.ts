@@ -5,11 +5,14 @@ import {
   requirePermission,
 } from "@/lib/server/auth";
 import { qcFor } from "@/lib/server/business";
+import { initializeDatabase } from "@/lib/server/migrate";
+
 export async function GET(request: Request) {
   try {
-    const ctx = authenticate(request);
+    await initializeDatabase();
+    const ctx = await authenticate(request);
     requirePermission(ctx, "qc.view");
-    return ok(qcFor(ctx));
+    return ok(await qcFor(ctx));
   } catch (e) {
     return failure(e);
   }

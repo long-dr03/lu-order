@@ -12,10 +12,13 @@ import {
   AppError,
 } from "@/lib/server/auth";
 import { permits } from "@/lib/permissions";
+import { initializeDatabase } from "@/lib/server/migrate";
+
 const maximum = 5 * 1024 * 1024;
 export async function POST(request: Request) {
   try {
-    const ctx = authenticate(request);
+    await initializeDatabase();
+    const ctx = await authenticate(request);
     guardWrite(request, ctx, {
       contentType: "multipart/form-data",
       maxBytes: maximum + 65536,
@@ -32,7 +35,7 @@ export async function POST(request: Request) {
       403,
       "Bạn không có quyền thêm ảnh sản phẩm.",
     );
-    limit(`images:${ctx.actor.id}`, 30);
+    await limit(`images:${ctx.actor.id}`, 30);
     const reader = request.body?.getReader();
     ensure(reader, 422, "Chưa chọn ảnh sản phẩm.");
     const chunks: Uint8Array[] = [];
@@ -124,17 +127,16 @@ export async function POST(request: Request) {
     }
     const id = randomUUID();
     const url = `/api/product-images/${id}`;
-    db.transaction(() => {
-      db.prepare(
-        "DELETE FROM product_images WHERE created_at<? AND NOT EXISTS (SELECT 1 FROM orders WHERE image_url='/api/product-images/' || product_images.id) AND NOT EXISTS (SELECT 1 FROM operation_records WHERE image_url='/api/product-images/' || product_images.id)",
-      ).run(Date.now() - 86400000);
-      db.prepare("INSERT INTO product_images VALUES (?,?,?,?)").run(
-        id,
-        ctx.user.id,
-        data,
-        Date.now(),
-      );
-      audit(ctx, "Tải ảnh sản phẩm", "Ảnh mẫu sản phẩm", line);
+    await db.transaction(async () => {
+      await db
+        .prepare(
+          "DELETE FROM product_images WHERE created_at<? AND NOT EXISTS (SELECT 1 FROM orders WHERE image_url='/api/product-images/' || product_images.id) AND NOT EXISTS (SELECT 1 FROM operation_records WHERE image_url='/api/product-images/' || product_images.id)",
+        )
+        .run(Date.now() - 86400000);
+      await db
+        .prepare("INSERT INTO product_images VALUES (?,?,?,?)")
+        .run(id, ctx.user.id, data, Date.now());
+      await audit(ctx, "Tải ảnh sản phẩm", "Ảnh mẫu sản phẩm", line);
     })();
     return ok({ url }, 201);
   } catch (e) {

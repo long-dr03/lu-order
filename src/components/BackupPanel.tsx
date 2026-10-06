@@ -49,10 +49,10 @@ export function BackupPanel({ api }: { api: Api }) {
       <h2>Sao lưu và lưu trữ</h2>
       <ErrorNotice error={error} />
       <p className="muted">
-        Bản SQLite chứa toàn bộ dữ liệu để khôi phục, bao gồm ảnh và tài khoản.
-        File JSON nén chứa nghiệp vụ trong số ngày gần nhất đã chọn, kèm đơn
-        liên quan và ảnh; số lượng giao hàng là số lũy kế tại thời điểm sao lưu.
-        Lưu tại thư mục backups cạnh database.
+        Bản sao lưu đầy đủ chứa toàn bộ dữ liệu để khôi phục, bao gồm ảnh và tài
+        khoản. File JSON nén chứa nghiệp vụ trong số ngày gần nhất đã chọn, kèm
+        đơn liên quan và ảnh; số lượng giao hàng là số lũy kế tại thời điểm sao
+        lưu. Bạn có thể tải bản sao lưu về máy để lưu trữ riêng.
       </p>
       {data && (
         <>

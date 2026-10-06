@@ -1,4 +1,4 @@
-# Multi-stage Dockerfile for Next.js with better-sqlite3
+# Multi-stage Dockerfile for Next.js with PostgreSQL (SQLite is used only by the migration export tool)
 FROM node:22-bookworm-slim AS builder
 
 WORKDIR /app
@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY . .
 
@@ -34,10 +34,19 @@ COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
 
-# Ensure sqlite storage folder exists
-RUN mkdir -p /app/data
+# Persistent application backups are mounted separately from PostgreSQL
+RUN mkdir -p /app/backups && chown node:node /app/backups && chmod 700 /app/backups
 
 EXPOSE 3000
 
-CMD ["npm", "run", "start"]
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+USER node
+
+# The local start script binds to loopback; the proxy must reach this container.
+CMD ["node", "node_modules/next/dist/bin/next", "start", "--hostname", "0.0.0.0"]

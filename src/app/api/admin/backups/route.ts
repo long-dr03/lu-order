@@ -16,6 +16,8 @@ import {
   runBackup,
   readBackup,
 } from "@/lib/server/backup";
+import { initializeDatabase } from "@/lib/server/migrate";
+
 function admin(ctx: Context) {
   ensure(
     !ctx.representing && ctx.user.roles.some((r) => r.id === "admin"),
@@ -25,7 +27,8 @@ function admin(ctx: Context) {
 }
 export async function GET(request: Request) {
   try {
-    admin(authenticate(request));
+    await initializeDatabase();
+    admin(await authenticate(request));
     const name = new URL(request.url).searchParams.get("file");
     if (name) {
       const bytes = await readBackup(name);
@@ -39,14 +42,15 @@ export async function GET(request: Request) {
         },
       });
     }
-    return ok({ config: backupConfig(), files: await backupFiles() });
+    return ok({ config: await backupConfig(), files: await backupFiles() });
   } catch (e) {
     return failure(e);
   }
 }
 export async function POST(request: Request) {
   try {
-    const ctx = authenticate(request);
+    await initializeDatabase();
+    const ctx = await authenticate(request);
     admin(ctx);
     guardWrite(request, ctx);
     const input = await body(request);
@@ -57,11 +61,15 @@ export async function POST(request: Request) {
       input.action === "run"
     ) {
       const files = await runBackup();
-      audit(ctx, "Sao lưu dữ liệu", "Tạo snapshot SQLite và lưu trữ nghiệp vụ");
+      await audit(
+        ctx,
+        "Sao lưu dữ liệu",
+        "Tạo snapshot PostgreSQL và lưu trữ nghiệp vụ",
+      );
       return ok(files);
     }
-    const config = configureBackup(backupSchema.parse(input));
-    audit(
+    const config = await configureBackup(backupSchema.parse(input));
+    await audit(
       ctx,
       "Cấu hình sao lưu",
       `Chu kỳ ${config.intervalHours} giờ, dữ liệu ${config.windowDays} ngày`,

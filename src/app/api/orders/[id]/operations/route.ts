@@ -5,17 +5,25 @@ import {
   idempotent,
 } from "@/lib/server/business";
 import { body } from "@/lib/server/validation";
+import { initializeDatabase } from "@/lib/server/migrate";
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    await initializeDatabase();
     const { id } = await params;
-    const ctx = authenticate(request);
+    const ctx = await authenticate(request);
     guardWrite(request, ctx);
     const input = operationSchema.parse(await body(request));
     return ok(
-      idempotent(ctx, request, input, () => recordOperation(ctx, id, input)),
+      await idempotent(
+        ctx,
+        request,
+        input,
+        async () => await recordOperation(ctx, id, input),
+      ),
     );
   } catch (e) {
     return failure(e);

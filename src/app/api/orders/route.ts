@@ -18,16 +18,19 @@ import {
 } from "@/lib/server/business";
 import { body } from "@/lib/server/validation";
 import { generateNextOrderCode } from "@/lib/db";
+import { initializeDatabase } from "@/lib/server/migrate";
+
 export async function GET(request: Request) {
   try {
-    const ctx = authenticate(request);
+    await initializeDatabase();
+    const ctx = await authenticate(request);
     requirePermission(ctx, "orders.view");
     return ok({
-      orders: filterOrders(visibleOrders(ctx), queryFilters(request)),
-      stats: dashboard(ctx),
-      lines: linesFor(ctx),
-      employees: employeesFor(ctx, "orders.view"),
-      nextCode: generateNextOrderCode(),
+      orders: filterOrders(await visibleOrders(ctx), queryFilters(request)),
+      stats: await dashboard(ctx),
+      lines: await linesFor(ctx),
+      employees: await employeesFor(ctx, "orders.view"),
+      nextCode: await generateNextOrderCode(),
     });
   } catch (e) {
     return failure(e);
@@ -35,11 +38,17 @@ export async function GET(request: Request) {
 }
 export async function POST(request: Request) {
   try {
-    const ctx = authenticate(request);
+    await initializeDatabase();
+    const ctx = await authenticate(request);
     guardWrite(request, ctx);
     const input = createOrderSchema.parse(await body(request));
     return ok(
-      idempotent(ctx, request, input, () => createOrder(ctx, input)),
+      await idempotent(
+        ctx,
+        request,
+        input,
+        async () => await createOrder(ctx, input),
+      ),
       201,
     );
   } catch (e) {

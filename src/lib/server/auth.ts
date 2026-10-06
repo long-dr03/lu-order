@@ -7,7 +7,7 @@ import {
 } from "node:crypto";
 import { NextResponse } from "next/server";
 import { db } from "../db";
-import "./migrate";
+import { initializeDatabase } from "./migrate";
 import {
   type Account,
   type Role,
@@ -45,34 +45,37 @@ export function verifyPassword(value: string, stored: string) {
   const computed = scryptSync(value, salt, 64, { N: 16384, r: 8, p: 1 });
   return timingSafeEqual(computed, Buffer.from(key, "hex"));
 }
-export function getRoles(): Role[] {
-  return (
-    db.prepare("SELECT * FROM roles ORDER BY position DESC,name").all() as Omit<
-      Role,
-      "grants"
-    >[]
-  ).map((role) => ({
+export async function getRoles(): Promise<Role[]> {
+  const roles = (await db
+    .prepare("SELECT * FROM roles ORDER BY position DESC,name")
+    .all()) as Omit<Role, "grants">[];
+  const grants = (await db
+    .prepare("SELECT role_id,permission,scope FROM role_grants")
+    .all()) as (Grant & { role_id: string })[];
+  return roles.map((role) => ({
     ...role,
-    grants: db
-      .prepare("SELECT permission,scope FROM role_grants WHERE role_id=?")
-      .all(role.id) as Grant[],
+    grants: grants
+      .filter((g) => g.role_id === role.id)
+      .map(({ permission, scope }) => ({ permission, scope })),
   }));
 }
-export function account(id: string): Account | null {
-  const row = db
+export async function account(id: string): Promise<Account | null> {
+  const row = (await db
     .prepare(
       "SELECT id,username,name,status,employee_id,line_ids,must_change_password FROM accounts WHERE id=?",
     )
-    .get(id) as
+    .get(id)) as
     (Omit<Account, "roles" | "line_ids"> & { line_ids: string }) | undefined;
   if (!row) return null;
-  const ids = db
+  const ids = (await db
     .prepare("SELECT role_id FROM account_roles WHERE account_id=?")
-    .all(id) as { role_id: string }[];
+    .all(id)) as { role_id: string }[];
   return {
     ...row,
     line_ids: JSON.parse(row.line_ids),
-    roles: getRoles().filter((r) => ids.some((i) => i.role_id === r.id)),
+    roles: (await getRoles()).filter((r) =>
+      ids.some((i) => i.role_id === r.id),
+    ),
   };
 }
 export interface Context {
@@ -92,18 +95,19 @@ function token(request: Request) {
       ?.slice(14) || ""
   );
 }
-export function authenticate(
+export async function authenticate(
   request: Request,
   allowPasswordChange = false,
-): Context {
+): Promise<Context> {
+  await initializeDatabase();
   const tokenHash = hashToken(token(request));
-  const session = db
+  const session = (await db
     .prepare("SELECT * FROM sessions WHERE token_hash=? AND expires_at>?")
-    .get(tokenHash, Date.now()) as
+    .get(tokenHash, Date.now())) as
     | { account_id: string; represented_id: string | null; csrf: string }
     | undefined;
   ensure(session, 401, "Vui lòng đăng nhập.");
-  const actor = account(session.account_id);
+  const actor = await account(session.account_id);
   ensure(actor?.status === "active", 401, "Tài khoản không còn hoạt động.");
   ensure(
     allowPasswordChange || !actor.must_change_password,
@@ -118,7 +122,7 @@ export function authenticate(
       403,
       "Không còn quyền đại diện.",
     );
-  const user = representing ? account(session.represented_id!) : actor;
+  const user = representing ? await account(session.represented_id!) : actor;
   ensure(
     user?.status === "active",
     403,
@@ -177,38 +181,42 @@ export function guardWrite(
       "Phiên thao tác không hợp lệ. Hãy tải lại trang.",
     );
 }
-export function audit(
+export async function audit(
   ctx: Context,
   action: string,
   details: string,
   lineId?: number,
 ) {
-  db.prepare(
-    "INSERT INTO audit_logs(user_name,action,details,actor_id,represented_id,line_id) VALUES (?,?,?,?,?,?)",
-  ).run(
-    ctx.actor.name,
-    action,
-    details,
-    ctx.actor.id,
-    ctx.representing ? ctx.user.id : null,
-    lineId ?? null,
-  );
+  await db
+    .prepare(
+      "INSERT INTO audit_logs(user_name,action,details,actor_id,represented_id,line_id) VALUES (?,?,?,?,?,?)",
+    )
+    .run(
+      ctx.actor.name,
+      action,
+      details,
+      ctx.actor.id,
+      ctx.representing ? ctx.user.id : null,
+      lineId ?? null,
+    );
 }
 export function actorLabel(ctx: Context) {
   return ctx.representing
     ? `${ctx.actor.name} → ${ctx.user.name}`
     : ctx.actor.name;
 }
-export function createSession(id: string, response: NextResponse) {
+export async function createSession(id: string, response: NextResponse) {
   const value = randomBytes(32).toString("hex");
-  db.prepare(
-    "INSERT INTO sessions(token_hash,account_id,csrf,expires_at) VALUES (?,?,?,?)",
-  ).run(
-    hashToken(value),
-    id,
-    randomBytes(32).toString("hex"),
-    Date.now() + 86400000,
-  );
+  await db
+    .prepare(
+      "INSERT INTO sessions(token_hash,account_id,csrf,expires_at) VALUES (?,?,?,?)",
+    )
+    .run(
+      hashToken(value),
+      id,
+      randomBytes(32).toString("hex"),
+      Date.now() + 86400000,
+    );
   response.cookies.set("luuta_session", value, {
     httpOnly: true,
     sameSite: "lax",
@@ -219,25 +227,29 @@ export function createSession(id: string, response: NextResponse) {
     maxAge: 86400,
   });
 }
-export function limit(key: string, maximum: number, windowMs = 900000) {
-  const now = Date.now();
-  const row = db
-    .prepare("SELECT count,reset_at FROM auth_attempts WHERE key=?")
-    .get(key) as { count: number; reset_at: number } | undefined;
-  if (!row || row.reset_at <= now)
-    db.prepare("INSERT OR REPLACE INTO auth_attempts VALUES (?,?,?)").run(
-      key,
-      1,
-      now + windowMs,
-    );
-  else {
-    ensure(
-      row.count < maximum,
-      429,
-      "Quá nhiều lần thử. Vui lòng thử lại sau 15 phút.",
-    );
-    db.prepare("UPDATE auth_attempts SET count=count+1 WHERE key=?").run(key);
-  }
+export async function limit(key: string, maximum: number, windowMs = 900000) {
+  return db.transaction(async () => {
+    const now = Date.now();
+    const row = (await db
+      .prepare("SELECT count,reset_at FROM auth_attempts WHERE key=?")
+      .get(key)) as { count: number; reset_at: number } | undefined;
+    if (!row || row.reset_at <= now)
+      await db
+        .prepare(
+          "INSERT INTO auth_attempts VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET count=excluded.count,reset_at=excluded.reset_at",
+        )
+        .run(key, 1, now + windowMs);
+    else {
+      ensure(
+        row.count < maximum,
+        429,
+        "Quá nhiều lần thử. Vui lòng thử lại sau 15 phút.",
+      );
+      await db
+        .prepare("UPDATE auth_attempts SET count=count+1 WHERE key=?")
+        .run(key);
+    }
+  })();
 }
 export function ok<T>(data: T, status = 200) {
   return NextResponse.json(
@@ -277,10 +289,9 @@ export function sessionData(ctx: Context) {
     csrf: ctx.csrf,
   };
 }
-export function revoke(id: string) {
-  db.prepare("DELETE FROM sessions WHERE account_id=? OR represented_id=?").run(
-    id,
-    id,
-  );
+export async function revoke(id: string) {
+  await db
+    .prepare("DELETE FROM sessions WHERE account_id=? OR represented_id=?")
+    .run(id, id);
 }
 export { randomUUID };

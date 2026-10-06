@@ -18,25 +18,28 @@ import {
   idempotent,
 } from "@/lib/server/business";
 import { body, text } from "@/lib/server/validation";
+import { initializeDatabase } from "@/lib/server/migrate";
+
 export async function GET(request: Request) {
   try {
-    const ctx = authenticate(request);
+    await initializeDatabase();
+    const ctx = await authenticate(request);
     requirePermission(ctx, "orders.view");
     if (
       !hasPermission(ctx.user, "rates.manage") &&
       !hasPermission(ctx.user, "payroll.view")
     )
       return ok([]);
-    const orders = visibleOrders(ctx);
+    const orders = await visibleOrders(ctx);
     return ok(
       (
         [
-          ...db.prepare("SELECT * FROM order_rates").all(),
-          ...db
+          ...(await db.prepare("SELECT * FROM order_rates").all()),
+          ...(await db
             .prepare(
               "SELECT order_id,stage,unit_price,id work_item_id,name work_item_name FROM order_work_items",
             )
-            .all(),
+            .all()),
         ] as Rate[]
       ).filter((r) => orders.some((o) => o.id === r.order_id)),
     );
@@ -46,7 +49,8 @@ export async function GET(request: Request) {
 }
 export async function POST(request: Request) {
   try {
-    const ctx = authenticate(request);
+    await initializeDatabase();
+    const ctx = await authenticate(request);
     guardWrite(request, ctx);
     const input = z
       .object({
@@ -79,9 +83,9 @@ export async function POST(request: Request) {
       })
       .strict()
       .parse(await body(request));
-    const order = orderFor(ctx, input.order_id, "rates.manage");
+    const order = await orderFor(ctx, input.order_id, "rates.manage");
     return ok(
-      idempotent(ctx, request, input, () => {
+      await idempotent(ctx, request, input, async () => {
         if (input.work_items) {
           ensure(
             ["Cắt", "May"].includes(input.stage),
@@ -93,9 +97,9 @@ export async function POST(request: Request) {
             422,
             "Không kết hợp cấu hình phần việc và đơn giá chung.",
           );
-          const fresh = db
+          const fresh = (await db
             .prepare("SELECT version FROM orders WHERE id=?")
-            .get(order.id) as { version: number };
+            .get(order.id)) as { version: number };
           ensure(
             input.version === fresh.version,
             409,
@@ -109,30 +113,34 @@ export async function POST(request: Request) {
           );
           const column = input.stage === "Cắt" ? "cut_qty" : "sewn_qty";
           ensure(
-            !db
+            !(await db
               .prepare(
                 "SELECT 1 FROM production_logs WHERE order_id=? AND stage=? LIMIT 1",
               )
-              .get(order.id, input.stage) &&
-              !db
+              .get(order.id, input.stage)) &&
+              !(await db
                 .prepare(
                   `SELECT 1 FROM order_variants WHERE order_id=? AND ${column}>0 LIMIT 1`,
                 )
-                .get(order.id),
+                .get(order.id)),
             422,
             "Công đoạn đã có sản lượng. Không đổi danh sách phần việc để giữ lịch sử và tiến độ; chỉ sửa đơn giá cho lần sau.",
           );
-          db.prepare(
-            "DELETE FROM order_work_items WHERE order_id=? AND stage=?",
-          ).run(order.id, input.stage);
+          await db
+            .prepare(
+              "DELETE FROM order_work_items WHERE order_id=? AND stage=?",
+            )
+            .run(order.id, input.stage);
           for (const part of input.work_items)
-            db.prepare(
-              "INSERT INTO order_work_items(order_id,stage,name,unit_price) VALUES (?,?,?,?)",
-            ).run(order.id, input.stage, part.name, part.unit_price);
-          db.prepare("UPDATE orders SET version=version+1 WHERE id=?").run(
-            order.id,
-          );
-          audit(
+            await db
+              .prepare(
+                "INSERT INTO order_work_items(order_id,stage,name,unit_price) VALUES (?,?,?,?)",
+              )
+              .run(order.id, input.stage, part.name, part.unit_price);
+          await db
+            .prepare("UPDATE orders SET version=version+1 WHERE id=?")
+            .run(order.id);
+          await audit(
             ctx,
             "Cấu hình phần việc",
             `${order.id} ${input.stage}: ${JSON.stringify(input.work_items)}`,
@@ -143,7 +151,7 @@ export async function POST(request: Request) {
         ensure(input.unit_price !== undefined, 422, "Thiếu đơn giá.");
         if (input.work_item_id) {
           ensure(
-            db
+            await db
               .prepare(
                 "SELECT 1 FROM order_work_items WHERE id=? AND order_id=? AND stage=?",
               )
@@ -151,11 +159,10 @@ export async function POST(request: Request) {
             422,
             "Phần việc không thuộc đơn/công đoạn.",
           );
-          db.prepare("UPDATE order_work_items SET unit_price=? WHERE id=?").run(
-            input.unit_price,
-            input.work_item_id,
-          );
-          audit(
+          await db
+            .prepare("UPDATE order_work_items SET unit_price=? WHERE id=?")
+            .run(input.unit_price, input.work_item_id);
+          await audit(
             ctx,
             "Đơn giá phần việc",
             `${order.id} ${input.stage} #${input.work_item_id}: ${input.unit_price}`,
@@ -164,18 +171,20 @@ export async function POST(request: Request) {
           return input;
         }
         ensure(
-          !db
+          !(await db
             .prepare(
               "SELECT 1 FROM order_work_items WHERE order_id=? AND stage=?",
             )
-            .get(order.id, input.stage),
+            .get(order.id, input.stage)),
           422,
           "Công đoạn đã chia phần việc: hãy chọn phần việc để đặt giá.",
         );
-        db.prepare(
-          "INSERT INTO order_rates VALUES (?,?,?) ON CONFLICT(order_id,stage) DO UPDATE SET unit_price=excluded.unit_price",
-        ).run(input.order_id, input.stage, input.unit_price);
-        audit(
+        await db
+          .prepare(
+            "INSERT INTO order_rates VALUES (?,?,?) ON CONFLICT(order_id,stage) DO UPDATE SET unit_price=excluded.unit_price",
+          )
+          .run(input.order_id, input.stage, input.unit_price);
+        await audit(
           ctx,
           "Cấu hình đơn giá",
           `${input.order_id} ${input.stage}: ${input.unit_price}`,

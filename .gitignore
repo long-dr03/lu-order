@@ -48,3 +48,7 @@ next-env.d.ts
 
 # Local QA screenshots and reports may contain business data
 /artifacts/
+
+# PostgreSQL full backups
+*.pg.json.gz
+*.dump

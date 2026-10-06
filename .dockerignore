@@ -2,4 +2,8 @@ node_modules
 .next
 .git
 *.db*
-.env*.local
+.env*
+backups
+artifacts
+*.pg.json.gz
+*.dump

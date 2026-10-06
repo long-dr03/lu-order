@@ -24,7 +24,7 @@ export interface PendingPacking {
   total_pay: number | null;
   settled_log_id: number | null;
 }
-export function pendingPackingFor(ctx: Context) {
+export async function pendingPackingFor(ctx: Context) {
   ensure(
     hasPermission(ctx.user, "production.view") ||
       hasPermission(ctx.user, "payroll.view"),
@@ -32,11 +32,11 @@ export function pendingPackingFor(ctx: Context) {
     "Không có quyền xem công chờ đối chiếu.",
   );
   return (
-    db
+    (await db
       .prepare(
         "SELECT id,order_id,employee_id,employee_name,product_name,line_id,color,size,work_date,quantity,unit_price,total_pay,settled_log_id FROM pending_packing_pay WHERE settled_log_id IS NULL ORDER BY work_date,id",
       )
-      .all() as PendingPacking[]
+      .all()) as PendingPacking[]
   )
     .filter(
       (p) =>
@@ -65,13 +65,13 @@ export const settlementSchema = z
     reason: z.string().trim().min(5).max(1000),
   })
   .strict();
-export function settlePacking(
+export async function settlePacking(
   ctx: Context,
   input: z.infer<typeof settlementSchema>,
 ) {
-  const p = db
+  const p = (await db
     .prepare("SELECT * FROM pending_packing_pay WHERE id=?")
-    .get(input.id) as PendingPacking | undefined;
+    .get(input.id)) as PendingPacking | undefined;
   ensure(p, 404, "Không tìm thấy công chờ đối chiếu.");
   requirePermission(ctx, "payroll.adjust", { lineId: p.line_id });
   requirePermission(ctx, "payroll.view", {
@@ -89,31 +89,31 @@ export function settlePacking(
     "Ngày hạch toán phải từ ngày làm việc đến hôm nay.",
   );
   ensure(
-    !db
+    !(await db
       .prepare("SELECT 1 FROM payroll_locks WHERE month=?")
-      .get(input.pay_date.slice(0, 7)),
+      .get(input.pay_date.slice(0, 7))),
     409,
     "Kỳ lương đã khóa. Chọn ngày hạch toán trong kỳ còn mở.",
   );
-  const order = getOrderById(p.order_id);
+  const order = await getOrderById(p.order_id);
   ensure(order, 404, "Không tìm thấy đơn.");
   const variant = order.variants?.find(
     (v) => v.color === p.color && v.size === p.size,
   );
   ensure(variant, 422, "Không tìm thấy màu–size.");
   const paid = (
-    db
+    (await db
       .prepare(
         "SELECT COALESCE(SUM(quantity),0) n FROM production_logs WHERE order_id=? AND color=? AND size=? AND stage='Đóng gói'",
       )
-      .get(p.order_id, p.color, p.size) as { n: number }
+      .get(p.order_id, p.color, p.size)) as { n: number }
   ).n;
   const pending = (
-    db
+    (await db
       .prepare(
         "SELECT COALESCE(SUM(quantity),0) n FROM pending_packing_pay WHERE order_id=? AND color=? AND size=? AND settled_log_id IS NULL",
       )
-      .get(p.order_id, p.color, p.size) as { n: number }
+      .get(p.order_id, p.color, p.size)) as { n: number }
   ).n;
   ensure(
     paid + pending <= variant.packed_qty,
@@ -121,16 +121,16 @@ export function settlePacking(
     "Công đóng gói không khớp số đã xử lý; cần đối chiếu dữ liệu trước.",
   );
   const total = (
-    db
+    (await db
       .prepare("SELECT COALESCE(SUM(total_pay),0) n FROM production_logs")
-      .get() as { n: number }
+      .get()) as { n: number }
   ).n;
   ensure(
     p.total_pay !== null && Number.isSafeInteger(total + p.total_pay),
     422,
     "Tổng tiền vượt khả năng tính chính xác.",
   );
-  const log = db
+  const log = await db
     .prepare(
       "INSERT INTO production_logs(log_date,employee_id,employee_name,line_id,order_id,product_name,color,size,stage,quantity,unit_price,total_pay,updated_by,month,completed_quantity) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
     )
@@ -152,11 +152,15 @@ export function settlePacking(
       0,
     );
   const logId = Number(log.lastInsertRowid);
-  db.prepare(
-    "UPDATE pending_packing_pay SET settled_log_id=?,settlement_reason=?,settled_at=CURRENT_TIMESTAMP WHERE id=?",
-  ).run(logId, input.reason, p.id);
-  db.prepare("UPDATE orders SET version=version+1 WHERE id=?").run(p.order_id);
-  audit(
+  await db
+    .prepare(
+      "UPDATE pending_packing_pay SET settled_log_id=?,settlement_reason=?,settled_at=to_char(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh','YYYY-MM-DD HH24:MI:SS') WHERE id=?",
+    )
+    .run(logId, input.reason, p.id);
+  await db
+    .prepare("UPDATE orders SET version=version+1 WHERE id=?")
+    .run(p.order_id);
+  await audit(
     ctx,
     "Đối chiếu công đóng gói",
     `Khoản ${p.id}: ${p.order_id} ${p.employee_name} ${p.quantity} sản phẩm; ngày làm ${p.work_date}; ngày hạch toán ${input.pay_date}; đơn giá giữ nguyên ${p.unit_price}; lý do ${input.reason}; bản ghi công ${logId}`,

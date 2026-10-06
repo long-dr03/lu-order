@@ -20,10 +20,12 @@ import {
 import { permits } from "@/lib/permissions";
 import { today } from "@/lib/server/validation";
 import type { OrderVariant } from "@/lib/types";
+import { initializeDatabase } from "@/lib/server/migrate";
 
 export async function GET(request: Request) {
   try {
-    const ctx = authenticate(request);
+    await initializeDatabase();
+    const ctx = await authenticate(request);
     requirePermission(ctx, "export.data");
     const f: Filters = queryFilters(request);
     const dataset =
@@ -78,11 +80,11 @@ export async function GET(request: Request) {
       });
       return ws;
     };
-    const exportableOrders = (
+    const exportableOrders = async (
       permission: "orders.view" | "qc.view" | "delivery.view",
     ) =>
       filterOrders(
-        visibleOrders(ctx, permission).filter((o) =>
+        (await visibleOrders(ctx, permission)).filter((o) =>
           permits(ctx.user, "export.data", { lineId: o.line_id }),
         ),
         f,
@@ -90,7 +92,7 @@ export async function GET(request: Request) {
     if (dataset === "orders" || dataset === "delivery") {
       const permission = dataset === "orders" ? "orders.view" : "delivery.view";
       requirePermission(ctx, permission);
-      const orders = exportableOrders(permission);
+      const orders = await exportableOrders(permission);
       sheet(
         "Đơn hàng",
         [
@@ -151,11 +153,11 @@ export async function GET(request: Request) {
         ),
       );
       const records = (
-        db
+        (await db
           .prepare(
             "SELECT r.*,COALESCE(e.name,a.name) worker_name FROM operation_records r LEFT JOIN employees e ON e.id=r.worker_id LEFT JOIN accounts a ON a.id=COALESCE(r.represented_id,r.actor_id) ORDER BY r.operation_date,r.id",
           )
-          .all() as {
+          .all()) as {
           order_id: string;
           operation_date: string;
           action: string;
@@ -203,7 +205,7 @@ export async function GET(request: Request) {
       );
     } else if (dataset === "qc") {
       requirePermission(ctx, "qc.view");
-      const orders = exportableOrders("qc.view");
+      const orders = await exportableOrders("qc.view");
       sheet(
         "QC",
         [
@@ -219,7 +221,7 @@ export async function GET(request: Request) {
           "Đạt lại",
           "Người kiểm",
         ],
-        qcFor(ctx)
+        (await qcFor(ctx))
           .filter(
             (q) =>
               orders.some((o) => o.id === q.order_id) &&
@@ -246,10 +248,12 @@ export async function GET(request: Request) {
       const permission =
         dataset === "payroll" ? "payroll.view" : "production.view";
       requirePermission(ctx, permission);
-      const logs = filterLogs(logsFor(ctx, permission), {
-        ...f,
-        month: f.month || (f.from || f.to ? undefined : today().slice(0, 7)),
-      }).filter((l) =>
+      const logs = (
+        await filterLogs(await logsFor(ctx, permission), {
+          ...f,
+          month: f.month || (f.from || f.to ? undefined : today().slice(0, 7)),
+        })
+      ).filter((l) =>
         permits(ctx.user, "export.data", {
           employeeId: l.employee_id,
           lineId: l.line_id,
@@ -334,9 +338,9 @@ export async function GET(request: Request) {
       }
       const permittedIds = new Set(logs.map((l) => l.id));
       const corrections = (
-        db
+        (await db
           .prepare("SELECT * FROM production_adjustments ORDER BY id")
-          .all() as {
+          .all()) as {
           log_id: number;
           before_json: string;
           after_json: string;
@@ -386,7 +390,7 @@ export async function GET(request: Request) {
       );
       if (dataset === "payroll") {
         const ids = new Set(logs.map((l) => l.employee_id));
-        const p = payrollFor(ctx, f);
+        const p = await payrollFor(ctx, f);
         sheet(
           "Tổng hợp lương",
           [
@@ -411,7 +415,11 @@ export async function GET(request: Request) {
       }
     }
     const buffer = await workbook.xlsx.writeBuffer();
-    audit(ctx, "Xuất Excel", `${dataset}, ${f.month || today().slice(0, 7)}`);
+    await audit(
+      ctx,
+      "Xuất Excel",
+      `${dataset}, ${f.month || today().slice(0, 7)}`,
+    );
     return new Response(new Uint8Array(buffer), {
       headers: {
         "Content-Type":

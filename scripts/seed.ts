@@ -1,17 +1,19 @@
 import { loadEnvConfig } from "@next/env";
 loadEnvConfig(process.cwd());
 async function main() {
+  const { initializeDatabase } = await import("../src/lib/server/migrate");
+  await initializeDatabase();
   const { db } = await import("../src/lib/db");
   try {
     const { seedSampleData } = await import("./sample-data");
-    seedSampleData();
+    await seedSampleData();
     const { migrate } = await import("../src/lib/server/migrate");
-    migrate();
+    await migrate();
     console.log(
-      "Dữ liệu mẫu đã seed vào SQLite; dữ liệu đang có được giữ nguyên.",
+      "Dữ liệu mẫu đã seed vào PostgreSQL; dữ liệu đang có được giữ nguyên.",
     );
   } finally {
-    db.close();
+    await db.close();
   }
 }
 main().catch(() => {

@@ -1,44 +1,56 @@
-# LUUTA — quản lý xưởng may trên local
+# LUUTA — quản lý xưởng may
 
-Next.js 16, React 19, TypeScript và SQLite. Giao diện Arial, màu trắng–xám, icon Lucide, Radix Dialog, Motion và Kanban dnd-kit. Chưa triển khai hoặc đẩy thay đổi này lên GitHub.
+Next.js 16, React 19, TypeScript và PostgreSQL. Giao diện Arial, trắng–xám, Lucide, Radix Dialog và Kanban dnd-kit.
 
-## Chạy ứng dụng
+## Chạy local và triển khai
 
-Yêu cầu Node.js 22 trở lên.
+Yêu cầu Node.js 22+ và PostgreSQL 17+. Tạo database riêng cho ứng dụng. Cấu hình trong `.env.local` (không commit):
+
+```dotenv
+DATABASE_URL=postgresql://<user>:<password>@127.0.0.1:5432/luuta
+APP_ORIGIN=http://localhost:3002
+SESSION_COOKIE_SECURE=false
+BACKUP_DIR=./backups
+```
 
 ```bash
-npm install
-npm run backup     # Khi đã có database, trước khi nâng phiên bản
-npm run seed      # Tùy chọn: seed mẫu vào SQLite trống, không ghi đè DB hiện có
-npm run bootstrap # Chỉ khởi tạo admin lần đầu
+npm ci
+npm run bootstrap # Chỉ khi database trống và đã cấu hình INITIAL_ADMIN_USERNAME / INITIAL_ADMIN_PASSWORD
+npm run seed      # Tùy chọn dữ liệu mẫu; không chạy trên production đang có dữ liệu
 npm run build
 npm run start -- --port 3002
 ```
 
-Mở http://localhost:3002. Server chỉ lắng nghe trên 127.0.0.1. Phát triển bằng `npm run dev -- --port 3002`.
+`bootstrap` không ghi đè tài khoản. Xóa hai biến `INITIAL_ADMIN_*` sau khi khởi tạo. Khi nhập database cũ, giữ nguyên tài khoản/mật khẩu và không bootstrap lại.
 
-Tạo `.env.local` ở thư mục dự án, không commit file này:
+Docker chạy Next.js trên `0.0.0.0:3000` để proxy truy cập được; lệnh local vẫn dùng `127.0.0.1`. Trong Dokploy: service PostgreSQL có volume riêng, không publish cổng database; ứng dụng dùng `DATABASE_URL` nội bộ, `APP_ORIGIN=https://luu-order.wtfdev.qzz.io`, `SESSION_COOKIE_SECURE=true`, `BACKUP_DIR=/app/backups` và volume `/app/backups`. Không đưa `.env`, database hoặc backup vào image/Git. Đặt 1 replica ứng dụng trong giai đoạn đầu.
 
-```dotenv
-DATABASE_PATH=lu_order.db
-INITIAL_ADMIN_USERNAME=admin
-INITIAL_ADMIN_PASSWORD=<mật khẩu admin ban đầu đã chọn, tối thiểu 10 ký tự>
-SESSION_COOKIE_SECURE=false
+## Migration, chuyển SQLite và backup
+
+Runtime chỉ dùng PostgreSQL qua `pg` bất đồng bộ. Migration 1–10 chạy trong transaction có khóa chung; nhiều tiến trình khởi động không chạy trùng. Thao tác ghi nghiệp vụ dùng cùng connection và advisory lock để bảo toàn kiểm tra số lượng, chốt lương, phiên bản và idempotency. Đọc dữ liệu dùng connection pool. Tiền/ID lớn được kiểm tra giới hạn chính xác của JavaScript.
+
+Dừng ghi ở nguồn trước khi chuyển dữ liệu. Tạo bản sao SQLite bằng Online Backup (bao gồm WAL), rồi xuất chỉ đọc và nhập vào **database PostgreSQL trống**:
+
+```bash
+npm run db:export-sqlite -- /path/source-snapshot.db /private/transfer.pg.json.gz
+DATABASE_URL=postgresql://... npm run db:restore -- /private/transfer.pg.json.gz
 ```
 
-Có thể đặt `APP_ORIGIN=http://localhost:3002` để cố định Origin; nếu đặt, phải trùng chính xác địa chỉ truy cập, kể cả port. Khi không đặt, server dùng origin của request. HTTPS với `APP_ORIGIN=https://...` tự bật cookie Secure; có thể bật bằng `SESSION_COOKIE_SECURE=true`.
+Công cụ giữ ID, tài khoản/hash mật khẩu, ảnh, lương lịch sử, quyền, audit và đặt lại sequence. Từ chối ghi đè database có tài khoản/đơn/sản lượng. Bất kỳ lỗi nào đều rollback. Đối chiếu số dòng từng bảng, tổng lương và ảnh trước khi đổi ứng dụng; giữ database nguồn để rollback.
 
-Admin đầu tiên đã được khởi tạo cho database local hiện tại bằng thông tin người dùng cung cấp. Mật khẩu không có trong mã nguồn hoặc tài liệu. `bootstrap` ghi dấu thiết lập trong SQLite, không tự tạo lại admin hoặc ghi đè mật khẩu khi chạy lại. Sau khi khởi tạo có thể xóa hai biến `INITIAL_ADMIN_*` khỏi cấu hình local.
+`npm run backup` tạo snapshot đầy đủ `LUUTA-*.pg.json.gz` trong transaction chỉ đọc repeatable-read, cùng file `LUUTA-*.json.gz` nghiệp vụ theo khoảng ngày. Snapshot đầy đủ chứa tài khoản/hash và ảnh, phải bảo quản riêng; file theo ngày không thay thế snapshot. Khôi phục bằng `npm run db:restore -- <snapshot>` vào database mới, kiểm tra trước khi đổi `DATABASE_URL`. Không chép đè dữ liệu đang chạy. Snapshot PostgreSQL định dạng LUUTA này dùng công cụ restore của dự án, không phải file dành cho `pg_restore`.
 
-## Migration và bảo toàn dữ liệu
+Sao lưu theo lịch chạy khi ứng dụng đang hoạt động. Volume bảo vệ qua redeploy; nên tải bản sao ra máy khác để bảo vệ khi mất cả server. `pg_dump`/`pg_restore` cũng dùng được cho backup quản trị PostgreSQL.
 
-Migration phiên bản 1 trong `src/lib/server/migrate.ts` tự chạy khi server truy cập lớp xác thực. Toàn bộ migration chạy trong transaction và được ghi vào `schema_migrations`. Bổ sung tài khoản, session, vai trò, quyền, đơn giá, phiên bản đơn, idempotency và bộ đếm QC. Không thay đổi sản lượng, đơn giá hoặc thành tiền lịch sử. Đơn giá hiện hành ban đầu lấy từ bản ghi sản lượng mới nhất cho từng đơn/công đoạn; đơn chưa có giá phải được quản lý cấu hình trước khi nhập sản lượng.
+## Kiểm thử PostgreSQL
 
-`npm run backup` dùng SQLite Online Backup để sao lưu cả dữ liệu trong WAL vào `backups/*.db`, không chỉ sao chép file chính. Các file database, backup và `.env*` được Git bỏ qua. Khi khôi phục: dừng mọi server, giữ bản sao database hiện tại, thay file ở `DATABASE_PATH` bằng backup và loại bỏ WAL/SHM cũ trước khi khởi động. Chỉ khôi phục vào đường dẫn đang cấu hình, tránh chạy nhầm database.
+Cung cấp `TEST_DATABASE_URL` tới PostgreSQL riêng cho kiểm thử, với quyền tạo/xóa database. Bộ test tự tạo database ngẫu nhiên và database restore, rồi xóa chúng; không dùng database ứng dụng:
 
-Database chưa có dữ liệu được khởi tạo bằng bộ dữ liệu nghiệp vụ mẫu kế thừa của dự án. Không tạo tài khoản đăng nhập mẫu trong database thật.
-
-Migration phiên bản 2 thêm `product_images` để lưu ảnh sản phẩm trong SQLite. Không thay dữ liệu đơn/lương cũ. Ảnh theo cùng database và được đưa vào bản sao lưu `npm run backup`.
+```bash
+TEST_DATABASE_URL=postgresql://<test-user>:<test-password>@localhost:5432/postgres npm test
+npm run lint
+npm run build
+```
 
 ## Ảnh sản phẩm
 
@@ -65,7 +77,7 @@ Admin có thể khóa/mở tài khoản, đặt mật khẩu tạm. Mật khẩu
 
 ## Bảo mật
 
-Mật khẩu scrypt có salt riêng; SQLite chỉ lưu hash token session ngẫu nhiên. Cookie HttpOnly/SameSite=Lax, thời hạn 24 giờ, không lưu xác thực trong localStorage. Mọi API xác thực và kiểm tra phạm vi server; thao tác ghi kiểm tra Origin/CSRF, schema Zod, SQL có tham số, giới hạn body và số lần đăng nhập/đăng ký. CSP nonce và các header hạn chế nhúng trang được bật. Không đưa lỗi SQLite hoặc hash mật khẩu vào phản hồi client.
+Mật khẩu scrypt có salt riêng; PostgreSQL chỉ lưu hash token session ngẫu nhiên. Cookie HttpOnly/SameSite=Lax, thời hạn 24 giờ, không lưu xác thực trong localStorage. Mọi API xác thực và kiểm tra phạm vi server; thao tác ghi kiểm tra Origin/CSRF, schema Zod, SQL có tham số, giới hạn body và số lần đăng nhập/đăng ký. CSP nonce và các header hạn chế nhúng trang được bật. Không đưa lỗi PostgreSQL hoặc hash mật khẩu vào phản hồi client.
 
 `npm audit --omit=dev` hiện có 0 lỗ hổng. Audit đầy đủ còn 5 cảnh báo high trong chuỗi công cụ lint `eslint-config-next → @next/eslint-plugin-next → fast-glob → micromatch → braces`; chưa có bản sửa tương thích ở phiên bản hiện tại. Không hạ Next.js xuống 14 theo gợi ý tự động của npm. Phần này thuộc dependency phát triển, cần theo dõi khi nâng công cụ lint. Bản local này chưa được kiểm toán bảo mật độc lập.
 
@@ -79,28 +91,28 @@ npm run build
 npm audit --omit=dev
 ```
 
-33 kiểm thử dùng database tạm riêng rồi xóa sau chạy: migration/lương lịch sử, đăng ký và duyệt, hạn session, rate limit, Origin/CSRF, đổi/reset mật khẩu và khóa, đọc API trực tiếp, đổi ID nhân viên/chuyền, giả mạo đơn giá, nhiều vai trò, phạm vi quản trị, thứ bậc, đại diện/audit, QC nhiều vòng, giao thiếu, phiên bản cạnh tranh, gửi lặp và tháng khóa. File Excel được đọc lại bằng ExcelJS và đối chiếu tổng sản lượng/tiền với SQLite.
+63 kiểm thử dùng database tạm riêng rồi xóa sau chạy: migration/lương lịch sử, đăng ký và duyệt, hạn session, rate limit, Origin/CSRF, đổi/reset mật khẩu và khóa, đọc API trực tiếp, đổi ID nhân viên/chuyền, giả mạo đơn giá, nhiều vai trò, phạm vi quản trị, thứ bậc, đại diện/audit, QC nhiều vòng, giao thiếu, phiên bản cạnh tranh, gửi lặp và tháng khóa. File Excel được đọc lại bằng ExcelJS và đối chiếu tổng sản lượng/tiền với PostgreSQL.
 
-Ảnh kiểm tra giao diện nằm trong `artifacts/`. Logo vector trong `public/logo.svg`, favicon/Apple Touch trong `src/app/`. Màn hình được kiểm tra tại 390, 768, 1024, 1366 và 1920px; modal/drawer hỗ trợ Escape và trả focus, animation tôn trọng reduced motion.
+Ảnh kiểm tra giao diện nằm trong `artifacts/`. Logo vector trong `public/logo.svg`, favicon/Apple Touch trong `src/app/`. Checklist giao diện bao gồm 390, 768, 1024, 1366 và 1920px; modal/drawer hỗ trợ Escape và trả focus, animation tôn trọng reduced motion.
 
 ## Màu, size, mã và số tiền
 
-Màu có tên/mã vải, màu phổ biến, bảng chọn tùy ý, HEX và RGB. HEX được lưu trong SQLite cùng biến thể. Size có gợi ý nhưng cho nhập tự do tối đa 40 ký tự. Mã đơn và sản phẩm tự điền, có thể sửa trước khi tạo; mã sản phẩm sửa được ở chi tiết. Mã đơn đã lưu là định danh liên kết nghiệp vụ nên giữ cố định. Mã đơn trùng trả 409. Đơn giá VND nhập số nguyên, tự nhóm mỗi 3 chữ số; chọn cách hiển thị 1.000 hoặc 1,000. Server nhận số, không nhận chuỗi đã định dạng.
+Màu có tên/mã vải, màu phổ biến, bảng chọn tùy ý, HEX và RGB. HEX được lưu trong PostgreSQL cùng biến thể. Size có gợi ý nhưng cho nhập tự do tối đa 40 ký tự. Mã đơn và sản phẩm tự điền, có thể sửa trước khi tạo; mã sản phẩm sửa được ở chi tiết. Mã đơn đã lưu là định danh liên kết nghiệp vụ nên giữ cố định. Mã đơn trùng trả 409. Đơn giá VND nhập số nguyên, tự nhóm mỗi 3 chữ số; chọn cách hiển thị 1.000 hoặc 1,000. Server nhận số, không nhận chuỗi đã định dạng.
 
-## SQLite và seed
+## PostgreSQL và seed
 
-Tất cả màn hình lấy dữ liệu thật qua API và SQLite. Không có mảng mock nghiệp vụ trong client. Dữ liệu ví dụ nằm riêng ở `scripts/sample-data.ts`, chỉ dùng khi chạy `npm run seed` hoặc tạo database kiểm thử. Seed là transaction, chỉ chạy khi bảng chuyền trống; chạy lại không tạo bản ghi lặp hoặc xóa dữ liệu. Database local hiện tại được giữ nguyên, không reset đơn/sản lượng/lương đã nhập.
+Tất cả màn hình lấy dữ liệu thật qua API và PostgreSQL. Không có mảng mock nghiệp vụ trong client. Dữ liệu ví dụ nằm riêng ở `scripts/sample-data.ts`, chỉ dùng khi chạy `npm run seed` hoặc tạo database kiểm thử. Seed là transaction, chỉ chạy khi bảng chuyền trống; chạy lại không tạo bản ghi lặp hoặc xóa dữ liệu. Database local hiện tại được giữ nguyên, không reset đơn/sản lượng/lương đã nhập.
 
 ## Lịch sao lưu
 
-Admin mở **Sao lưu**, bật lịch và chọn chu kỳ theo giờ (1–8760), số ngày nghiệp vụ gần nhất (1–3650). Mặc định lịch tắt, gợi ý 24 giờ / 30 ngày. **Sao lưu ngay** tạo hai file trong `backups/` cạnh database:
+Admin mở **Sao lưu**, bật lịch và chọn chu kỳ theo giờ (1–8760), số ngày nghiệp vụ gần nhất (1–3650). Mặc định lịch tắt, gợi ý 24 giờ / 30 ngày. **Sao lưu ngay** tạo hai file trong thư mục `BACKUP_DIR`:
 
-- `.db`: snapshot nhất quán toàn bộ SQLite, bao gồm ảnh, tài khoản, quyền và dữ liệu lịch sử.
+- `.pg.json.gz`: snapshot nhất quán toàn bộ PostgreSQL, bao gồm ảnh, tài khoản, quyền và dữ liệu lịch sử.
 - `.json.gz`: JSON nén nghiệp vụ theo ngày nhận đơn, ngày sản lượng hoặc ngày QC; lấy thêm đơn/biến thể/công đoạn/đơn giá/ảnh liên quan và danh mục chuyền, nhân viên. Gồm lịch sử từng lần xử lý, đóng gói/giao hàng, hồ sơ công đoạn và điều chỉnh tiền công; các bộ đếm biến thể là lũy kế tại thời điểm snapshot. File này không chứa hash mật khẩu hoặc session.
 
 Ngày lọc theo múi giờ Việt Nam, gồm cả hai đầu khoảng. Scheduler chạy trong server local, kiểm tra mỗi phút; khi mở lại sau hạn sẽ chạy bù một lần. Không thể tự tải vào Downloads khi trình duyệt đóng: bản sao được lưu local, admin dùng **Tải file** để chuyển sang nơi lưu trữ khác. Chỉ Admin, ngoài chế độ đại diện, được cấu hình hoặc tải backup. Bản sao có quyền file 600. Không tự xóa bản sao cũ. Nếu thất bại, màn hình ghi lỗi và lịch thử lại sau 5 phút.
 
-Khôi phục: dừng server, sao lưu database hiện tại, chép bản `.db` đã chọn vào đúng `DATABASE_PATH`, loại bỏ file WAL/SHM cũ của database đã dừng rồi khởi động lại. Snapshot chứa dữ liệu xác thực, chỉ lưu ở nơi admin kiểm soát.
+Khôi phục: dùng `npm run db:restore -- <file.pg.json.gz>` với `DATABASE_URL` trỏ tới database mới, đối chiếu rồi chuyển ứng dụng sang database đó. Snapshot chứa dữ liệu xác thực, chỉ lưu ở nơi admin kiểm soát.
 
 ## Bước sản xuất và tổ phụ trách
 
@@ -130,7 +142,7 @@ Kiểm thử mới đối chiếu rủi ro, hồ sơ công đoạn, xử lý sau
 
 Khi tạo đơn, mỗi dòng màu–size có **Thêm màu phối trên cùng sản phẩm**, tối đa 8 màu. Ví dụ Đen / Trắng là một biến thể của một chiếc áo; số lượng, sản lượng và tiền công không nhân theo số màu. Tên phối màu/mã vải tự ghép từ các màu, có thể chỉnh. Các phối màu khác nhau là các dòng biến thể riêng.
 
-Mỗi màu có vùng kéo chọn độ bão hòa/độ sáng, thanh sắc màu, bảng màu sẵn và HEX/RGBA luôn hiển thị và điều chỉnh bằng bàn phím, nút Áp dụng/Hủy để thử màu trước khi xác nhận. Hoạt động bằng chuột và cảm ứng. Migration 6 thêm `colors_json`; màu cũ và tiền công giữ nguyên. Các chấm màu phối hiển thị trong chi tiết đơn; Excel thêm cột các màu phối, backup SQLite/JSON giữ thông tin này.
+Mỗi màu có vùng kéo chọn độ bão hòa/độ sáng, thanh sắc màu, bảng màu sẵn và HEX/RGBA luôn hiển thị và điều chỉnh bằng bàn phím, nút Áp dụng/Hủy để thử màu trước khi xác nhận. Hoạt động bằng chuột và cảm ứng. Migration 6 thêm `colors_json`; màu cũ và tiền công giữ nguyên. Các chấm màu phối hiển thị trong chi tiết đơn; Excel thêm cột các màu phối, backup PostgreSQL/JSON giữ thông tin này.
 
 Bảng chọn theo mẫu: rộng 364px trên desktop, mặt phẳng màu cao 232px, thanh sắc màu và alpha, ô HEX/R/G/B/A. A là độ đục 0–100%, mặc định 100%; được lưu trong phối màu, đưa vào Excel và backup. Palette có sẵn mở bằng icon. Hủy/Escape bỏ màu đang thử, trả focus về nút chọn; Escape chỉ đóng bảng màu, giữ hộp tạo đơn.
 
@@ -144,9 +156,9 @@ Chạy `npm run seed:accounts` để bổ sung một tài khoản cho các vai t
 
 ## QA hệ thống và đối chiếu dữ liệu
 
-`npm test` chạy bộ hồi quy trên SQLite tạm riêng, gồm đủ 6 vai trò, luồng sản xuất nhiều màu–size, QC/sửa/QC lại, giao từng phần, chốt lương/Excel và khôi phục snapshot vào database khác. Test restore mở tiến trình Node riêng; môi trường sandbox phải cho phép tiến trình con. `npm run qa:data` chỉ đọc database đã cấu hình và xuất `artifacts/data-integrity-report.json`; không tự sửa bất nhất lịch sử. Checklist, test case và kết quả nằm trong `artifacts/verification.md`, `artifacts/qa-test-cases.json`, `artifacts/qa-test-results.txt`. File báo cáo dữ liệu chứa thông tin nghiệp vụ local; xem xét trước khi chia sẻ.
+`npm test` chạy bộ hồi quy trên PostgreSQL tạm riêng, gồm đủ 6 vai trò, luồng sản xuất nhiều màu–size, QC/sửa/QC lại, giao từng phần, chốt lương/Excel và khôi phục snapshot vào database khác. Test restore mở tiến trình Node riêng; môi trường sandbox phải cho phép tiến trình con. `npm run qa:data` chỉ đọc database đã cấu hình và xuất `artifacts/data-integrity-report.json`; không tự sửa bất nhất lịch sử. Checklist, test case và kết quả nằm trong `artifacts/verification.md`, `artifacts/qa-test-cases.json`, `artifacts/qa-test-results.txt`. File báo cáo dữ liệu chứa thông tin nghiệp vụ local; xem xét trước khi chia sẻ.
 
-Khôi phục backup phải dùng file `.db` đầy đủ, thử trên đường dẫn database mới và đối chiếu trước; file `.json.gz` theo thời gian phục vụ lưu trữ nghiệp vụ, không thay thế snapshot toàn bộ. Không chép đè database khi server đang chạy. Bộ test khôi phục đối chiếu toàn bộ bảng, integrity, ảnh, tiền công và quyền rồi đọc lại API trong tiến trình mới.
+Khôi phục backup phải dùng file `.pg.json.gz` đầy đủ, thử trên database PostgreSQL mới và đối chiếu trước; file `.json.gz` theo thời gian phục vụ lưu trữ nghiệp vụ, không thay thế snapshot toàn bộ. Không chép đè database khi server đang chạy. Bộ test khôi phục đối chiếu toàn bộ bảng, integrity, ảnh, tiền công và quyền rồi đọc lại API trong tiến trình mới.
 
 ## Hồ sơ cá nhân và điều chuyển
 
@@ -162,7 +174,7 @@ Nhân viên trong chuyền chọn Ghi nhận công việc, chọn phần việc,
 
 Danh mục phần việc không đổi sau khi đã có sản lượng để tránh làm sai tiến độ/lịch sử. Đơn giá vẫn chỉnh được cho lần ghi tiếp theo; tiền công đã lưu giữ nguyên. Đơn cũ không chia phần việc tiếp tục ghi toàn công đoạn như trước, vẫn cho nhiều người chia nhau số lượng. Người phụ trách theo dõi đơn, không phải người duy nhất được làm. Chi tiết đơn và thẻ Công việc hiển thị tiến độ từng phần; lịch sử/Excel ghi tên phần việc. Lượt công việc và sản phẩm hoàn thành là hai số khác nhau.
 
-Migration 7 thêm order_work_items và các cột phần việc/sản phẩm hoàn thành vào production_logs, không sửa lương hoặc số lượng cũ. Snapshot SQLite và archive JSON chứa danh mục cùng lịch sử phần việc. QA đối chiếu Cắt/May, nhiều người, gửi lặp, phiên bản cũ, khóa tháng, sửa số lượng và dữ liệu Excel/backup trên SQLite riêng.
+Migration 7 thêm order_work_items và các cột phần việc/sản phẩm hoàn thành vào production_logs, không sửa lương hoặc số lượng cũ. Snapshot PostgreSQL và archive JSON chứa danh mục cùng lịch sử phần việc. QA đối chiếu Cắt/May, nhiều người, gửi lặp, phiên bản cũ, khóa tháng, sửa số lượng và dữ liệu Excel/backup trên PostgreSQL riêng.
 
 ## Nhân viên hỗ trợ nhiều chuyền
 
@@ -206,10 +218,12 @@ Xem [kế hoạch QA, checklist QC và 36 ca nghiệm thu UX](artifacts/verifica
 
 Nhân viên vẫn dùng “Xác nhận đóng gói và ghi công”. Nếu ngày làm thuộc tháng đã khóa, hệ thống lưu tiến độ đóng gói và khoản **Công đóng gói chờ đối chiếu**, không ghi thêm lương vào tháng khóa. Ngày làm, người/chuyền, số lượng và đơn giá tại lúc đóng gói được giữ nguyên. Không cần đổi sang tài khoản quản lý để xác nhận hàng.
 
-Tại Sản lượng hoặc Lương sản phẩm, nhân viên thấy khoản chờ của mình; quản lý có quyền điều chỉnh và xem lương chọn **Đối chiếu tiền công**, tự chọn ngày hạch toán thuộc kỳ còn mở và nhập lý do. Không có ngày hạch toán tự điền để tránh tự chuyển kỳ. Lưu một lần, giữ lịch sử ngày gốc và không cộng lại số đóng gói. Khoản chờ không được nhận công lần nữa qua chức năng bổ sung công cũ; lương đã khóa không bị mở lại. Tiền chờ chưa nằm trong tổng lương/Excel lương cho tới khi đối chiếu; backup SQLite và JSON nghiệp vụ có lưu khoản này.
+Tại Sản lượng hoặc Lương sản phẩm, nhân viên thấy khoản chờ của mình; quản lý có quyền điều chỉnh và xem lương chọn **Đối chiếu tiền công**, tự chọn ngày hạch toán thuộc kỳ còn mở và nhập lý do. Không có ngày hạch toán tự điền để tránh tự chuyển kỳ. Lưu một lần, giữ lịch sử ngày gốc và không cộng lại số đóng gói. Khoản chờ không được nhận công lần nữa qua chức năng bổ sung công cũ; lương đã khóa không bị mở lại. Tiền chờ chưa nằm trong tổng lương/Excel lương cho tới khi đối chiếu; backup PostgreSQL và JSON nghiệp vụ có lưu khoản này.
 
 Hồi quy mới nhất: 59/59 test, lint/build/TypeScript đạt; UX-BUG-003 sửa và xác minh tự động, còn chờ nghiệm thu trình duyệt. Database local đã có snapshot trước migration.
 
 ## Bố cục Lương sản phẩm / Sản lượng
 
 Thanh lọc chính và lọc phụ đóng/mở nằm trên; tiếp theo là lượt công, tiền đã ghi nhận và số lần ghi nhận. Bảng nhân viên/chi tiết ở cột chính, công chờ và điều chỉnh ở cột bên theo quyền. Click tên nhân viên lọc chi tiết người đó. Các bảng phân trang 25 dòng, nhóm báo cáo cộng dữ liệu một lượt; công chờ/điều chỉnh 5 mục/trang, điều chỉnh có tìm kiếm. Export không bị giới hạn theo trang. Bố cục xếp xuống hàng trên màn hình nhỏ, giữ Arial/sans và chữ dễ đọc; không tạo số phần trăm tăng trưởng hoặc cảnh báo lỗi khi chưa có dữ liệu tương ứng.
+
+Hướng dẫn triển khai và khôi phục PostgreSQL: [docs/postgresql-deployment.md](docs/postgresql-deployment.md).

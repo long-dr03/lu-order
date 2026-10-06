@@ -6,6 +6,8 @@ import path from "node:path";
 loadEnvConfig(process.cwd());
 
 async function main() {
+  const { initializeDatabase } = await import("../src/lib/server/migrate");
+  await initializeDatabase();
   const { db } = await import("../src/lib/db");
   const { hashPassword, verifyPassword, randomUUID } =
     await import("../src/lib/server/auth");
@@ -35,12 +37,19 @@ async function main() {
   );
   const created: string[] = [];
   try {
-    const planned = definitions.filter(
-      (definition) =>
-        !db
-          .prepare("SELECT 1 FROM account_roles WHERE role_id=?")
-          .get(definition.role),
-    );
+    const planned = (
+      await Promise.all(
+        definitions.map(async (item) => ({
+          item,
+          keep: await (async (definition) =>
+            !(await db
+              .prepare("SELECT 1 FROM account_roles WHERE role_id=?")
+              .get(definition.role)))(item),
+        })),
+      )
+    )
+      .filter((row) => row.keep)
+      .map((row) => row.item);
     // Save credentials before inserting accounts, so they are recoverable locally.
     for (const definition of planned) {
       const key = `SEED_${definition.role.toUpperCase()}_PASSWORD`;
@@ -53,18 +62,22 @@ async function main() {
       writeFileSync(credentialPath, localConfig, { mode: 0o600 });
       chmodSync(credentialPath, 0o600);
     }
-    db.transaction(() => {
+    await db.transaction(async () => {
       for (const definition of planned) {
         if (
-          db
+          await db
             .prepare("SELECT 1 FROM account_roles WHERE role_id=?")
             .get(definition.role)
         )
           continue;
-        if (!db.prepare("SELECT 1 FROM roles WHERE id=?").get(definition.role))
+        if (
+          !(await db
+            .prepare("SELECT 1 FROM roles WHERE id=?")
+            .get(definition.role))
+        )
           throw new Error("Vai trò chưa tồn tại.");
         if (
-          db
+          await db
             .prepare("SELECT 1 FROM accounts WHERE username=?")
             .get(definition.username)
         )
@@ -78,37 +91,43 @@ async function main() {
           throw new Error("Không thể xác minh mật khẩu seed.");
         const id = randomUUID();
         const employeeId = `NV-SAMPLE-${definition.role.toUpperCase()}`;
-        const line = db
+        const line = (await db
           .prepare("SELECT id FROM lines ORDER BY id LIMIT 1")
-          .get() as { id: number } | undefined;
+          .get()) as { id: number } | undefined;
         if (!line)
           throw new Error("Cần có chuyền để liên kết hồ sơ nhân viên mẫu.");
-        const role = db
+        const role = (await db
           .prepare("SELECT name FROM roles WHERE id=?")
-          .get(definition.role) as { name: string };
-        db.prepare(
-          "INSERT INTO employees(id,name,line_id,role) VALUES (?,?,?,?)",
-        ).run(employeeId, definition.name, line.id, role.name);
-        db.prepare(
-          "INSERT INTO accounts(id,username,name,password_hash,status,employee_id,line_ids,must_change_password) VALUES (?,?,?,?,'active',?,?,0)",
-        ).run(
-          id,
-          definition.username,
-          definition.name,
-          hash,
-          employeeId,
-          JSON.stringify([line.id]),
-        );
-        db.prepare(
-          "INSERT INTO account_roles(account_id,role_id) VALUES (?,?)",
-        ).run(id, definition.role);
-        db.prepare(
-          "INSERT INTO audit_logs(user_name,action,details) VALUES (?,?,?)",
-        ).run(
-          "Thiết lập local",
-          "Seed tài khoản mẫu",
-          `${definition.username}: ${definition.role}`,
-        );
+          .get(definition.role)) as { name: string };
+        await db
+          .prepare(
+            "INSERT INTO employees(id,name,line_id,role) VALUES (?,?,?,?)",
+          )
+          .run(employeeId, definition.name, line.id, role.name);
+        await db
+          .prepare(
+            "INSERT INTO accounts(id,username,name,password_hash,status,employee_id,line_ids,must_change_password) VALUES (?,?,?,?,'active',?,?,0)",
+          )
+          .run(
+            id,
+            definition.username,
+            definition.name,
+            hash,
+            employeeId,
+            JSON.stringify([line.id]),
+          );
+        await db
+          .prepare("INSERT INTO account_roles(account_id,role_id) VALUES (?,?)")
+          .run(id, definition.role);
+        await db
+          .prepare(
+            "INSERT INTO audit_logs(user_name,action,details) VALUES (?,?,?)",
+          )
+          .run(
+            "Thiết lập local",
+            "Seed tài khoản mẫu",
+            `${definition.username}: ${definition.role}`,
+          );
         created.push(definition.username);
       }
     })();
@@ -121,7 +140,7 @@ async function main() {
       "Mật khẩu nằm trong .env.seed-accounts.local; tài khoản mẫu đã sẵn sàng để thử góc nhìn.",
     );
   } finally {
-    db.close();
+    await db.close();
   }
 }
 main().catch(() => {

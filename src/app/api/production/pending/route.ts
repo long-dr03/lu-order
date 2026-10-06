@@ -6,19 +6,30 @@ import {
   settlePacking,
 } from "@/lib/server/pending-packing";
 import { body } from "@/lib/server/validation";
+import { initializeDatabase } from "@/lib/server/migrate";
+
 export async function GET(request: Request) {
   try {
-    return ok(pendingPackingFor(authenticate(request)));
+    await initializeDatabase();
+    return ok(await pendingPackingFor(await authenticate(request)));
   } catch (e) {
     return failure(e);
   }
 }
 export async function POST(request: Request) {
   try {
-    const ctx = authenticate(request);
+    await initializeDatabase();
+    const ctx = await authenticate(request);
     guardWrite(request, ctx);
     const input = settlementSchema.parse(await body(request));
-    return ok(idempotent(ctx, request, input, () => settlePacking(ctx, input)));
+    return ok(
+      await idempotent(
+        ctx,
+        request,
+        input,
+        async () => await settlePacking(ctx, input),
+      ),
+    );
   } catch (e) {
     return failure(e);
   }

@@ -18,21 +18,25 @@ import {
 } from "@/lib/server/business";
 import { permits } from "@/lib/permissions";
 import { body } from "@/lib/server/validation";
+import { initializeDatabase } from "@/lib/server/migrate";
+
 export async function GET(request: Request) {
   try {
-    const ctx = authenticate(request);
+    await initializeDatabase();
+    const ctx = await authenticate(request);
     requirePermission(ctx, "production.view");
     return ok({
-      logs: filterLogs(logsFor(ctx), queryFilters(request)).map((l) =>
-        permits(ctx.user, "payroll.view", {
-          employeeId: l.employee_id,
-          lineId: l.line_id,
-        })
-          ? l
-          : { ...l, unit_price: null, total_pay: null },
+      logs: (await filterLogs(await logsFor(ctx), queryFilters(request))).map(
+        (l) =>
+          permits(ctx.user, "payroll.view", {
+            employeeId: l.employee_id,
+            lineId: l.line_id,
+          })
+            ? l
+            : { ...l, unit_price: null, total_pay: null },
       ),
-      employees: employeesFor(ctx),
-      lines: linesFor(ctx),
+      employees: await employeesFor(ctx),
+      lines: await linesFor(ctx),
     });
   } catch (e) {
     return failure(e);
@@ -40,11 +44,17 @@ export async function GET(request: Request) {
 }
 export async function POST(request: Request) {
   try {
-    const ctx = authenticate(request);
+    await initializeDatabase();
+    const ctx = await authenticate(request);
     guardWrite(request, ctx);
     const input = logSchema.parse(await body(request));
     return ok(
-      idempotent(ctx, request, input, () => recordProduction(ctx, input)),
+      await idempotent(
+        ctx,
+        request,
+        input,
+        async () => await recordProduction(ctx, input),
+      ),
       201,
     );
   } catch (e) {
@@ -54,11 +64,17 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const ctx = authenticate(request);
+    await initializeDatabase();
+    const ctx = await authenticate(request);
     guardWrite(request, ctx);
     const input = adjustmentSchema.parse(await body(request));
     return ok(
-      idempotent(ctx, request, input, () => adjustProduction(ctx, input)),
+      await idempotent(
+        ctx,
+        request,
+        input,
+        async () => await adjustProduction(ctx, input),
+      ),
     );
   } catch (e) {
     return failure(e);

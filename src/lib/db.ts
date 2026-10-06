@@ -1,6 +1,4 @@
 import { assessOrders } from "./progress";
-import Database from "better-sqlite3";
-import path from "path";
 import {
   LUUTA_STAGES,
   StageKey,
@@ -16,159 +14,24 @@ import {
 
 export * from "./types";
 
-import fs from "fs";
-
-const rawDbPath = process.env.DATABASE_PATH || "lu_order.db";
-const dbPath = path.isAbsolute(rawDbPath)
-  ? rawDbPath
-  : path.resolve(/*turbopackIgnore: true*/ process.cwd(), rawDbPath);
-
-const dbDir = path.dirname(dbPath);
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
-}
-
-export const db = new Database(dbPath);
-db.pragma("foreign_keys = ON");
-db.pragma("busy_timeout = 5000");
-
-// Enable WAL mode for high performance
-db.pragma("journal_mode = WAL");
-
-// Database initialization
-db.exec(`
-  CREATE TABLE IF NOT EXISTS lines (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    leader_name TEXT NOT NULL,
-    workers_count INTEGER NOT NULL,
-    capacity_per_day INTEGER NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS employees (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    line_id INTEGER NOT NULL,
-    role TEXT NOT NULL,
-    phone TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS orders (
-    id TEXT PRIMARY KEY,
-    customer TEXT NOT NULL,
-    product_code TEXT NOT NULL,
-    product_name TEXT NOT NULL,
-    image_url TEXT,
-    total_quantity INTEGER NOT NULL DEFAULT 0,
-    line_id INTEGER NOT NULL DEFAULT 1,
-    order_date TEXT NOT NULL,
-    deadline TEXT NOT NULL,
-    priority TEXT NOT NULL DEFAULT 'normal',
-    assigned_to TEXT NOT NULL,
-    current_stage TEXT NOT NULL DEFAULT 'nhan_don',
-    progress INTEGER NOT NULL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'on_track',
-    notes TEXT,
-    created_at TEXT DEFAULT (datetime('now', 'localtime'))
-  );
-
-  CREATE TABLE IF NOT EXISTS order_variants (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-    color TEXT NOT NULL,
-    size TEXT NOT NULL,
-    quantity INTEGER NOT NULL DEFAULT 0,
-    cut_qty INTEGER NOT NULL DEFAULT 0,
-    sewn_qty INTEGER NOT NULL DEFAULT 0,
-    qc_passed_qty INTEGER NOT NULL DEFAULT 0,
-    packed_qty INTEGER NOT NULL DEFAULT 0,
-    delivered_qty INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(order_id, color, size)
-  );
-
-  CREATE TABLE IF NOT EXISTS order_stages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-    stage_key TEXT NOT NULL,
-    stage_name TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    assignee TEXT,
-    received_qty INTEGER NOT NULL DEFAULT 0,
-    completed_qty INTEGER NOT NULL DEFAULT 0,
-    remaining_qty INTEGER NOT NULL DEFAULT 0,
-    started_at TEXT,
-    completed_at TEXT,
-    notes TEXT,
-    UNIQUE(order_id, stage_key)
-  );
-
-  CREATE TABLE IF NOT EXISTS production_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    log_date TEXT NOT NULL,
-    employee_id TEXT NOT NULL,
-    employee_name TEXT NOT NULL,
-    line_id INTEGER NOT NULL,
-    order_id TEXT NOT NULL,
-    product_name TEXT NOT NULL,
-    color TEXT NOT NULL,
-    size TEXT NOT NULL,
-    stage TEXT NOT NULL,
-    quantity INTEGER NOT NULL,
-    unit_price REAL NOT NULL,
-    total_pay REAL NOT NULL,
-    updated_by TEXT NOT NULL,
-    month TEXT NOT NULL,
-    is_locked INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT DEFAULT (datetime('now', 'localtime'))
-  );
-
-  CREATE TABLE IF NOT EXISTS payroll_locks (
-    month TEXT PRIMARY KEY,
-    locked_by TEXT NOT NULL,
-    locked_at TEXT DEFAULT (datetime('now', 'localtime')),
-    notes TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS audit_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_name TEXT NOT NULL,
-    action TEXT NOT NULL,
-    details TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now', 'localtime'))
-  );
-
-  CREATE TABLE IF NOT EXISTS qc_records (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id TEXT NOT NULL,
-    color TEXT NOT NULL,
-    size TEXT NOT NULL,
-    inspected_qty INTEGER NOT NULL,
-    passed_qty INTEGER NOT NULL,
-    defect_qty INTEGER NOT NULL,
-    defect_type TEXT,
-    rework_qty INTEGER NOT NULL DEFAULT 0,
-    reinspected_qty INTEGER NOT NULL DEFAULT 0,
-    repassed_qty INTEGER NOT NULL DEFAULT 0,
-    inspector TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now', 'localtime'))
-  );
-`);
+export { db } from "./server/database";
+import { db } from "./server/database";
 
 // ----------------- QUERY & MUTATION FUNCTIONS -----------------
 
-export function getAllOrders(filter?: {
+export async function getAllOrders(filter?: {
   search?: string;
   status?: string;
   line_id?: number;
-}): Order[] {
+}): Promise<Order[]> {
   let sql = "SELECT * FROM orders WHERE 1=1";
   const params: (string | number)[] = [];
 
   if (filter?.search && filter.search.trim() !== "") {
     const term = `%${filter.search.trim()}%`;
     sql += ` AND (
-      id LIKE ? OR customer LIKE ? OR product_code LIKE ? OR product_name LIKE ?
-      OR id IN (SELECT order_id FROM order_variants WHERE color LIKE ? OR size LIKE ?)
+      id ILIKE ? OR customer ILIKE ? OR product_code ILIKE ? OR product_name ILIKE ?
+      OR id IN (SELECT order_id FROM order_variants WHERE color ILIKE ? OR size ILIKE ?)
     )`;
     params.push(term, term, term, term, term, term);
   }
@@ -202,36 +65,44 @@ export function getAllOrders(filter?: {
   sql +=
     " ORDER BY CASE status WHEN 'delayed' THEN 1 WHEN 'at_risk' THEN 2 WHEN 'on_track' THEN 3 ELSE 4 END, deadline ASC";
 
-  const orders = db.prepare(sql).all(...params) as Order[];
+  const orders = (await db.prepare(sql).all(...params)) as Order[];
 
-  // Attach variants to each order
-  const variantStmt = db.prepare(
-    "SELECT * FROM order_variants WHERE order_id = ?",
-  );
-  for (const o of orders) {
-    o.variants = (variantStmt.all(o.id) as OrderVariant[]).map(decodeColors);
-    o.work_items = db
-      .prepare(
-        "SELECT w.id,w.order_id,w.stage,w.name,COALESCE(SUM(p.quantity),0) recorded_quantity FROM order_work_items w LEFT JOIN production_logs p ON p.work_item_id=w.id WHERE w.order_id=? GROUP BY w.id ORDER BY w.id",
-      )
-      .all(o.id) as WorkItem[];
+  const ids = orders.map((o) => o.id);
+  const variants = (await db
+    .prepare(
+      "SELECT * FROM order_variants WHERE order_id=ANY(?::text[]) ORDER BY id",
+    )
+    .all(ids)) as OrderVariant[];
+  const workItems = (await db
+    .prepare(
+      "SELECT w.id,w.order_id,w.stage,w.name,COALESCE(SUM(p.quantity),0) recorded_quantity FROM order_work_items w LEFT JOIN production_logs p ON p.work_item_id=w.id WHERE w.order_id=ANY(?::text[]) GROUP BY w.id ORDER BY w.id",
+    )
+    .all(ids)) as WorkItem[];
+  const byId = new Map(orders.map((o) => [o.id, o]));
+  for (const order of orders) {
+    order.variants = [];
+    order.work_items = [];
   }
+  for (const variant of variants)
+    byId.get(variant.order_id)?.variants?.push(decodeColors(variant));
+  for (const item of workItems) byId.get(item.order_id)?.work_items?.push(item);
 
-  return assessOrders(orders, getLines(), throughput());
+  return assessOrders(orders, await getLines(), await throughput());
 }
 
-export function getOrderById(id: string): Order | null {
-  const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(id) as
-    Order | undefined;
+export async function getOrderById(id: string): Promise<Order | null> {
+  const order = (await db
+    .prepare("SELECT * FROM orders WHERE id = ?")
+    .get(id)) as Order | undefined;
   if (!order) return null;
 
-  order.variants = db
+  order.variants = (await db
     .prepare("SELECT * FROM order_variants WHERE order_id = ?")
-    .all(id) as OrderVariant[];
+    .all(id)) as OrderVariant[];
   order.variants = order.variants.map(decodeColors);
-  order.stages = db
+  order.stages = (await db
     .prepare("SELECT * FROM order_stages WHERE order_id = ? ORDER BY id ASC")
-    .all(id) as OrderStage[];
+    .all(id)) as OrderStage[];
 
   const counts: Record<string, [string, string]> = {
     cat: ["quantity", "cut_qty"],
@@ -259,18 +130,18 @@ export function getOrderById(id: string): Order | null {
     stage.remaining_qty = Math.max(0, stage.received_qty - stage.completed_qty);
   }
 
-  const all = getAllOrders();
+  const all = await getAllOrders();
   const assessed = all.find((o) => o.id === id);
   return { ...order, ...assessed, stages: order.stages };
 }
 
-export function createOrderWithVariants(
+export async function createOrderWithVariants(
   data: {
     order: Omit<Order, "created_at" | "progress" | "status" | "version">;
     variants: Array<{ color: string; size: string; quantity: number }>;
   },
   actor = "Hệ thống",
-): Order {
+): Promise<Order> {
   const insertOrder = db.prepare(`
     INSERT INTO orders (id, customer, product_code, product_name, image_url, total_quantity, line_id, order_date, deadline, priority, assigned_to, current_stage, progress, status, notes)
     VALUES (@id, @customer, @product_code, @product_name, @image_url, @total_quantity, @line_id, @order_date, @deadline, @priority, @assigned_to, @current_stage, 0, 'on_track', @notes)
@@ -291,15 +162,15 @@ export function createOrderWithVariants(
     0,
   );
 
-  const tx = db.transaction(() => {
-    insertOrder.run({
+  const tx = db.transaction(async () => {
+    await insertOrder.run({
       ...data.order,
       total_quantity: totalQty,
     });
 
     for (const v of data.variants) {
       if (v.quantity > 0) {
-        insertVariant.run({
+        await insertVariant.run({
           order_id: data.order.id,
           color: v.color,
           size: v.size,
@@ -311,7 +182,7 @@ export function createOrderWithVariants(
     // Initialize all 11 stages
     for (let i = 0; i < LUUTA_STAGES.length; i++) {
       const s = LUUTA_STAGES[i];
-      insertStage.run({
+      await insertStage.run({
         order_id: data.order.id,
         stage_key: s.key,
         stage_name: s.label,
@@ -323,23 +194,23 @@ export function createOrderWithVariants(
     }
 
     // Log audit
-    logAudit(
+    await logAudit(
       actor,
       "Tạo đơn hàng mới",
       `Tạo mã ${data.order.id} - ${data.order.product_name} (SL: ${totalQty})`,
     );
   });
 
-  tx();
-  return getOrderById(data.order.id)!;
+  await tx();
+  return (await getOrderById(data.order.id))!;
 }
 
-export function updateOrderStage(
+export async function updateOrderStage(
   orderId: string,
   newStage: StageKey,
   userName: string = "Quản lý",
 ) {
-  const order = getOrderById(orderId);
+  const order = await getOrderById(orderId);
   if (!order) return null;
 
   const stageIndex = LUUTA_STAGES.findIndex((s) => s.key === newStage);
@@ -351,60 +222,68 @@ export function updateOrderStage(
 
   const isCompleted = newStage === "hoan_thanh";
 
-  const tx = db.transaction(() => {
-    db.prepare(
-      `
+  const tx = db.transaction(async () => {
+    await db
+      .prepare(
+        `
       UPDATE orders
       SET current_stage = ?, progress = ?, status = ?
       WHERE id = ?
     `,
-    ).run(
-      newStage,
-      progress,
-      isCompleted ? "completed" : order.status,
-      orderId,
-    );
+      )
+      .run(
+        newStage,
+        progress,
+        isCompleted ? "completed" : order.status,
+        orderId,
+      );
 
-    db.prepare(
-      `
+    await db
+      .prepare(
+        `
       UPDATE order_stages
-      SET status = 'completed', completed_at = datetime('now', 'localtime')
+      SET status = 'completed', completed_at = to_char(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD HH24:MI:SS')
       WHERE order_id = ? AND id < (SELECT id FROM order_stages WHERE order_id = ? AND stage_key = ?)
     `,
-    ).run(orderId, orderId, newStage);
+      )
+      .run(orderId, orderId, newStage);
 
-    db.prepare(
-      `
+    await db
+      .prepare(
+        `
       UPDATE order_stages
-      SET status = 'in_progress', started_at = datetime('now', 'localtime')
+      SET status = 'in_progress', started_at = to_char(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD HH24:MI:SS')
       WHERE order_id = ? AND stage_key = ?
     `,
-    ).run(orderId, newStage);
+      )
+      .run(orderId, newStage);
 
-    logAudit(
+    await logAudit(
       userName,
       "Chuyển công đoạn",
       `${orderId} chuyển sang: ${LUUTA_STAGES[stageIndex]?.label || newStage}`,
     );
   });
 
-  tx();
-  return getOrderById(orderId);
+  await tx();
+  return await getOrderById(orderId);
 }
 
-export function getLines(): Line[] {
-  return db.prepare("SELECT * FROM lines ORDER BY id ASC").all() as Line[];
+export async function getLines(): Promise<Line[]> {
+  return (await db
+    .prepare("SELECT * FROM lines ORDER BY id ASC")
+    .all()) as Line[];
 }
 
-export function getEmployees(lineId?: number): Employee[] {
-  const employees = db
+export async function getEmployees(lineId?: number): Promise<Employee[]> {
+  const employees = (await db
     .prepare("SELECT * FROM employees ORDER BY name ASC")
-    .all() as Employee[];
-  const accounts = db
+    .all()) as Employee[];
+  const accounts = (await db
     .prepare(
       "SELECT employee_id,line_ids FROM accounts WHERE status='active' AND employee_id IS NOT NULL",
     )
-    .all() as { employee_id: string; line_ids: string }[];
+    .all()) as { employee_id: string; line_ids: string }[];
   const assignments = new Map(
     accounts.map((a) => [a.employee_id, JSON.parse(a.line_ids) as number[]]),
   );
@@ -418,11 +297,11 @@ export function getEmployees(lineId?: number): Employee[] {
 
 // ----------------- SẢN LƯỢNG & TÍNH LƯƠNG SẢN PHẨM -----------------
 
-export function addProductionLog(
+export async function addProductionLog(
   data: Omit<ProductionLog, "id" | "created_at" | "is_locked">,
-): ProductionLog {
+): Promise<ProductionLog> {
   // Check if month is locked
-  const lock = db
+  const lock = await db
     .prepare("SELECT * FROM payroll_locks WHERE month = ?")
     .get(data.month);
   if (lock) {
@@ -438,45 +317,49 @@ export function addProductionLog(
     VALUES (@log_date, @employee_id, @employee_name, @line_id, @order_id, @product_name, @color, @size, @stage, @quantity, @unit_price, @total_pay, @updated_by, @month, 0)
   `);
 
-  const res = stmt.run({ ...data, total_pay: totalPay });
+  const res = await stmt.run({ ...data, total_pay: totalPay });
 
   // Update variant stage quantity if applicable
   if (data.stage === "Cắt") {
-    db.prepare(
-      `
+    await db
+      .prepare(
+        `
       UPDATE order_variants
       SET cut_qty = cut_qty + ?
       WHERE order_id = ? AND color = ? AND size = ?
     `,
-    ).run(data.quantity, data.order_id, data.color, data.size);
+      )
+      .run(data.quantity, data.order_id, data.color, data.size);
   } else if (data.stage === "May") {
-    db.prepare(
-      `
+    await db
+      .prepare(
+        `
       UPDATE order_variants
       SET sewn_qty = sewn_qty + ?
       WHERE order_id = ? AND color = ? AND size = ?
     `,
-    ).run(data.quantity, data.order_id, data.color, data.size);
+      )
+      .run(data.quantity, data.order_id, data.color, data.size);
   }
 
   // Log audit
-  logAudit(
+  await logAudit(
     data.updated_by,
     "Cập nhật sản lượng",
     `${data.employee_name} • ${data.order_id} - ${data.product_name} • ${data.color}/${data.size} • ${data.stage} • +${data.quantity} sp (${totalPay.toLocaleString()}đ)`,
   );
 
-  return db
+  return (await db
     .prepare("SELECT * FROM production_logs WHERE id = ?")
-    .get(res.lastInsertRowid) as ProductionLog;
+    .get(res.lastInsertRowid)) as ProductionLog;
 }
 
-export function getProductionLogs(filter?: {
+export async function getProductionLogs(filter?: {
   month?: string;
   employee_id?: string;
   line_id?: number;
   stage?: string;
-}): ProductionLog[] {
+}): Promise<ProductionLog[]> {
   let sql = "SELECT * FROM production_logs WHERE 1=1";
   const params: (string | number)[] = [];
 
@@ -498,10 +381,10 @@ export function getProductionLogs(filter?: {
   }
 
   sql += " ORDER BY id DESC";
-  return db.prepare(sql).all(...params) as ProductionLog[];
+  return (await db.prepare(sql).all(...params)) as ProductionLog[];
 }
 
-export function getPayrollSummary(month: string, employeeId?: string) {
+export async function getPayrollSummary(month: string, employeeId?: string) {
   let sql = `
     SELECT
       employee_id,
@@ -523,10 +406,10 @@ export function getPayrollSummary(month: string, employeeId?: string) {
   sql +=
     " GROUP BY employee_id, employee_name, line_id ORDER BY total_salary DESC";
 
-  const rows = db.prepare(sql).all(...params);
-  const isLocked = !!db
+  const rows = await db.prepare(sql).all(...params);
+  const isLocked = !!(await db
     .prepare("SELECT * FROM payroll_locks WHERE month = ?")
-    .get(month);
+    .get(month));
 
   return {
     month,
@@ -535,73 +418,83 @@ export function getPayrollSummary(month: string, employeeId?: string) {
   };
 }
 
-export function lockPayroll(month: string, lockedBy: string) {
-  const existing = db
+export async function lockPayroll(month: string, lockedBy: string) {
+  const existing = await db
     .prepare("SELECT * FROM payroll_locks WHERE month = ?")
     .get(month);
   if (existing) {
     throw new Error(`Tháng ${month} đã được chốt trước đó!`);
   }
 
-  const tx = db.transaction(() => {
-    db.prepare(
-      `
+  const tx = db.transaction(async () => {
+    await db
+      .prepare(
+        `
       INSERT INTO payroll_locks (month, locked_by, locked_at)
-      VALUES (?, ?, datetime('now', 'localtime'))
+      VALUES (?, ?, to_char(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD HH24:MI:SS'))
     `,
-    ).run(month, lockedBy);
+      )
+      .run(month, lockedBy);
 
-    db.prepare(
-      `
+    await db
+      .prepare(
+        `
       UPDATE production_logs
       SET is_locked = 1
       WHERE month = ?
     `,
-    ).run(month);
+      )
+      .run(month);
 
-    logAudit(
+    await logAudit(
       lockedBy,
       "CHỐT LƯƠNG THÁNG",
       `Đã khóa toàn bộ dữ liệu sản lượng và bảng lương tháng ${month}`,
     );
   });
 
-  tx();
+  await tx();
   return { success: true, month };
 }
 
 // ----------------- AUDIT & LOGGING -----------------
 
-export function logAudit(userName: string, action: string, details: string) {
-  db.prepare(
-    `
+export async function logAudit(
+  userName: string,
+  action: string,
+  details: string,
+) {
+  await db
+    .prepare(
+      `
     INSERT INTO audit_logs (user_name, action, details)
     VALUES (?, ?, ?)
   `,
-  ).run(userName, action, details);
+    )
+    .run(userName, action, details);
 }
 
-export function getAuditLogs(limit: number = 50): AuditLog[] {
-  return db
+export async function getAuditLogs(limit: number = 50): Promise<AuditLog[]> {
+  return (await db
     .prepare("SELECT * FROM audit_logs ORDER BY id DESC LIMIT ?")
-    .all(limit) as AuditLog[];
+    .all(limit)) as AuditLog[];
 }
 
 // ----------------- DASHBOARD METRICS -----------------
 
-export function getDirectorDashboardStats() {
-  const orders = db.prepare("SELECT * FROM orders").all() as Order[];
-  const logsThisMonth = db
+export async function getDirectorDashboardStats() {
+  const orders = (await db.prepare("SELECT * FROM orders").all()) as Order[];
+  const logsThisMonth = (await db
     .prepare(
       `
     SELECT
       SUM(quantity) as total_qty,
       SUM(total_pay) as total_pay
     FROM production_logs
-    WHERE month = strftime('%Y-%m', 'now', 'localtime')
+    WHERE month = to_char(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM')
   `,
     )
-    .get() as { total_qty: number; total_pay: number };
+    .get()) as { total_qty: number; total_pay: number };
 
   const totalRunning = orders.filter((o) => o.status !== "completed").length;
   const atRisk = orders.filter((o) => o.status === "at_risk").length;
@@ -614,7 +507,7 @@ export function getDirectorDashboardStats() {
     (o) => o.current_stage === "dong_goi" || o.current_stage === "giao_hang",
   ).length;
 
-  const lines = getLines();
+  const lines = await getLines();
   const lineStats = lines.map((l) => {
     const lineOrders = orders.filter(
       (o) => o.line_id === l.id && o.status !== "completed",
@@ -638,7 +531,7 @@ export function getDirectorDashboardStats() {
   });
 
   const employeesCount = (
-    db.prepare("SELECT COUNT(*) as count FROM employees").get() as {
+    (await db.prepare("SELECT COUNT(*) as count FROM employees").get()) as {
       count: number;
     }
   ).count;
@@ -661,8 +554,10 @@ export function getDirectorDashboardStats() {
   };
 }
 
-export function generateNextOrderCode(): string {
-  const ids = db.prepare("SELECT id FROM orders").all() as { id: string }[];
+export async function generateNextOrderCode(): Promise<string> {
+  const ids = (await db.prepare("SELECT id FROM orders").all()) as {
+    id: string;
+  }[];
   const largest = ids.reduce(
     (n, row) =>
       /^LU-\d+$/.test(row.id) ? Math.max(n, Number(row.id.slice(3))) : n,
@@ -671,12 +566,12 @@ export function generateNextOrderCode(): string {
   return `LU-${String(largest + 1).padStart(3, "0")}`;
 }
 
-export function throughput() {
-  return db
+export async function throughput() {
+  return (await db
     .prepare(
-      "SELECT line_id,SUM(COALESCE(completed_quantity,quantity))*1.0/14 daily FROM production_logs WHERE stage='May' AND log_date BETWEEN date('now','+7 hours','-13 days') AND date('now','+7 hours') GROUP BY line_id",
+      "SELECT line_id,SUM(COALESCE(completed_quantity,quantity))*1.0/14 daily FROM production_logs WHERE stage='May' AND log_date BETWEEN to_char((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh') - INTERVAL '13 days','YYYY-MM-DD') AND to_char(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh','YYYY-MM-DD') GROUP BY line_id",
     )
-    .all() as { line_id: number; daily: number }[];
+    .all()) as { line_id: number; daily: number }[];
 }
 
 function decodeColors(v: OrderVariant) {

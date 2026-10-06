@@ -18,14 +18,16 @@ import {
   requireAdmin,
 } from "@/lib/server/auth";
 import { body, password, username, text } from "@/lib/server/validation";
+import { initializeDatabase } from "@/lib/server/migrate";
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ action: string }> },
 ) {
   try {
+    await initializeDatabase();
     ensure((await params).action === "session", 404, "Không tìm thấy.");
-    return ok(sessionData(authenticate(request, true)));
+    return ok(sessionData(await authenticate(request, true)));
   } catch (e) {
     return failure(e);
   }
@@ -35,46 +37,53 @@ export async function POST(
   { params }: { params: Promise<{ action: string }> },
 ) {
   try {
+    await initializeDatabase();
     const { action } = await params;
     guardWrite(request);
     if (action === "register") {
-      limit("register:local", 10);
+      await limit("register:local", 10);
       const input = z
         .object({ username, name: text, password })
         .strict()
         .parse(await body(request));
-      ensure(
-        !db
-          .prepare("SELECT 1 FROM accounts WHERE username=?")
-          .get(input.username),
-        422,
-        "Tên đăng nhập đã được sử dụng.",
-      );
-      db.prepare(
-        "INSERT INTO accounts(id,username,name,password_hash,status) VALUES (?,?,?,?,'pending')",
-      ).run(
-        randomUUID(),
-        input.username,
-        input.name,
-        hashPassword(input.password),
-      );
-      return ok(
-        { message: "Đăng ký thành công. Vui lòng chờ admin duyệt tài khoản." },
-        201,
-      );
+      return await db.transaction(async () => {
+        ensure(
+          !(await db
+            .prepare("SELECT 1 FROM accounts WHERE lower(username)=lower(?)")
+            .get(input.username)),
+          422,
+          "Tên đăng nhập đã được sử dụng.",
+        );
+        await db
+          .prepare(
+            "INSERT INTO accounts(id,username,name,password_hash,status) VALUES (?,?,?,?,'pending')",
+          )
+          .run(
+            randomUUID(),
+            input.username,
+            input.name,
+            hashPassword(input.password),
+          );
+        return ok(
+          {
+            message: "Đăng ký thành công. Vui lòng chờ admin duyệt tài khoản.",
+          },
+          201,
+        );
+      })();
     }
     if (action === "login") {
       const input = z
         .object({ username, password: z.string().min(1).max(128) })
         .strict()
         .parse(await body(request));
-      limit("login:local", 100);
-      limit(`login:${input.username}`, 5);
-      const row = db
+      await limit("login:local", 100);
+      await limit(`login:${input.username.toLowerCase()}`, 5);
+      const row = (await db
         .prepare(
-          "SELECT id,password_hash,status FROM accounts WHERE username=?",
+          "SELECT id,password_hash,status FROM accounts WHERE lower(username)=lower(?)",
         )
-        .get(input.username) as
+        .get(input.username)) as
         { id: string; password_hash: string; status: string } | undefined;
       // Equalize expensive password work for unknown usernames.
       const valid = verifyPassword(
@@ -89,11 +98,11 @@ export async function POST(
           ? "Tài khoản đang chờ admin duyệt."
           : "Tài khoản đã bị khóa.",
       );
-      db.prepare("DELETE FROM auth_attempts WHERE key=?").run(
-        `login:${input.username}`,
-      );
-      const response = ok({ user: account(row.id) });
-      createSession(row.id, response);
+      await db
+        .prepare("DELETE FROM auth_attempts WHERE key=?")
+        .run(`login:${input.username.toLowerCase()}`);
+      const response = ok({ user: await account(row.id) });
+      await createSession(row.id, response);
       return response;
     }
     if (action === "stop-represent") {
@@ -105,15 +114,15 @@ export async function POST(
           .find((v) => v.startsWith("luuta_session="))
           ?.slice(14) || "";
       const { hashToken } = await import("@/lib/server/auth");
-      const row = db
+      const row = (await db
         .prepare(
           "SELECT account_id,csrf,represented_id FROM sessions WHERE token_hash=? AND expires_at>?",
         )
-        .get(hashToken(token), Date.now()) as
+        .get(hashToken(token), Date.now())) as
         | { account_id: string; csrf: string; represented_id: string | null }
         | undefined;
       ensure(
-        row && account(row.account_id)?.status === "active",
+        row && (await account(row.account_id))?.status === "active",
         401,
         "Vui lòng đăng nhập.",
       );
@@ -122,11 +131,11 @@ export async function POST(
         403,
         "Phiên thao tác không hợp lệ.",
       );
-      const actor = account(row.account_id)!;
-      db.prepare(
-        "UPDATE sessions SET represented_id=NULL WHERE token_hash=?",
-      ).run(hashToken(token));
-      audit(
+      const actor = (await account(row.account_id))!;
+      await db
+        .prepare("UPDATE sessions SET represented_id=NULL WHERE token_hash=?")
+        .run(hashToken(token));
+      await audit(
         {
           actor,
           user: actor,
@@ -139,10 +148,12 @@ export async function POST(
       );
       return ok({ message: "Đã thoát đại diện." });
     }
-    const ctx = authenticate(request, true);
+    const ctx = await authenticate(request, true);
     guardWrite(request, ctx);
     if (action === "logout") {
-      db.prepare("DELETE FROM sessions WHERE token_hash=?").run(ctx.tokenHash);
+      await db
+        .prepare("DELETE FROM sessions WHERE token_hash=?")
+        .run(ctx.tokenHash);
       const response = ok({ message: "Đã đăng xuất." });
       response.cookies.delete("luuta_session");
       return response;
@@ -157,10 +168,10 @@ export async function POST(
         .object({ currentPassword: z.string().max(128), newPassword: password })
         .strict()
         .parse(await body(request));
-      limit(`password:${ctx.actor.id}`, 5);
-      const row = db
+      await limit(`password:${ctx.actor.id}`, 5);
+      const row = (await db
         .prepare("SELECT password_hash FROM accounts WHERE id=?")
-        .get(ctx.actor.id) as { password_hash: string };
+        .get(ctx.actor.id)) as { password_hash: string };
       ensure(
         verifyPassword(input.currentPassword, row.password_hash),
         422,
@@ -171,12 +182,14 @@ export async function POST(
         422,
         "Mật khẩu mới phải khác mật khẩu hiện tại.",
       );
-      db.transaction(() => {
-        db.prepare(
-          "UPDATE accounts SET password_hash=?,must_change_password=0 WHERE id=?",
-        ).run(hashPassword(input.newPassword), ctx.actor.id);
-        revoke(ctx.actor.id);
-        audit(ctx, "Đổi mật khẩu", "Đã thu hồi các phiên đăng nhập.");
+      await db.transaction(async () => {
+        await db
+          .prepare(
+            "UPDATE accounts SET password_hash=?,must_change_password=0 WHERE id=?",
+          )
+          .run(hashPassword(input.newPassword), ctx.actor.id);
+        await revoke(ctx.actor.id);
+        await audit(ctx, "Đổi mật khẩu", "Đã thu hồi các phiên đăng nhập.");
       })();
       const response = ok({
         message: "Đã đổi mật khẩu. Vui lòng đăng nhập lại.",
@@ -200,16 +213,16 @@ export async function POST(
         .object({ accountId: text, password: z.string().max(128) })
         .strict()
         .parse(await body(request));
-      limit(`represent:${ctx.actor.id}`, 5);
-      const row = db
+      await limit(`represent:${ctx.actor.id}`, 5);
+      const row = (await db
         .prepare("SELECT password_hash FROM accounts WHERE id=?")
-        .get(ctx.actor.id) as { password_hash: string };
+        .get(ctx.actor.id)) as { password_hash: string };
       ensure(
         verifyPassword(input.password, row.password_hash),
         422,
         "Mật khẩu xác nhận không đúng.",
       );
-      const target = account(input.accountId);
+      const target = await account(input.accountId);
       ensure(
         target?.status === "active" &&
           target.employee_id &&
@@ -218,11 +231,10 @@ export async function POST(
         422,
         "Chọn nhân viên đang hoạt động và đã đổi mật khẩu tạm.",
       );
-      db.prepare("UPDATE sessions SET represented_id=? WHERE token_hash=?").run(
-        target.id,
-        ctx.tokenHash,
-      );
-      audit(
+      await db
+        .prepare("UPDATE sessions SET represented_id=? WHERE token_hash=?")
+        .run(target.id, ctx.tokenHash);
+      await audit(
         { ...ctx, user: target, representing: true },
         "Bắt đầu đại diện",
         `Đại diện nhân viên ${target.name}`,
