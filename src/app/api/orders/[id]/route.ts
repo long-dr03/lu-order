@@ -1,56 +1,34 @@
-import { NextResponse } from "next/server";
-import { getOrderById, updateOrderStage, StageKey } from "@/lib/db";
-
+import { authenticate, guardWrite, ok, failure } from "@/lib/server/auth";
+import {
+  orderFor,
+  moveSchema,
+  moveOrder,
+  idempotent,
+} from "@/lib/server/business";
+import { body } from "@/lib/server/validation";
 export async function GET(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { id } = await params;
-    const order = getOrderById(id);
-
-    if (!order) {
-      return NextResponse.json(
-        { success: false, error: "Không tìm thấy đơn hàng" },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      data: order,
-    });
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
+    return ok(
+      orderFor(authenticate(request), (await params).id, "orders.view"),
     );
+  } catch (e) {
+    return failure(e);
   }
 }
-
 export async function PATCH(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await params;
-    const body = await request.json();
-
-    if (body.stage) {
-      const updated = updateOrderStage(id, body.stage as StageKey, body.user_name || "Quản lý");
-      return NextResponse.json({
-        success: true,
-        data: updated,
-      });
-    }
-
-    return NextResponse.json({
-      success: true,
-    });
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    const ctx = authenticate(request);
+    guardWrite(request, ctx);
+    const input = moveSchema.parse(await body(request));
+    return ok(idempotent(ctx, request, input, () => moveOrder(ctx, id, input)));
+  } catch (e) {
+    return failure(e);
   }
 }

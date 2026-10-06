@@ -19,20 +19,21 @@ export function Progress({
   // Convert to 8-block representation (like ████░░░░ in wireframe)
   const totalBlocks = 8;
   const filledBlocks = Math.round((percentage / 100) * totalBlocks);
-  const blockString = "█".repeat(filledBlocks) + "░".repeat(totalBlocks - filledBlocks);
+  const blockString =
+    "█".repeat(filledBlocks) + "░".repeat(totalBlocks - filledBlocks);
 
   return (
     <div className="flex flex-col gap-1 w-full" {...props}>
       <div
         className={cn(
           "relative h-1.5 w-full overflow-hidden rounded-full bg-zinc-100",
-          className
+          className,
         )}
       >
         <div
           className={cn(
             "h-full transition-all duration-300 rounded-full bg-zinc-700",
-            indicatorClassName
+            indicatorClassName,
           )}
           style={{ width: `${percentage}%` }}
         />

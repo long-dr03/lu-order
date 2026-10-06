@@ -1,88 +1,66 @@
-import { NextResponse } from "next/server";
-import { addProductionLog, getProductionLogs, getEmployees, getLines } from "@/lib/db";
-
+import { adjustmentSchema, adjustProduction } from "@/lib/server/requirements";
+import {
+  authenticate,
+  guardWrite,
+  ok,
+  failure,
+  requirePermission,
+} from "@/lib/server/auth";
+import {
+  logsFor,
+  filterLogs,
+  queryFilters,
+  employeesFor,
+  linesFor,
+  logSchema,
+  recordProduction,
+  idempotent,
+} from "@/lib/server/business";
+import { permits } from "@/lib/permissions";
+import { body } from "@/lib/server/validation";
 export async function GET(request: Request) {
   try {
-    const { searchParams } = new URL(request.url);
-    const month = searchParams.get("month") || undefined;
-    const employee_id = searchParams.get("employee_id") || undefined;
-    const line_id = searchParams.get("line_id") ? Number(searchParams.get("line_id")) : undefined;
-    const stage = searchParams.get("stage") || undefined;
-
-    const logs = getProductionLogs({ month, employee_id, line_id, stage });
-    const employees = getEmployees(line_id);
-    const lines = getLines();
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        logs,
-        employees,
-        lines,
-      },
+    const ctx = authenticate(request);
+    requirePermission(ctx, "production.view");
+    return ok({
+      logs: filterLogs(logsFor(ctx), queryFilters(request)).map((l) =>
+        permits(ctx.user, "payroll.view", {
+          employeeId: l.employee_id,
+          lineId: l.line_id,
+        })
+          ? l
+          : { ...l, unit_price: null, total_pay: null },
+      ),
+      employees: employeesFor(ctx),
+      lines: linesFor(ctx),
     });
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
+  } catch (e) {
+    return failure(e);
+  }
+}
+export async function POST(request: Request) {
+  try {
+    const ctx = authenticate(request);
+    guardWrite(request, ctx);
+    const input = logSchema.parse(await body(request));
+    return ok(
+      idempotent(ctx, request, input, () => recordProduction(ctx, input)),
+      201,
     );
+  } catch (e) {
+    return failure(e);
   }
 }
 
-export async function POST(request: Request) {
+export async function PATCH(request: Request) {
   try {
-    const body = await request.json();
-
-    const {
-      log_date,
-      employee_id,
-      employee_name,
-      line_id,
-      order_id,
-      product_name,
-      color,
-      size,
-      stage,
-      quantity,
-      unit_price,
-      updated_by,
-      month,
-    } = body;
-
-    if (!employee_id || !order_id || !quantity || !unit_price) {
-      return NextResponse.json(
-        { success: false, error: "Vui lòng nhập đủ thông tin sản lượng và đơn giá" },
-        { status: 400 }
-      );
-    }
-
-    const calculatedMonth = month || log_date.slice(0, 7);
-
-    const newLog = addProductionLog({
-      log_date,
-      employee_id,
-      employee_name,
-      line_id: Number(line_id || 1),
-      order_id,
-      product_name,
-      color: color || "Chung",
-      size: size || "M",
-      stage: stage || "May",
-      quantity: Number(quantity),
-      unit_price: Number(unit_price),
-      total_pay: Number(quantity) * Number(unit_price),
-      updated_by: updated_by || "Tổ trưởng",
-      month: calculatedMonth,
-    });
-
-    return NextResponse.json({
-      success: true,
-      data: newLog,
-    });
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 400 }
+    const ctx = authenticate(request);
+    guardWrite(request, ctx);
+    const input = adjustmentSchema.parse(await body(request));
+    return ok(
+      idempotent(ctx, request, input, () => adjustProduction(ctx, input)),
     );
+  } catch (e) {
+    return failure(e);
   }
 }

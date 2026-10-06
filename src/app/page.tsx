@@ -1,311 +1,876 @@
 "use client";
-
-import React, { useState, useEffect, useCallback } from "react";
-import { Header, UserRole } from "@/components/Header";
-import { Sidebar, NavItemKey } from "@/components/Sidebar";
-import { KpiCards } from "@/components/KpiCards";
-import { OrderTable } from "@/components/OrderTable";
-import { OrderDetailModal } from "@/components/OrderDetailModal";
-import { CreateOrderModal } from "@/components/CreateOrderModal";
-import { FastProductionLogModal } from "@/components/FastProductionLogModal";
-import { LinesView } from "@/components/views/LinesView";
-import { PayrollView } from "@/components/views/PayrollView";
-import { QcView } from "@/components/views/QcView";
-import { DeliveryView } from "@/components/views/DeliveryView";
-import { Order, Line, Employee, StageKey } from "@/lib/types";
-import { RefreshCw, Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
-
-export default function LuutaAppPage() {
-  const [activeTab, setActiveTab] = useState<NavItemKey>("tong_quan");
-  const [currentRole, setCurrentRole] = useState<UserRole>("giam_doc");
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-
-  const [allOrders, setAllOrders] = useState<Order[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [lines, setLines] = useState<Line[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [stats, setStats] = useState({
-    orders: {
-      totalRunning: 0,
-      atRisk: 0,
-      delayed: 0,
-      completed: 0,
-      waitingQc: 0,
-      waitingDelivery: 0,
-    },
-    production: {
-      monthlyQty: 0,
-      monthlyPay: 0,
-      lineStats: [],
-    },
-    employeesCount: 0,
-  });
-  const [nextCode, setNextCode] = useState("LU-005");
-
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-
-  // Modals
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-  const [isDetailOpen, setIsDetailOpen] = useState(false);
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [isFastLogOpen, setIsFastLogOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  // Fetch orders and system state
-  const fetchData = useCallback(async () => {
-    try {
-      const params = new URLSearchParams();
-      if (searchTerm) params.append("search", searchTerm);
-      if (statusFilter !== "all") params.append("status", statusFilter);
-
-      const res = await fetch(`/api/orders?${params.toString()}`);
-      const json = await res.json();
-
-      if (json.success) {
-        setOrders(json.data.orders);
-        setStats(json.data.stats);
-        setLines(json.data.lines);
-        setNextCode(json.data.nextCode);
-      }
-
-      const allRes = await fetch("/api/orders");
-      const allJson = await allRes.json();
-      if (allJson.success) setAllOrders(allJson.data.orders);
-
-      // Also fetch employees for quick production log
-      const resLogs = await fetch("/api/production/log");
-      const jsonLogs = await resLogs.json();
-      if (jsonLogs.success) {
-        setEmployees(jsonLogs.data.employees || []);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }, [searchTerm, statusFilter]);
-
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import { AnimatePresence, motion, MotionConfig } from "motion/react";
+import {
+  LayoutDashboard,
+  ShoppingBag,
+  Factory,
+  ChartNoAxesCombined,
+  DollarSign,
+  ShieldCheck,
+  Truck,
+  Users,
+  Shield,
+  ClipboardList,
+  DatabaseBackup,
+  Menu,
+  X,
+  Plus,
+  RefreshCw,
+  LogOut,
+  UserRound,
+  KeyRound,
+  ArrowLeft,
+  CheckCircle2,
+  Settings2,
+} from "lucide-react";
+import {
+  type SessionInfo,
+  hasPermission,
+  permits,
+  canRecordProduction,
+} from "@/lib/permissions";
+import {
+  type DashboardData,
+  type Api,
+  apiFor,
+  message,
+  money,
+  day,
+} from "@/lib/client";
+import { availableOperations } from "@/lib/workflow";
+import { LUUTA_STAGES, type Order } from "@/lib/types";
+import type { Rate } from "@/lib/server/business";
+import { Pagination } from "@/components/Pagination";
+import { AuthScreen } from "@/components/AuthScreen";
+import {
+  Action,
+  Logo,
+  Modal,
+  ErrorNotice,
+  Field,
+  Empty,
+} from "@/components/Primitives";
+import { OrderWorkspace, CreateOrderForm } from "@/components/OrderWorkspace";
+import {
+  ProductionForm,
+  OrderDetail,
+  RatesPanel,
+} from "@/components/ProductionForms";
+import {
+  RecordsPanel,
+  AuditPanel,
+  OperationsPanel,
+} from "@/components/RecordsPanel";
+import { LinesPanel, DashboardInsights } from "@/components/RequirementPanels";
+import { BackupPanel } from "@/components/BackupPanel";
+import { AdminPanel } from "@/components/AdminPanel";
+const navigation = [
+  {
+    id: "overview",
+    label: "Tổng quan",
+    icon: LayoutDashboard,
+    permission: "orders.view",
+  },
+  {
+    id: "orders",
+    label: "Đơn hàng",
+    icon: ShoppingBag,
+    permission: "orders.view",
+  },
+  {
+    id: "rates",
+    label: "Đơn giá",
+    icon: Settings2,
+    permission: "rates.manage",
+  },
+  {
+    id: "lines",
+    label: "Chuyền sản xuất",
+    icon: Factory,
+    permission: "orders.view",
+  },
+  {
+    id: "production",
+    label: "Sản lượng",
+    icon: ChartNoAxesCombined,
+    permission: "production.view",
+  },
+  {
+    id: "qc",
+    label: "Kiểm soát chất lượng",
+    icon: ShieldCheck,
+    permission: "qc.view",
+  },
+  {
+    id: "delivery",
+    label: "Giao hàng",
+    icon: Truck,
+    permission: "delivery.view",
+  },
+  {
+    id: "payroll",
+    label: "Lương sản phẩm",
+    icon: DollarSign,
+    permission: "payroll.view",
+  },
+  {
+    id: "audit",
+    label: "Nhật ký",
+    icon: ClipboardList,
+    permission: "audit.view",
+  },
+  { id: "users", label: "Tài khoản", icon: Users, permission: "users.manage" },
+  {
+    id: "roles",
+    label: "Vai trò và quyền",
+    icon: Shield,
+    permission: "roles.manage",
+  },
+  {
+    id: "backup",
+    label: "Sao lưu",
+    icon: DatabaseBackup,
+    permission: "users.manage",
+  },
+] as const;
+type Tab = (typeof navigation)[number]["id"];
+export default function Page() {
+  const [session, setSession] = useState<SessionInfo | null>(null);
+  const [checking, setChecking] = useState(true);
+  const [tab, setTab] = useState<Tab>("overview");
+  const [sidebar, setSidebar] = useState(false);
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [rates, setRates] = useState<Rate[]>([]);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [create, setCreate] = useState(false);
+  const [production, setProduction] = useState(false);
+  const [productionOrder, setProductionOrder] = useState("");
+  const [selected, setSelected] = useState<Order | null>(null);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [notice, setNotice] = useState("");
+  const unauthorized = useCallback(() => {
+    setSession(null);
+    setData(null);
+    setSelected(null);
+    setCreate(false);
+    setProduction(false);
+    setAccountOpen(false);
+  }, []);
+  const api = useMemo(
+    () => apiFor(session, unauthorized),
+    [session, unauthorized],
+  );
+  const loadSession = useCallback(async () => {
+    const value = await apiFor(null, () => {})<SessionInfo>(
+      "/api/auth/session",
+    );
+    setSession(value);
+    setTab("overview");
+    setData(null);
+    setError("");
+  }, []);
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
-  // Stage transition
-  const handleUpdateStage = async (orderId: string, stage: StageKey) => {
-    try {
-      const res = await fetch(`/api/orders/${orderId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stage, user_name: currentRole }),
+    let live = true;
+    void apiFor(null, () => {})<SessionInfo>("/api/auth/session")
+      .then((value) => {
+        if (live) setSession(value);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (live) setChecking(false);
       });
-      const json = await res.json();
-      if (json.success) {
-        fetchData();
-        // Update selected order if opened
-        if (selectedOrder && selectedOrder.id === orderId) {
-          const resDetail = await fetch(`/api/orders/${orderId}`);
-          const jsonDetail = await resDetail.json();
-          if (jsonDetail.success) setSelectedOrder(jsonDetail.data);
-        }
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleOpenOrderDetail = async (order: Order) => {
+    return () => {
+      live = false;
+    };
+  }, []);
+  const currentSession = useRef(session);
+  useEffect(() => {
+    currentSession.current = session;
+  }, [session]);
+  const refresh = useCallback(async () => {
+    if (!session || session.user.must_change_password) return;
     try {
-      const res = await fetch(`/api/orders/${order.id}`);
-      const json = await res.json();
-      if (json.success) {
-        setSelectedOrder(json.data);
-      } else {
-        setSelectedOrder(order);
-      }
-      setIsDetailOpen(true);
-    } catch (err) {
-      setSelectedOrder(order);
-      setIsDetailOpen(true);
+      const results = await Promise.all([
+        hasPermission(session.user, "orders.view")
+          ? api<DashboardData>("/api/orders")
+          : Promise.resolve(null),
+        hasPermission(session.user, "orders.view") &&
+        (hasPermission(session.user, "rates.manage") ||
+          hasPermission(session.user, "payroll.view"))
+          ? api<Rate[]>("/api/rates")
+          : Promise.resolve([]),
+      ]);
+      if (currentSession.current !== session) return;
+      setData(results[0]);
+      setRates(results[1]);
+      setError("");
+    } catch (e) {
+      if (currentSession.current === session) setError(message(e));
+    } finally {
+      if (currentSession.current === session) setLoading(false);
     }
+  }, [session, api]);
+  useEffect(() => {
+    let live = true;
+    void Promise.resolve().then(() => {
+      if (live) return refresh();
+    });
+    return () => {
+      live = false;
+    };
+  }, [refresh]);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(""), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+  const [workPage, setWorkPage] = useState(1);
+  const [workSearch, setWorkSearch] = useState("");
+  const workerOrders = (data?.orders || []).filter(
+    (o) =>
+      o.status !== "completed" &&
+      `${o.id} ${o.product_name} ${o.customer}`
+        .toLocaleLowerCase("vi")
+        .includes(workSearch.toLocaleLowerCase("vi")),
+  );
+  const currentWorkPage = Math.min(
+    workPage,
+    Math.max(1, Math.ceil(workerOrders.length / 12)),
+  );
+  const isWorker =
+    !!session?.user.employee_id &&
+    session.user.roles.length > 0 &&
+    session.user.roles.some((r) => r.id === "worker") &&
+    session.user.roles.every(
+      (r) =>
+        r.id === "worker" ||
+        r.grants.every((g) => g.permission === "delivery.record"),
+    );
+  const tabs = session
+    ? navigation
+        .filter(
+          (n) =>
+            hasPermission(session.user, n.permission) &&
+            (!isWorker ||
+              ["overview", "production", "payroll"].includes(n.id)) &&
+            (n.id !== "backup" ||
+              session.user.roles.some((r) => r.id === "admin")) &&
+            (!session.representing ||
+              !["users", "roles", "backup"].includes(n.id)),
+        )
+        .map((n) =>
+          isWorker
+            ? {
+                ...n,
+                label:
+                  n.id === "overview"
+                    ? "Công việc"
+                    : n.id === "production"
+                      ? "Lịch sử sản lượng"
+                      : "Lương của tôi",
+              }
+            : n,
+        )
+    : [];
+  const active = tabs.find((n) => n.id === tab) || tabs[0];
+  async function openOrder(order: Order) {
+    try {
+      setSelected(await api<Order>(`/api/orders/${order.id}`));
+    } catch (e) {
+      setError(message(e));
+    }
+  }
+  async function reloadDetail() {
+    await refresh();
+    if (selected) {
+      try {
+        setSelected(await api<Order>(`/api/orders/${selected.id}`));
+      } catch (e) {
+        setError(message(e));
+      }
+    }
+  }
+  async function saved(close: () => void, message = "Đã lưu dữ liệu.") {
+    close();
+    await refresh();
+    setNotice(message);
+  }
+  async function logout() {
+    try {
+      await api("/api/auth/logout", {});
+      unauthorized();
+    } catch (e) {
+      setError(message(e));
+    }
+  }
+  if (checking)
+    return (
+      <div className="loading-page">
+        <Logo />
+        <p>Đang kiểm tra phiên đăng nhập…</p>
+      </div>
+    );
+  if (!session)
+    return (
+      <MotionConfig reducedMotion="user">
+        <AuthScreen api={api} onLogin={loadSession} />
+      </MotionConfig>
+    );
+  if (session.user.must_change_password)
+    return (
+      <div className="forced-password">
+        <Logo />
+        <section className="panel padded">
+          <h1>Đổi mật khẩu tạm</h1>
+          <p className="muted">
+            Bạn cần đặt mật khẩu mới để tiếp tục làm việc.
+          </p>
+          <PasswordForm
+            api={api}
+            onChanged={() => {
+              unauthorized();
+            }}
+          />
+          <Action tone="secondary" onClick={logout}>
+            Đăng xuất
+          </Action>
+        </section>
+      </div>
+    );
+  const title =
+    active?.id === "overview" && isWorker
+      ? "Công việc của tôi"
+      : active?.label || "Không gian làm việc";
+  const orderProps = {
+    orders: data?.orders || [],
+    lines: data?.lines || [],
+    session,
+    api,
+    onOpen: openOrder,
+    onCreate: () => setCreate(true),
+    onChanged: refresh,
   };
-
-  const atRiskCount = stats.orders.atRisk + stats.orders.delayed;
-  const canViewPayroll = currentRole !== "nhan_vien";
-
-  return (
-    <div className="min-h-screen bg-zinc-50 flex flex-col font-sans text-zinc-900">
-      <div className="flex flex-1">
-        {/* Left Navigation Sidebar */}
-        <Sidebar
-          activeTab={activeTab}
-          onSelectTab={(tab) => {
-            if (tab === "nhap_san_luong") {
-              setIsFastLogOpen(true);
-            } else {
-              setActiveTab(tab);
-            }
-          }}
-          isOpenMobile={mobileSidebarOpen}
-          onCloseMobile={() => setMobileSidebarOpen(false)}
-          canViewPayroll={canViewPayroll}
-        />
-
-        <div className="min-w-0 flex-1">
-      {/* Top Header */}
-      <Header
-        currentRole={currentRole}
-        onRoleChange={(role) => {
-          setCurrentRole(role);
-          if (role === "nhan_vien" && activeTab === "luong_san_luong") setActiveTab("tong_quan");
-        }}
-        onToggleSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-        atRiskCount={atRiskCount}
-      />
-        {/* Main Content View */}
-        <main className="flex-1 p-3.5 sm:p-6 lg:p-8 space-y-5 mx-auto w-full overflow-x-hidden">
-          {/* Top Title Action Bar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-1">
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-                  {activeTab === "tong_quan" && "Tổng quan"}
-                  {activeTab === "don_hang" && "Đơn hàng"}
-                  {activeTab === "chuyen_may" && "Chuyền may"}
-                  {activeTab === "luong_san_luong" && "Lương sản phẩm"}
-                  {activeTab === "qc" && "Kiểm soát chất lượng"}
-                  {activeTab === "giao_hang" && "Giao hàng"}
-                </h1>
-
-              </div>
-
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 text-xs border-zinc-200 text-zinc-700 hover:bg-zinc-100 gap-1"
-                onClick={() => fetchData()}
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-                <span className="hidden sm:inline">Làm mới</span>
-              </Button>
-
-              <Button
-                size="sm"
-                className="h-8 text-xs bg-zinc-900 text-white hover:bg-zinc-800 gap-1 font-semibold"
-                onClick={() => setIsFastLogOpen(true)}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>Nhập sản lượng</span>
-              </Button>
+  const panel =
+    active?.id === "overview" ? (
+      <div className="stack">
+        <div className="kpi-grid">
+          {[
+            {
+              label: isWorker ? "Đơn trong chuyền" : "Đang sản xuất",
+              value: data?.stats.orders.totalRunning || 0,
+              hint: "Đơn hàng chưa hoàn thành",
+              tab: "orders",
+            },
+            {
+              label: "Cần chú ý",
+              value:
+                (data?.stats.orders.atRisk || 0) +
+                (data?.stats.orders.delayed || 0),
+              hint: `${data?.stats.orders.atRisk || 0} nguy cơ · ${data?.stats.orders.delayed || 0} trễ hạn`,
+              tab: "orders",
+            },
+            {
+              label: "Lượt công việc tháng",
+              value: data?.stats.production.monthlyQty || 0,
+              hint: `Tháng ${day().slice(0, 7)}`,
+              tab: "production",
+            },
+            {
+              label: hasPermission(session.user, "payroll.view")
+                ? "Tiền công tháng"
+                : "Đơn hoàn thành",
+              value: hasPermission(session.user, "payroll.view")
+                ? money(data?.stats.production.monthlyPay || 0)
+                : data?.stats.orders.completed || 0,
+              hint: hasPermission(session.user, "payroll.view")
+                ? "Trong phạm vi được xem"
+                : "Đã xuất xưởng",
+              tab: hasPermission(session.user, "payroll.view")
+                ? "payroll"
+                : "orders",
+            },
+          ].map((card) => (
+            <button
+              className={`kpi-card ${typeof card.value === "string" ? "kpi-money" : ""}`}
+              key={card.label}
+              onClick={() =>
+                setTab(
+                  (isWorker && card.tab === "orders"
+                    ? "overview"
+                    : card.tab) as Tab,
+                )
+              }
+            >
+              <span>{card.label}</span>
+              <strong>
+                {typeof card.value === "number"
+                  ? card.value.toLocaleString("vi-VN")
+                  : card.value}
+              </strong>
+              <p>{card.hint}</p>
+            </button>
+          ))}
+        </div>
+        {!isWorker && hasPermission(session.user, "production.view") && (
+          <DashboardInsights
+            api={api}
+            orders={data?.orders || []}
+            lines={data?.lines || []}
+            session={session}
+          />
+        )}
+        {isWorker ? (
+          <div className="stack">
+            <input
+              aria-label="Tìm công việc"
+              placeholder="Tìm mã đơn, sản phẩm…"
+              value={workSearch}
+              onChange={(e) => {
+                setWorkSearch(e.target.value);
+                setWorkPage(1);
+              }}
+            />
+            <Pagination
+              page={currentWorkPage}
+              total={workerOrders.length}
+              pageSize={12}
+              onChange={setWorkPage}
+            />
+            <div className="operations-grid">
+              {workerOrders
+                .slice((currentWorkPage - 1) * 12, currentWorkPage * 12)
+                .map((o) => (
+                  <article className="panel padded stack" key={o.id}>
+                    <div className="card-top">
+                      <strong>{o.id}</strong>
+                      <span className="muted">
+                        {
+                          LUUTA_STAGES.find((s) => s.key === o.current_stage)
+                            ?.label
+                        }
+                      </span>
+                    </div>
+                    <h2>{o.product_name}</h2>
+                    <p className="muted">
+                      {o.total_quantity} sản phẩm · Chuyền {o.line_id}
+                    </p>
+                    {!(data?.employees || []).some((e) =>
+                      canRecordProduction(session.user, e, o),
+                    ) && (
+                      <p className="muted">
+                        Chỉ xem tiến độ · Chưa có quyền ghi nhận cho nhân viên
+                        tại chuyền này.
+                      </p>
+                    )}
+                    {!!o.work_items?.length && (
+                      <ul className="work-progress-list">
+                        {o.work_items.map((p) => (
+                          <li key={p.id}>
+                            <span>
+                              {p.stage} · {p.name}
+                            </span>
+                            <strong>
+                              {p.recorded_quantity || 0}/{o.total_quantity}
+                            </strong>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <div className="inline-actions">
+                      {o.current_stage === "giao_hang" &&
+                        availableOperations(session.user, o).some(
+                          (a) => a.key === "deliver",
+                        ) && (
+                          <Action onClick={() => openOrder(o)}>
+                            Ghi nhận giao hàng
+                          </Action>
+                        )}
+                      {o.current_stage !== "giao_hang" &&
+                        (data?.employees || []).some((e) =>
+                          canRecordProduction(session.user, e, o),
+                        ) && (
+                          <Action
+                            onClick={() => {
+                              setProductionOrder(o.id);
+                              setProduction(true);
+                            }}
+                          >
+                            Ghi nhận công việc
+                          </Action>
+                        )}
+                      <Action tone="secondary" onClick={() => openOrder(o)}>
+                        Chi tiết và tiến độ
+                      </Action>
+                    </div>
+                  </article>
+                ))}
+              {!data?.orders.some((o) => o.status !== "completed") && (
+                <Empty>Chưa có công việc trong chuyền của bạn.</Empty>
+              )}
             </div>
           </div>
-
-          {/* TAB: TỔNG QUAN (Dashboard Giám Đốc) */}
-          {activeTab === "tong_quan" && (
-            <div className="space-y-5">
-              {/* 6 KPI Cards & Monthly Snapshot */}
-              <KpiCards
-                stats={stats}
-                showPayroll={canViewPayroll}
-                activeFilter={statusFilter}
-                onFilterChange={setStatusFilter}
-              />
-
-              {/* Order List Table */}
-              <OrderTable
-                orders={orders}
-                searchTerm={searchTerm}
-                onSearchChange={setSearchTerm}
-                statusFilter={statusFilter}
-                onStatusFilterChange={setStatusFilter}
-                onCreateNew={() => setIsCreateOpen(true)}
-                onSelectOrder={handleOpenOrderDetail}
-              />
-            </div>
-          )}
-
-          {/* TAB: ĐƠN HÀNG */}
-          {activeTab === "don_hang" && (
-            <div className="space-y-4">
-              <OrderTable
-                orders={orders}
-                searchTerm={searchTerm}
-                onSearchChange={setSearchTerm}
-                statusFilter={statusFilter}
-                onStatusFilterChange={setStatusFilter}
-                onCreateNew={() => setIsCreateOpen(true)}
-                onSelectOrder={handleOpenOrderDetail}
-              />
-            </div>
-          )}
-
-          {/* TAB: 5 CHUYỀN MAY */}
-          {activeTab === "chuyen_may" && (
-            <LinesView
-              lines={lines}
-              orders={allOrders}
-              onSelectOrder={handleOpenOrderDetail}
-              onOpenLogModal={(lineId) => setIsFastLogOpen(true)}
-            />
-          )}
-
-          {/* TAB: LƯƠNG & SẢN LƯỢNG */}
-          {activeTab === "luong_san_luong" && canViewPayroll && (
-            <PayrollView currentRole={currentRole} />
-          )}
-
-          {/* TAB: PHÂN HỆ QC */}
-          {activeTab === "qc" && (
-            <QcView
-              orders={allOrders}
-              onSelectOrder={handleOpenOrderDetail}
-              onUpdateStage={handleUpdateStage}
-            />
-          )}
-
-          {/* TAB: GIAO HÀNG */}
-          {activeTab === "giao_hang" && (
-            <DeliveryView
-              orders={allOrders}
-              onSelectOrder={handleOpenOrderDetail}
-              onRefresh={fetchData}
-            />
-          )}
-        </main>
-        </div>
+        ) : (
+          <OrderWorkspace {...orderProps} />
+        )}
       </div>
-
-      {/* MODAL 1: CHI TIẾT ĐƠN HÀNG (Ma trận Màu x Size + Timeline 11 bước) */}
-      <OrderDetailModal
-        order={selectedOrder}
-        isOpen={isDetailOpen}
-        onClose={() => {
-          setIsDetailOpen(false);
-          setSelectedOrder(null);
-        }}
-        onUpdateStage={handleUpdateStage}
+    ) : active?.id === "orders" ? (
+      <OrderWorkspace {...orderProps} />
+    ) : active?.id === "lines" ? (
+      <LinesPanel
+        lines={data?.lines || []}
+        orders={data?.orders || []}
+        onOpen={openOrder}
       />
-
-      {/* MODAL 2: TẠO ĐƠN HÀNG MỚI */}
-      <CreateOrderModal
-        isOpen={isCreateOpen}
-        onClose={() => setIsCreateOpen(false)}
-        nextId={nextCode}
-        onSuccess={fetchData}
+    ) : active?.id === "production" || active?.id === "payroll" ? (
+      <RecordsPanel
+        key={`${active.id}-${session.user.id}`}
+        mode={active.id}
+        api={api}
+        session={session}
+        employees={data?.employees || []}
+        lines={data?.lines || []}
       />
-
-      {/* MODAL 3: CẬP NHẬT NHANH SẢN LƯỢNG (Mobile fast-entry) */}
-      <FastProductionLogModal
-        isOpen={isFastLogOpen}
-        onClose={() => setIsFastLogOpen(false)}
-        orders={allOrders}
-        employees={employees}
-        lines={lines}
-        onSuccess={fetchData}
+    ) : active?.id === "qc" || active?.id === "delivery" ? (
+      <OperationsPanel
+        mode={active.id}
+        orders={data?.orders || []}
+        session={session}
+        onOpen={openOrder}
       />
-    </div>
+    ) : active?.id === "rates" ? (
+      <RatesPanel
+        orders={(data?.orders || []).filter((o) =>
+          permits(session.user, "rates.manage", { lineId: o.line_id }),
+        )}
+        rates={rates}
+        api={api}
+        onSaved={refresh}
+      />
+    ) : active?.id === "users" || active?.id === "roles" ? (
+      <AdminPanel
+        key={active.id}
+        mode={active.id}
+        api={api}
+        session={session}
+        onRepresent={loadSession}
+      />
+    ) : active?.id === "backup" ? (
+      <BackupPanel api={api} />
+    ) : active?.id === "audit" ? (
+      <AuditPanel api={api} />
+    ) : (
+      <Empty>Chưa có quyền truy cập phân hệ. Liên hệ admin.</Empty>
+    );
+  function renderNavigation(mobile: boolean) {
+    return tabs.map((item) => {
+      const Icon = item.icon;
+      return (
+        <button
+          key={item.id}
+          aria-current={active?.id === item.id ? "page" : undefined}
+          onClick={() => {
+            setTab(item.id);
+            if (mobile) setSidebar(false);
+          }}
+        >
+          <Icon size={20} />
+          {item.label}
+          {!mobile && active?.id === item.id && (
+            <motion.span
+              layoutId="nav-indicator"
+              className="nav-indicator"
+              transition={{ duration: 0.18 }}
+            />
+          )}
+        </button>
+      );
+    });
+  }
+  return (
+    <MotionConfig reducedMotion="user">
+      <div className="app-shell">
+        <aside className="sidebar">
+          <Logo />
+          <nav aria-label="Điều hướng chính">{renderNavigation(false)}</nav>
+          <div className="sidebar-footer">
+            LUUTA Garment<span>Không gian làm việc local</span>
+          </div>
+        </aside>
+        <Modal
+          open={sidebar}
+          onClose={() => setSidebar(false)}
+          title="Điều hướng"
+          drawer
+        >
+          <Logo />
+          <nav aria-label="Điều hướng điện thoại">{renderNavigation(true)}</nav>
+        </Modal>
+        <div className="app-main">
+          <header className="app-header">
+            <div className="inline-actions">
+              <button
+                className="icon-button mobile-menu"
+                aria-label="Mở điều hướng"
+                onClick={() => setSidebar(true)}
+              >
+                <Menu size={22} />
+              </button>
+              <span className="header-label">Không gian làm việc</span>
+            </div>
+            <button
+              className="profile-button"
+              onClick={() => setAccountOpen(true)}
+            >
+              <span className="avatar">{session.user.name.charAt(0)}</span>
+              <span>
+                {session.user.name}
+                <small>
+                  {session.user.roles.map((r) => r.name).join(", ")}
+                </small>
+              </span>
+              <UserRound size={18} />
+            </button>
+          </header>
+          {session.representing && (
+            <div className="represent-banner">
+              <span>
+                <EyeBadge /> {session.actor.name} đang thao tác thay{" "}
+                <strong>{session.user.name}</strong>
+              </span>
+              <Action
+                tone="secondary"
+                onClick={async () => {
+                  try {
+                    await api("/api/auth/stop-represent", {});
+                    await loadSession();
+                  } catch (e) {
+                    setError(message(e));
+                  }
+                }}
+              >
+                <ArrowLeft size={18} />
+                Thoát đại diện
+              </Action>
+            </div>
+          )}
+          <main>
+            <div className="page-heading">
+              <div>
+                <h1>{title}</h1>
+                <p>
+                  {isWorker
+                    ? "Theo dõi công việc, sản lượng và tiền công trong phạm vi của bạn."
+                    : "Theo dõi và điều phối hoạt động xưởng may."}
+                </p>
+              </div>
+              <div className="inline-actions">
+                <Action
+                  tone="secondary"
+                  aria-label="Làm mới dữ liệu"
+                  busy={loading}
+                  onClick={() => {
+                    setLoading(true);
+                    void refresh();
+                  }}
+                >
+                  <RefreshCw size={18} />
+                  Làm mới
+                </Action>
+                {hasPermission(session.user, "production.create") && (
+                  <Action
+                    onClick={() => {
+                      setProductionOrder("");
+                      setProduction(true);
+                    }}
+                  >
+                    <Plus size={18} />
+                    {isWorker ? "Ghi nhận công việc" : "Nhập sản lượng"}
+                  </Action>
+                )}
+              </div>
+            </div>
+            <ErrorNotice error={error} />
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={`${active?.id}-${session.user.id}`}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.16 }}
+              >
+                {panel}
+              </motion.div>
+            </AnimatePresence>
+          </main>
+        </div>
+        <AnimatePresence>
+          {notice && (
+            <motion.div
+              className="toast"
+              role="status"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 12 }}
+            >
+              <CheckCircle2 size={20} />
+              {notice}
+              <button
+                className="icon-button"
+                aria-label="Đóng thông báo"
+                onClick={() => setNotice("")}
+              >
+                <X size={18} />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        <Modal
+          open={create}
+          onClose={() => setCreate(false)}
+          title="Tạo đơn hàng"
+          description="Phân bổ sản phẩm theo màu và size."
+          wide
+        >
+          {data && (
+            <CreateOrderForm
+              api={api}
+              session={session}
+              employees={data.employees}
+              nextCode={data.nextCode}
+              lines={data.lines.filter((l) =>
+                permits(session.user, "orders.create", { lineId: l.id }),
+              )}
+              onSaved={() => saved(() => setCreate(false))}
+            />
+          )}
+        </Modal>
+        <Modal
+          open={production}
+          onClose={() => setProduction(false)}
+          title={isWorker ? "Ghi nhận công việc" : "Nhập sản lượng"}
+          description="Ghi nhận số lượng hoàn thành để tính tiền công."
+          wide
+        >
+          {data ? (
+            <ProductionForm
+              api={api}
+              initialOrderId={productionOrder}
+              orders={data.orders}
+              employees={data.employees}
+              rates={rates}
+              session={session}
+              onSaved={(notice) => saved(() => setProduction(false), notice)}
+            />
+          ) : (
+            <Empty>Chưa có dữ liệu nhập sản lượng.</Empty>
+          )}
+        </Modal>
+        <Modal
+          open={!!selected}
+          onClose={() => setSelected(null)}
+          title={`Chi tiết đơn ${selected?.id || ""}`}
+          description="Số lượng theo từng màu–size và quy trình sản xuất."
+          wide
+        >
+          {selected && (
+            <OrderDetail
+              key={selected.id}
+              order={selected}
+              session={session}
+              api={api}
+              lines={data?.lines || []}
+              employees={data?.employees || []}
+              onChanged={reloadDetail}
+            />
+          )}
+        </Modal>
+        <Modal
+          open={accountOpen}
+          onClose={() => setAccountOpen(false)}
+          title="Tài khoản của tôi"
+          description={session.user.username}
+        >
+          <div className="stack">
+            <div>
+              <strong>{session.user.name}</strong>
+              <p className="muted">
+                {session.user.roles.map((r) => r.name).join(", ")}
+              </p>
+            </div>
+            {!session.representing && (
+              <PasswordForm
+                api={api}
+                onChanged={() => {
+                  unauthorized();
+                }}
+              />
+            )}
+            <Action tone="secondary" onClick={logout}>
+              <LogOut size={18} />
+              Đăng xuất
+            </Action>
+          </div>
+        </Modal>
+      </div>
+    </MotionConfig>
+  );
+}
+function EyeBadge() {
+  return <UserRound size={20} />;
+}
+function PasswordForm({ api, onChanged }: { api: Api; onChanged: () => void }) {
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function submit(form: FormData) {
+    setBusy(true);
+    setError("");
+    try {
+      await api("/api/auth/password", {
+        currentPassword: form.get("current"),
+        newPassword: form.get("new"),
+      });
+      onChanged();
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        void submit(new FormData(event.currentTarget));
+      }}
+      className="stack"
+    >
+      <h3>Đổi mật khẩu</h3>
+      <ErrorNotice error={error} />
+      <Field label="Mật khẩu hiện tại">
+        <input
+          name="current"
+          type="password"
+          autoComplete="current-password"
+          maxLength={128}
+          required
+        />
+      </Field>
+      <Field label="Mật khẩu mới (ít nhất 10 ký tự)">
+        <input
+          name="new"
+          type="password"
+          autoComplete="new-password"
+          minLength={10}
+          maxLength={128}
+          required
+        />
+      </Field>
+      <Action busy={busy} type="submit">
+        <KeyRound size={18} />
+        Đổi mật khẩu và đăng nhập lại
+      </Action>
+    </form>
   );
 }

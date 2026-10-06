@@ -1,14 +1,9 @@
-import { NextResponse } from "next/server";
-import { getAuditLogs } from "@/lib/db";
-
-export async function GET() {
+import { authenticate, ok, failure } from "@/lib/server/auth";
+import { auditFor } from "@/lib/server/business";
+export async function GET(request: Request) {
   try {
-    const logs = getAuditLogs(50);
-    return NextResponse.json({
-      success: true,
-      data: logs,
-    });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return ok(auditFor(authenticate(request)));
+  } catch (e) {
+    return failure(e);
   }
 }

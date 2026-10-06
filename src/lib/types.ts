@@ -18,6 +18,8 @@ export interface OrderVariant {
   id?: number;
   order_id: string;
   color: string;
+  color_hex?: string | null;
+  colors?: { name: string; hex: string; alpha?: number }[];
   size: string; // XS, S, M, L, XL, XXL
   quantity: number;
   cut_qty: number;
@@ -37,12 +39,25 @@ export interface OrderStage {
   received_qty: number;
   completed_qty: number;
   remaining_qty: number;
+  received_at?: string | null;
   started_at: string | null;
   completed_at: string | null;
   notes: string | null;
 }
 
+export interface WorkItem {
+  recorded_quantity?: number;
+  id: number;
+  order_id: string;
+  stage: string;
+  name: string;
+}
+
 export interface Order {
+  work_items?: WorkItem[];
+  risk_reason?: string;
+  delivered_complete?: boolean;
+  version: number;
   id: string;
   customer: string;
   product_code: string;
@@ -53,6 +68,7 @@ export interface Order {
   order_date: string;
   deadline: string;
   priority: "normal" | "high" | "urgent";
+  responsible_id?: string | null;
   assigned_to: string;
   current_stage: StageKey;
   progress: number; // 0 - 100
@@ -61,6 +77,18 @@ export interface Order {
   created_at: string;
   variants?: OrderVariant[];
   stages?: OrderStage[];
+  operations?: {
+    id: number;
+    action: string;
+    color: string;
+    size: string;
+    quantity: number;
+    packages: number;
+    operation_date: string;
+    image_url?: string | null;
+    worker_name: string;
+    notes: string;
+  }[];
 }
 
 export interface Line {
@@ -76,6 +104,7 @@ export interface Line {
 }
 
 export interface Employee {
+  assigned_line_ids?: number[];
   id: string;
   name: string;
   line_id: number;
@@ -84,6 +113,10 @@ export interface Employee {
 }
 
 export interface ProductionLog {
+  work_item_id?: number | null;
+  work_item_name?: string | null;
+  completed_quantity?: number | null;
+  product_code?: string;
   id?: number;
   log_date: string; // YYYY-MM-DD
   employee_id: string;
@@ -100,6 +133,7 @@ export interface ProductionLog {
   updated_by: string;
   month: string; // YYYY-MM
   is_locked: number;
+  version?: number;
   created_at?: string;
 }
 

@@ -3,26 +3,37 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -H 127.0.0.1",
     "build": "next build",
-    "start": "next start -H 0.0.0.0",
-    "lint": "eslint"
+    "start": "next start -H 127.0.0.1",
+    "lint": "eslint",
+    "bootstrap": "node --import tsx scripts/bootstrap.ts",
+    "backup": "node --import tsx scripts/backup.ts",
+    "test": "node --import tsx tests/system.test.mts",
+    "seed": "node --import tsx scripts/seed.ts",
+    "seed:accounts": "node --import tsx scripts/seed-accounts.ts",
+    "qa:data": "node --import tsx scripts/qa-data.ts"
   },
   "engines": {
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.117.2",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@radix-ui/react-dialog": "^1.2.0",
     "better-sqlite3": "^13.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
+    "exceljs": "^4.4.0",
     "lucide-react": "^1.52.0",
+    "motion": "^14.0.0",
     "next": "16.3.8",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "sharp": "^0.35.5",
     "tailwind-merge": "^3.7.0",
-    "xlsx": "^0.18.5"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -32,7 +43,14 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.8",
+    "prettier": "^3.9.9",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
   }
 }

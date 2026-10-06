@@ -42,3 +42,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local business archives and snapshots
+/backups/
+
+# Local QA screenshots and reports may contain business data
+/artifacts/

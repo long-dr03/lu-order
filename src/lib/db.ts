@@ -1,3 +1,4 @@
+import { assessOrders } from "./progress";
 import Database from "better-sqlite3";
 import path from "path";
 import {
@@ -6,11 +7,11 @@ import {
   OrderVariant,
   OrderStage,
   Order,
+  WorkItem,
   Line,
   Employee,
   ProductionLog,
   AuditLog,
-  QcRecord,
 } from "./types";
 
 export * from "./types";
@@ -27,7 +28,9 @@ if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
 
-const db = new Database(dbPath);
+export const db = new Database(dbPath);
+db.pragma("foreign_keys = ON");
+db.pragma("busy_timeout = 5000");
 
 // Enable WAL mode for high performance
 db.pragma("journal_mode = WAL");
@@ -151,410 +154,6 @@ db.exec(`
   );
 `);
 
-// Seed data if empty
-const countLines = db.prepare("SELECT COUNT(*) as count FROM lines").get() as { count: number };
-
-if (countLines.count === 0) {
-  // 1. Seed 5 Chuyền sản xuất
-  const insertLine = db.prepare(`
-    INSERT INTO lines (id, name, leader_name, workers_count, capacity_per_day)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-
-  insertLine.run(1, "Chuyền 1", "Nguyễn Thị Hoa", 8, 35);
-  insertLine.run(2, "Chuyền 2", "Trần Văn Bình", 10, 45);
-  insertLine.run(3, "Chuyền 3", "Lê Thu Hà", 7, 30);
-  insertLine.run(4, "Chuyền 4", "Phạm Minh Đạt", 9, 40);
-  insertLine.run(5, "Chuyền 5", "Vũ Thị Mai", 8, 35);
-
-  // 2. Seed Nhân viên
-  const insertEmp = db.prepare(`
-    INSERT INTO employees (id, name, line_id, role, phone)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-
-  const initialEmployees = [
-    ["NV-01", "Nguyễn Văn A", 1, "May", "0901234567"],
-    ["NV-02", "Trần Thị B", 1, "May", "0902345678"],
-    ["NV-03", "Lê Văn C", 2, "Cắt", "0903456789"],
-    ["NV-04", "Hoàng Thị D", 2, "May", "0904567890"],
-    ["NV-05", "Phạm Văn E", 3, "May", "0905678901"],
-    ["NV-06", "Vũ Thị F", 3, "QC", "0906789012"],
-    ["NV-07", "Đỗ Văn G", 4, "May", "0907890123"],
-    ["NV-08", "Ngô Thị H", 4, "Sửa hàng", "0908901234"],
-    ["NV-09", "Bùi Văn K", 5, "Đóng gói", "0909012345"],
-    ["NV-10", "Dương Thị M", 5, "May", "0909123456"],
-  ];
-
-  for (const emp of initialEmployees) {
-    insertEmp.run(...emp);
-  }
-
-  // 3. Seed Đơn hàng mẫu của LUUTA
-  const insertOrder = db.prepare(`
-    INSERT INTO orders (id, customer, product_code, product_name, image_url, total_quantity, line_id, order_date, deadline, priority, assigned_to, current_stage, progress, status, notes)
-    VALUES (@id, @customer, @product_code, @product_name, @image_url, @total_quantity, @line_id, @order_date, @deadline, @priority, @assigned_to, @current_stage, @progress, @status, @notes)
-  `);
-
-  const insertVariant = db.prepare(`
-    INSERT INTO order_variants (order_id, color, size, quantity, cut_qty, sewn_qty, qc_passed_qty, packed_qty, delivered_qty)
-    VALUES (@order_id, @color, @size, @quantity, @cut_qty, @sewn_qty, @qc_passed_qty, @packed_qty, @delivered_qty)
-  `);
-
-  const insertStage = db.prepare(`
-    INSERT INTO order_stages (order_id, stage_key, stage_name, status, assignee, received_qty, completed_qty, remaining_qty, started_at, completed_at, notes)
-    VALUES (@order_id, @stage_key, @stage_name, @status, @assignee, @received_qty, @completed_qty, @remaining_qty, @started_at, @completed_at, @notes)
-  `);
-
-  // LU-001: Đầm lụa xếp ly A (111 sản phẩm theo đúng bảng ví dụ size x màu của LUUTA)
-  insertOrder.run({
-    id: "LU-001",
-    customer: "Thời Trang Elise",
-    product_code: "DL-01",
-    product_name: "Đầm lụa xếp ly A",
-    image_url: null,
-    total_quantity: 111,
-    line_id: 1,
-    order_date: "2026-10-01",
-    deadline: "2026-10-12",
-    priority: "high",
-    assigned_to: "Chuyền 1 (Nguyễn Thị Hoa)",
-    current_stage: "may",
-    progress: 55,
-    status: "on_track",
-    notes: "Vải lụa cao cấp, đường may tỉ mỉ, ủi định hình",
-  });
-
-  // Variants for LU-001
-  const v001 = [
-    // Đen: XS=5, S=10, M=20, L=10, XL=5 (Tổng 50)
-    { color: "Đen", size: "XS", q: 5, cut: 5, sew: 4, qc: 4, pack: 4, del: 0 },
-    { color: "Đen", size: "S", q: 10, cut: 10, sew: 8, qc: 8, pack: 6, del: 0 },
-    { color: "Đen", size: "M", q: 20, cut: 20, sew: 15, qc: 13, pack: 10, del: 10 },
-    { color: "Đen", size: "L", q: 10, cut: 10, sew: 8, qc: 8, pack: 8, del: 8 },
-    { color: "Đen", size: "XL", q: 5, cut: 5, sew: 3, qc: 3, pack: 2, del: 0 },
-    // Trắng: XS=3, S=8, M=15, L=8, XL=2 (Tổng 36)
-    { color: "Trắng", size: "XS", q: 3, cut: 3, sew: 3, qc: 3, pack: 0, del: 0 },
-    { color: "Trắng", size: "S", q: 8, cut: 8, sew: 6, qc: 5, pack: 0, del: 0 },
-    { color: "Trắng", size: "M", q: 15, cut: 15, sew: 12, qc: 10, pack: 0, del: 0 },
-    { color: "Trắng", size: "L", q: 8, cut: 8, sew: 6, qc: 5, pack: 0, del: 0 },
-    { color: "Trắng", size: "XL", q: 2, cut: 2, sew: 1, qc: 1, pack: 0, del: 0 },
-    // Đỏ: XS=2, S=5, M=10, L=5, XL=3 (Tổng 25)
-    { color: "Đỏ", size: "XS", q: 2, cut: 2, sew: 1, qc: 0, pack: 0, del: 0 },
-    { color: "Đỏ", size: "S", q: 5, cut: 5, sew: 3, qc: 2, pack: 0, del: 0 },
-    { color: "Đỏ", size: "M", q: 10, cut: 10, sew: 6, qc: 4, pack: 0, del: 0 },
-    { color: "Đỏ", size: "L", q: 5, cut: 5, sew: 3, qc: 2, pack: 0, del: 0 },
-    { color: "Đỏ", size: "XL", q: 3, cut: 3, sew: 2, qc: 1, pack: 0, del: 0 },
-  ];
-
-  for (const item of v001) {
-    insertVariant.run({
-      order_id: "LU-001",
-      color: item.color,
-      size: item.size,
-      quantity: item.q,
-      cut_qty: item.cut,
-      sewn_qty: item.sew,
-      qc_passed_qty: item.qc,
-      packed_qty: item.pack,
-      delivered_qty: item.del,
-    });
-  }
-
-  // LU-002: Áo Blazer Form Rộng (80 cái) - Đang ở khâu Cắt
-  insertOrder.run({
-    id: "LU-002",
-    customer: "Local Brand Hades",
-    product_code: "BZ-02",
-    product_name: "Áo Blazer Form Rộng",
-    image_url: null,
-    total_quantity: 80,
-    line_id: 2,
-    order_date: "2026-10-02",
-    deadline: "2026-10-08",
-    priority: "urgent",
-    assigned_to: "Chuyền 2 (Trần Văn Bình)",
-    current_stage: "cat",
-    progress: 30,
-    status: "at_risk",
-    notes: "Cần giao gấp ngày 08/10. Chuyền 2 đang dồn lực cắt may.",
-  });
-
-  const v002 = [
-    { color: "Đen", size: "M", q: 25, cut: 25, sew: 10, qc: 0, pack: 0, del: 0 },
-    { color: "Đen", size: "L", q: 20, cut: 20, sew: 5, qc: 0, pack: 0, del: 0 },
-    { color: "Kem", size: "S", q: 15, cut: 15, sew: 0, qc: 0, pack: 0, del: 0 },
-    { color: "Kem", size: "M", q: 20, cut: 10, sew: 0, qc: 0, pack: 0, del: 0 },
-  ];
-  for (const item of v002) {
-    insertVariant.run({
-      order_id: "LU-002",
-      color: item.color,
-      size: item.size,
-      quantity: item.q,
-      cut_qty: item.cut,
-      sewn_qty: item.sew,
-      qc_passed_qty: item.qc,
-      packed_qty: item.pack,
-      delivered_qty: item.del,
-    });
-  }
-
-  // LU-003: Đầm suông Linen (50 cái) - Đang trễ ở khâu sửa hàng
-  insertOrder.run({
-    id: "LU-003",
-    customer: "Thời Trang Bella",
-    product_code: "DL-03",
-    product_name: "Đầm suông Linen thêu",
-    image_url: null,
-    total_quantity: 50,
-    line_id: 3,
-    order_date: "2026-09-28",
-    deadline: "2026-10-05",
-    priority: "urgent",
-    assigned_to: "Chuyền 3 (Lê Thu Hà)",
-    current_stage: "sua_hang",
-    progress: 65,
-    status: "delayed",
-    notes: "Hạn giao 05/10 đã trễ. Đang sửa hàng 8 cái lỗi đường may.",
-  });
-
-  const v003 = [
-    { color: "Be", size: "S", q: 15, cut: 15, sew: 15, qc: 10, pack: 0, del: 0 },
-    { color: "Be", size: "M", q: 25, cut: 25, sew: 25, qc: 18, pack: 0, del: 0 },
-    { color: "Trắng", size: "M", q: 10, cut: 10, sew: 10, qc: 6, pack: 0, del: 0 },
-  ];
-  for (const item of v003) {
-    insertVariant.run({
-      order_id: "LU-003",
-      color: item.color,
-      size: item.size,
-      quantity: item.q,
-      cut_qty: item.cut,
-      sewn_qty: item.sew,
-      qc_passed_qty: item.qc,
-      packed_qty: item.pack,
-      delivered_qty: item.del,
-    });
-  }
-
-  // LU-004: Áo sơ mi lụa công sở (45 cái) - Đang chờ giao
-  insertOrder.run({
-    id: "LU-004",
-    customer: "Đồng Phục V-Tech",
-    product_code: "SM-04",
-    product_name: "Áo sơ mi lụa công sở",
-    image_url: null,
-    total_quantity: 45,
-    line_id: 4,
-    order_date: "2026-09-25",
-    deadline: "2026-10-07",
-    priority: "normal",
-    assigned_to: "Chuyền 4 (Phạm Minh Đạt)",
-    current_stage: "giao_hang",
-    progress: 95,
-    status: "on_track",
-    notes: "Đã đóng gói đủ 45 cái. Đang chờ xe vận chuyển lấy hàng.",
-  });
-
-  const v004 = [
-    { color: "Trắng", size: "M", q: 20, cut: 20, sew: 20, qc: 20, pack: 20, del: 20 },
-    { color: "Trắng", size: "L", q: 15, cut: 15, sew: 15, qc: 15, pack: 15, del: 13 }, // thiếu 2 cái L
-    { color: "Xanh", size: "M", q: 10, cut: 10, sew: 10, qc: 10, pack: 10, del: 10 },
-  ];
-  for (const item of v004) {
-    insertVariant.run({
-      order_id: "LU-004",
-      color: item.color,
-      size: item.size,
-      quantity: item.q,
-      cut_qty: item.cut,
-      sewn_qty: item.sew,
-      qc_passed_qty: item.qc,
-      packed_qty: item.pack,
-      delivered_qty: item.del,
-    });
-  }
-
-  // 4. Seed Stages cho từng đơn
-  const allOrders = [
-    { id: "LU-001", cur: "may", total: 111 },
-    { id: "LU-002", cur: "cat", total: 80 },
-    { id: "LU-003", cur: "sua_hang", total: 50 },
-    { id: "LU-004", cur: "giao_hang", total: 45 },
-  ];
-
-  for (const ord of allOrders) {
-    const curIndex = LUUTA_STAGES.findIndex((s) => s.key === ord.cur);
-
-    for (let i = 0; i < LUUTA_STAGES.length; i++) {
-      const s = LUUTA_STAGES[i];
-      let status: "pending" | "in_progress" | "completed" | "has_issue" = "pending";
-      let comp = 0;
-      let started: string | null = null;
-      let completed: string | null = null;
-
-      if (i < curIndex) {
-        status = "completed";
-        comp = ord.total;
-        started = "2026-10-02 08:00";
-        completed = "2026-10-03 17:00";
-      } else if (i === curIndex) {
-        status = ord.cur === "sua_hang" ? "has_issue" : "in_progress";
-        comp = Math.round(ord.total * 0.5);
-        started = "2026-10-04 08:00";
-      }
-
-      insertStage.run({
-        order_id: ord.id,
-        stage_key: s.key,
-        stage_name: s.label,
-        status,
-        assignee: "Tổ phụ trách",
-        received_qty: ord.total,
-        completed_qty: comp,
-        remaining_qty: ord.total - comp,
-        started_at: started,
-        completed_at: completed,
-        notes: status === "has_issue" ? "Có 8 sản phẩm lỗi đang sửa" : null,
-      });
-    }
-  }
-
-  // 5. Seed Production Logs (Cập nhật sản lượng tính lương)
-  const insertLog = db.prepare(`
-    INSERT INTO production_logs (log_date, employee_id, employee_name, line_id, order_id, product_name, color, size, stage, quantity, unit_price, total_pay, updated_by, month, is_locked)
-    VALUES (@log_date, @employee_id, @employee_name, @line_id, @order_id, @product_name, @color, @size, @stage, @quantity, @unit_price, @total_pay, @updated_by, @month, @is_locked)
-  `);
-
-  const initialLogs = [
-    {
-      log_date: "2026-10-05",
-      employee_id: "NV-01",
-      employee_name: "Nguyễn Văn A",
-      line_id: 1,
-      order_id: "LU-001",
-      product_name: "Đầm lụa xếp ly A",
-      color: "Đen",
-      size: "M",
-      stage: "May",
-      quantity: 15,
-      unit_price: 35000,
-      total_pay: 525000,
-      updated_by: "Tổ trưởng Hoa",
-      month: "2026-10",
-      is_locked: 0,
-    },
-    {
-      log_date: "2026-10-04",
-      employee_id: "NV-01",
-      employee_name: "Nguyễn Văn A",
-      line_id: 1,
-      order_id: "LU-001",
-      product_name: "Đầm lụa xếp ly A",
-      color: "Đen",
-      size: "M",
-      stage: "May",
-      quantity: 105,
-      unit_price: 35000,
-      total_pay: 3675000,
-      updated_by: "Tổ trưởng Hoa",
-      month: "2026-10",
-      is_locked: 0,
-    },
-    {
-      log_date: "2026-10-03",
-      employee_id: "NV-01",
-      employee_name: "Nguyễn Văn A",
-      line_id: 1,
-      order_id: "LU-001",
-      product_name: "Đầm lụa xếp ly A",
-      color: "Trắng",
-      size: "S",
-      stage: "May",
-      quantity: 80,
-      unit_price: 40000,
-      total_pay: 3200000,
-      updated_by: "Tổ trưởng Hoa",
-      month: "2026-10",
-      is_locked: 0,
-    },
-    {
-      log_date: "2026-10-02",
-      employee_id: "NV-01",
-      employee_name: "Nguyễn Văn A",
-      line_id: 1,
-      order_id: "LU-001",
-      product_name: "Đầm lụa xếp ly A",
-      color: "Đỏ",
-      size: "M",
-      stage: "May",
-      quantity: 50,
-      unit_price: 20000,
-      total_pay: 1000000,
-      updated_by: "Tổ trưởng Hoa",
-      month: "2026-10",
-      is_locked: 0,
-    },
-    {
-      log_date: "2026-10-05",
-      employee_id: "NV-02",
-      employee_name: "Trần Thị B",
-      line_id: 1,
-      order_id: "LU-001",
-      product_name: "Đầm lụa xếp ly A",
-      color: "Đen",
-      size: "L",
-      stage: "May",
-      quantity: 20,
-      unit_price: 35000,
-      total_pay: 700000,
-      updated_by: "Tổ trưởng Hoa",
-      month: "2026-10",
-      is_locked: 0,
-    },
-    {
-      log_date: "2026-10-05",
-      employee_id: "NV-03",
-      employee_name: "Lê Văn C",
-      line_id: 2,
-      order_id: "LU-002",
-      product_name: "Áo Blazer Form Rộng",
-      color: "Đen",
-      size: "M",
-      stage: "Cắt",
-      quantity: 45,
-      unit_price: 15000,
-      total_pay: 675000,
-      updated_by: "Tổ trưởng Bình",
-      month: "2026-10",
-      is_locked: 0,
-    },
-  ];
-
-  for (const log of initialLogs) {
-    insertLog.run(log);
-  }
-
-  // 6. Seed Audit Logs
-  const insertAudit = db.prepare(`
-    INSERT INTO audit_logs (user_name, action, details, created_at)
-    VALUES (?, ?, ?, ?)
-  `);
-
-  insertAudit.run("Nguyễn B", "Cập nhật sản lượng", "LU-027 – Đầm A – May – Đen/M – +6 sản phẩm", "2026-10-05 17:32:00");
-  insertAudit.run("Trợ lý sản xuất", "Sửa Deadline", "Sửa Deadline LU-027 từ 08/10 → 10/10", "2026-10-05 18:10:00");
-  insertAudit.run("Tổ trưởng Hoa", "Cập nhật chuyền 1", "Nhận đơn LU-001 vào chuyền may", "2026-10-01 09:00:00");
-
-  // 7. Seed QC Records
-  const insertQc = db.prepare(`
-    INSERT INTO qc_records (order_id, color, size, inspected_qty, passed_qty, defect_qty, defect_type, rework_qty, reinspected_qty, repassed_qty, inspector)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  insertQc.run("LU-003", "Be", "M", 25, 17, 8, "Nhảy mũi chỉ lai váy và lệch ve cổ", 8, 5, 5, "Vũ Thị F");
-}
-
 // ----------------- QUERY & MUTATION FUNCTIONS -----------------
 
 export function getAllOrders(filter?: {
@@ -563,7 +162,7 @@ export function getAllOrders(filter?: {
   line_id?: number;
 }): Order[] {
   let sql = "SELECT * FROM orders WHERE 1=1";
-  const params: any[] = [];
+  const params: (string | number)[] = [];
 
   if (filter?.search && filter.search.trim() !== "") {
     const term = `%${filter.search.trim()}%`;
@@ -600,33 +199,78 @@ export function getAllOrders(filter?: {
     params.push(filter.line_id);
   }
 
-  sql += " ORDER BY CASE status WHEN 'delayed' THEN 1 WHEN 'at_risk' THEN 2 WHEN 'on_track' THEN 3 ELSE 4 END, deadline ASC";
+  sql +=
+    " ORDER BY CASE status WHEN 'delayed' THEN 1 WHEN 'at_risk' THEN 2 WHEN 'on_track' THEN 3 ELSE 4 END, deadline ASC";
 
   const orders = db.prepare(sql).all(...params) as Order[];
 
   // Attach variants to each order
-  const variantStmt = db.prepare("SELECT * FROM order_variants WHERE order_id = ?");
+  const variantStmt = db.prepare(
+    "SELECT * FROM order_variants WHERE order_id = ?",
+  );
   for (const o of orders) {
-    o.variants = variantStmt.all(o.id) as OrderVariant[];
+    o.variants = (variantStmt.all(o.id) as OrderVariant[]).map(decodeColors);
+    o.work_items = db
+      .prepare(
+        "SELECT w.id,w.order_id,w.stage,w.name,COALESCE(SUM(p.quantity),0) recorded_quantity FROM order_work_items w LEFT JOIN production_logs p ON p.work_item_id=w.id WHERE w.order_id=? GROUP BY w.id ORDER BY w.id",
+      )
+      .all(o.id) as WorkItem[];
   }
 
-  return orders;
+  return assessOrders(orders, getLines(), throughput());
 }
 
 export function getOrderById(id: string): Order | null {
-  const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(id) as Order | undefined;
+  const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(id) as
+    Order | undefined;
   if (!order) return null;
 
-  order.variants = db.prepare("SELECT * FROM order_variants WHERE order_id = ?").all(id) as OrderVariant[];
-  order.stages = db.prepare("SELECT * FROM order_stages WHERE order_id = ? ORDER BY id ASC").all(id) as OrderStage[];
+  order.variants = db
+    .prepare("SELECT * FROM order_variants WHERE order_id = ?")
+    .all(id) as OrderVariant[];
+  order.variants = order.variants.map(decodeColors);
+  order.stages = db
+    .prepare("SELECT * FROM order_stages WHERE order_id = ? ORDER BY id ASC")
+    .all(id) as OrderStage[];
 
-  return order;
+  const counts: Record<string, [string, string]> = {
+    cat: ["quantity", "cut_qty"],
+    may: ["cut_qty", "sewn_qty"],
+    qc: ["sewn_qty", "qc_inspected_qty"],
+    sua_hang: ["qc_defect_qty", "reworked_qty"],
+    qc_lai: ["reworked_qty", "reinspected_qty"],
+    dong_goi: ["qc_passed_qty", "packed_qty"],
+    giao_hang: ["packed_qty", "delivered_qty"],
+  };
+  for (const stage of order.stages) {
+    const columns = counts[stage.stage_key];
+    if (!columns) continue;
+    const sum = (key: string) =>
+      (order.variants || []).reduce(
+        (n, v) =>
+          n + Number((v as unknown as Record<string, number>)[key] || 0),
+        0,
+      );
+    stage.received_qty =
+      stage.stage_key === "sua_hang"
+        ? sum("qc_defect_qty") + sum("reinspected_qty") - sum("repassed_qty")
+        : sum(columns[0]);
+    stage.completed_qty = sum(columns[1]);
+    stage.remaining_qty = Math.max(0, stage.received_qty - stage.completed_qty);
+  }
+
+  const all = getAllOrders();
+  const assessed = all.find((o) => o.id === id);
+  return { ...order, ...assessed, stages: order.stages };
 }
 
-export function createOrderWithVariants(data: {
-  order: Omit<Order, "created_at" | "progress" | "status">;
-  variants: Array<{ color: string; size: string; quantity: number }>;
-}): Order {
+export function createOrderWithVariants(
+  data: {
+    order: Omit<Order, "created_at" | "progress" | "status" | "version">;
+    variants: Array<{ color: string; size: string; quantity: number }>;
+  },
+  actor = "Hệ thống",
+): Order {
   const insertOrder = db.prepare(`
     INSERT INTO orders (id, customer, product_code, product_name, image_url, total_quantity, line_id, order_date, deadline, priority, assigned_to, current_stage, progress, status, notes)
     VALUES (@id, @customer, @product_code, @product_name, @image_url, @total_quantity, @line_id, @order_date, @deadline, @priority, @assigned_to, @current_stage, 0, 'on_track', @notes)
@@ -642,7 +286,10 @@ export function createOrderWithVariants(data: {
     VALUES (@order_id, @stage_key, @stage_name, @status, @assignee, @received_qty, 0, @remaining_qty)
   `);
 
-  const totalQty = data.variants.reduce((acc, v) => acc + Number(v.quantity || 0), 0);
+  const totalQty = data.variants.reduce(
+    (acc, v) => acc + Number(v.quantity || 0),
+    0,
+  );
 
   const tx = db.transaction(() => {
     insertOrder.run({
@@ -676,7 +323,11 @@ export function createOrderWithVariants(data: {
     }
 
     // Log audit
-    logAudit("Trợ lý sản xuất", "Tạo đơn hàng mới", `Tạo mã ${data.order.id} - ${data.order.product_name} (SL: ${totalQty})`);
+    logAudit(
+      actor,
+      "Tạo đơn hàng mới",
+      `Tạo mã ${data.order.id} - ${data.order.product_name} (SL: ${totalQty})`,
+    );
   });
 
   tx();
@@ -686,37 +337,55 @@ export function createOrderWithVariants(data: {
 export function updateOrderStage(
   orderId: string,
   newStage: StageKey,
-  userName: string = "Quản lý"
+  userName: string = "Quản lý",
 ) {
   const order = getOrderById(orderId);
   if (!order) return null;
 
   const stageIndex = LUUTA_STAGES.findIndex((s) => s.key === newStage);
   const totalStages = LUUTA_STAGES.length;
-  const progress = Math.min(100, Math.round(((stageIndex + 1) / totalStages) * 100));
+  const progress = Math.min(
+    100,
+    Math.round(((stageIndex + 1) / totalStages) * 100),
+  );
 
   const isCompleted = newStage === "hoan_thanh";
 
   const tx = db.transaction(() => {
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE orders
       SET current_stage = ?, progress = ?, status = ?
       WHERE id = ?
-    `).run(newStage, progress, isCompleted ? "completed" : order.status, orderId);
+    `,
+    ).run(
+      newStage,
+      progress,
+      isCompleted ? "completed" : order.status,
+      orderId,
+    );
 
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE order_stages
       SET status = 'completed', completed_at = datetime('now', 'localtime')
       WHERE order_id = ? AND id < (SELECT id FROM order_stages WHERE order_id = ? AND stage_key = ?)
-    `).run(orderId, orderId, newStage);
+    `,
+    ).run(orderId, orderId, newStage);
 
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE order_stages
       SET status = 'in_progress', started_at = datetime('now', 'localtime')
       WHERE order_id = ? AND stage_key = ?
-    `).run(orderId, newStage);
+    `,
+    ).run(orderId, newStage);
 
-    logAudit(userName, "Chuyển công đoạn", `${orderId} chuyển sang: ${LUUTA_STAGES[stageIndex]?.label || newStage}`);
+    logAudit(
+      userName,
+      "Chuyển công đoạn",
+      `${orderId} chuyển sang: ${LUUTA_STAGES[stageIndex]?.label || newStage}`,
+    );
   });
 
   tx();
@@ -728,19 +397,38 @@ export function getLines(): Line[] {
 }
 
 export function getEmployees(lineId?: number): Employee[] {
-  if (lineId) {
-    return db.prepare("SELECT * FROM employees WHERE line_id = ? ORDER BY name ASC").all(lineId) as Employee[];
-  }
-  return db.prepare("SELECT * FROM employees ORDER BY name ASC").all() as Employee[];
+  const employees = db
+    .prepare("SELECT * FROM employees ORDER BY name ASC")
+    .all() as Employee[];
+  const accounts = db
+    .prepare(
+      "SELECT employee_id,line_ids FROM accounts WHERE status='active' AND employee_id IS NOT NULL",
+    )
+    .all() as { employee_id: string; line_ids: string }[];
+  const assignments = new Map(
+    accounts.map((a) => [a.employee_id, JSON.parse(a.line_ids) as number[]]),
+  );
+  return employees
+    .map((e) => ({ ...e, assigned_line_ids: assignments.get(e.id) || [] }))
+    .filter(
+      (e) =>
+        !lineId || e.line_id === lineId || e.assigned_line_ids.includes(lineId),
+    );
 }
 
 // ----------------- SẢN LƯỢNG & TÍNH LƯƠNG SẢN PHẨM -----------------
 
-export function addProductionLog(data: Omit<ProductionLog, "id" | "created_at" | "is_locked">): ProductionLog {
+export function addProductionLog(
+  data: Omit<ProductionLog, "id" | "created_at" | "is_locked">,
+): ProductionLog {
   // Check if month is locked
-  const lock = db.prepare("SELECT * FROM payroll_locks WHERE month = ?").get(data.month);
+  const lock = db
+    .prepare("SELECT * FROM payroll_locks WHERE month = ?")
+    .get(data.month);
   if (lock) {
-    throw new Error(`Bảng lương tháng ${data.month} đã được CHỐT. Không thể thêm sản lượng mới!`);
+    throw new Error(
+      `Bảng lương tháng ${data.month} đã được CHỐT. Không thể thêm sản lượng mới!`,
+    );
   }
 
   const totalPay = data.quantity * data.unit_price;
@@ -754,27 +442,33 @@ export function addProductionLog(data: Omit<ProductionLog, "id" | "created_at" |
 
   // Update variant stage quantity if applicable
   if (data.stage === "Cắt") {
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE order_variants
       SET cut_qty = cut_qty + ?
       WHERE order_id = ? AND color = ? AND size = ?
-    `).run(data.quantity, data.order_id, data.color, data.size);
+    `,
+    ).run(data.quantity, data.order_id, data.color, data.size);
   } else if (data.stage === "May") {
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE order_variants
       SET sewn_qty = sewn_qty + ?
       WHERE order_id = ? AND color = ? AND size = ?
-    `).run(data.quantity, data.order_id, data.color, data.size);
+    `,
+    ).run(data.quantity, data.order_id, data.color, data.size);
   }
 
   // Log audit
   logAudit(
     data.updated_by,
     "Cập nhật sản lượng",
-    `${data.employee_name} • ${data.order_id} - ${data.product_name} • ${data.color}/${data.size} • ${data.stage} • +${data.quantity} sp (${totalPay.toLocaleString()}đ)`
+    `${data.employee_name} • ${data.order_id} - ${data.product_name} • ${data.color}/${data.size} • ${data.stage} • +${data.quantity} sp (${totalPay.toLocaleString()}đ)`,
   );
 
-  return db.prepare("SELECT * FROM production_logs WHERE id = ?").get(res.lastInsertRowid) as ProductionLog;
+  return db
+    .prepare("SELECT * FROM production_logs WHERE id = ?")
+    .get(res.lastInsertRowid) as ProductionLog;
 }
 
 export function getProductionLogs(filter?: {
@@ -784,7 +478,7 @@ export function getProductionLogs(filter?: {
   stage?: string;
 }): ProductionLog[] {
   let sql = "SELECT * FROM production_logs WHERE 1=1";
-  const params: any[] = [];
+  const params: (string | number)[] = [];
 
   if (filter?.month) {
     sql += " AND month = ?";
@@ -819,17 +513,20 @@ export function getPayrollSummary(month: string, employeeId?: string) {
     FROM production_logs
     WHERE month = ?
   `;
-  const params: any[] = [month];
+  const params: (string | number)[] = [month];
 
   if (employeeId) {
     sql += " AND employee_id = ?";
     params.push(employeeId);
   }
 
-  sql += " GROUP BY employee_id, employee_name, line_id ORDER BY total_salary DESC";
+  sql +=
+    " GROUP BY employee_id, employee_name, line_id ORDER BY total_salary DESC";
 
   const rows = db.prepare(sql).all(...params);
-  const isLocked = !!db.prepare("SELECT * FROM payroll_locks WHERE month = ?").get(month);
+  const isLocked = !!db
+    .prepare("SELECT * FROM payroll_locks WHERE month = ?")
+    .get(month);
 
   return {
     month,
@@ -839,24 +536,34 @@ export function getPayrollSummary(month: string, employeeId?: string) {
 }
 
 export function lockPayroll(month: string, lockedBy: string) {
-  const existing = db.prepare("SELECT * FROM payroll_locks WHERE month = ?").get(month);
+  const existing = db
+    .prepare("SELECT * FROM payroll_locks WHERE month = ?")
+    .get(month);
   if (existing) {
     throw new Error(`Tháng ${month} đã được chốt trước đó!`);
   }
 
   const tx = db.transaction(() => {
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO payroll_locks (month, locked_by, locked_at)
       VALUES (?, ?, datetime('now', 'localtime'))
-    `).run(month, lockedBy);
+    `,
+    ).run(month, lockedBy);
 
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE production_logs
       SET is_locked = 1
       WHERE month = ?
-    `).run(month);
+    `,
+    ).run(month);
 
-    logAudit(lockedBy, "CHỐT LƯƠNG THÁNG", `Đã khóa toàn bộ dữ liệu sản lượng và bảng lương tháng ${month}`);
+    logAudit(
+      lockedBy,
+      "CHỐT LƯƠNG THÁNG",
+      `Đã khóa toàn bộ dữ liệu sản lượng và bảng lương tháng ${month}`,
+    );
   });
 
   tx();
@@ -866,40 +573,60 @@ export function lockPayroll(month: string, lockedBy: string) {
 // ----------------- AUDIT & LOGGING -----------------
 
 export function logAudit(userName: string, action: string, details: string) {
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO audit_logs (user_name, action, details)
     VALUES (?, ?, ?)
-  `).run(userName, action, details);
+  `,
+  ).run(userName, action, details);
 }
 
 export function getAuditLogs(limit: number = 50): AuditLog[] {
-  return db.prepare("SELECT * FROM audit_logs ORDER BY id DESC LIMIT ?").all(limit) as AuditLog[];
+  return db
+    .prepare("SELECT * FROM audit_logs ORDER BY id DESC LIMIT ?")
+    .all(limit) as AuditLog[];
 }
 
 // ----------------- DASHBOARD METRICS -----------------
 
 export function getDirectorDashboardStats() {
   const orders = db.prepare("SELECT * FROM orders").all() as Order[];
-  const logsThisMonth = db.prepare(`
+  const logsThisMonth = db
+    .prepare(
+      `
     SELECT
       SUM(quantity) as total_qty,
       SUM(total_pay) as total_pay
     FROM production_logs
     WHERE month = strftime('%Y-%m', 'now', 'localtime')
-  `).get() as { total_qty: number; total_pay: number };
+  `,
+    )
+    .get() as { total_qty: number; total_pay: number };
 
   const totalRunning = orders.filter((o) => o.status !== "completed").length;
   const atRisk = orders.filter((o) => o.status === "at_risk").length;
   const delayed = orders.filter((o) => o.status === "delayed").length;
   const completed = orders.filter((o) => o.status === "completed").length;
-  const waitingQc = orders.filter((o) => o.current_stage === "may" || o.current_stage === "qc").length;
-  const waitingDelivery = orders.filter((o) => o.current_stage === "dong_goi" || o.current_stage === "giao_hang").length;
+  const waitingQc = orders.filter(
+    (o) => o.current_stage === "may" || o.current_stage === "qc",
+  ).length;
+  const waitingDelivery = orders.filter(
+    (o) => o.current_stage === "dong_goi" || o.current_stage === "giao_hang",
+  ).length;
 
   const lines = getLines();
   const lineStats = lines.map((l) => {
-    const lineOrders = orders.filter((o) => o.line_id === l.id && o.status !== "completed");
-    const totalRemainingQty = lineOrders.reduce((sum, o) => sum + Math.round(o.total_quantity * (1 - o.progress / 100)), 0);
-    const daysNeeded = l.capacity_per_day > 0 ? Math.ceil(totalRemainingQty / l.capacity_per_day) : 0;
+    const lineOrders = orders.filter(
+      (o) => o.line_id === l.id && o.status !== "completed",
+    );
+    const totalRemainingQty = lineOrders.reduce(
+      (sum, o) => sum + Math.round(o.total_quantity * (1 - o.progress / 100)),
+      0,
+    );
+    const daysNeeded =
+      l.capacity_per_day > 0
+        ? Math.ceil(totalRemainingQty / l.capacity_per_day)
+        : 0;
 
     return {
       ...l,
@@ -910,7 +637,11 @@ export function getDirectorDashboardStats() {
     };
   });
 
-  const employeesCount = (db.prepare("SELECT COUNT(*) as count FROM employees").get() as { count: number }).count;
+  const employeesCount = (
+    db.prepare("SELECT COUNT(*) as count FROM employees").get() as {
+      count: number;
+    }
+  ).count;
 
   return {
     orders: {
@@ -931,9 +662,31 @@ export function getDirectorDashboardStats() {
 }
 
 export function generateNextOrderCode(): string {
-  const last = db.prepare("SELECT id FROM orders WHERE id LIKE 'LU-%' ORDER BY id DESC LIMIT 1").get() as { id: string } | undefined;
-  if (!last) return "LU-005";
-  const num = parseInt(last.id.replace("LU-", ""), 10);
-  if (isNaN(num)) return "LU-005";
-  return `LU-${String(num + 1).padStart(3, "0")}`;
+  const ids = db.prepare("SELECT id FROM orders").all() as { id: string }[];
+  const largest = ids.reduce(
+    (n, row) =>
+      /^LU-\d+$/.test(row.id) ? Math.max(n, Number(row.id.slice(3))) : n,
+    0,
+  );
+  return `LU-${String(largest + 1).padStart(3, "0")}`;
+}
+
+export function throughput() {
+  return db
+    .prepare(
+      "SELECT line_id,SUM(COALESCE(completed_quantity,quantity))*1.0/14 daily FROM production_logs WHERE stage='May' AND log_date BETWEEN date('now','+7 hours','-13 days') AND date('now','+7 hours') GROUP BY line_id",
+    )
+    .all() as { line_id: number; daily: number }[];
+}
+
+function decodeColors(v: OrderVariant) {
+  const raw = (v as OrderVariant & { colors_json?: string }).colors_json;
+  return {
+    ...v,
+    colors: raw
+      ? JSON.parse(raw)
+      : v.color_hex
+        ? [{ name: v.color, hex: v.color_hex }]
+        : [],
+  };
 }
