@@ -1,121 +1,181 @@
 "use client";
 
-import React from "react";
-import { CheckCircle2, XCircle, AlertTriangle, ShieldCheck } from "lucide-react";
-import { Order } from "@/lib/db";
+import React, { useState } from "react";
+import { ShieldCheck, CheckCircle2, XCircle, Wrench, RefreshCw, AlertTriangle } from "lucide-react";
+import { Order, StageKey } from "@/lib/types";
 import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
 import { formatDate } from "@/lib/utils";
 
 interface QcViewProps {
   orders: Order[];
   onSelectOrder: (order: Order) => void;
-  onApproveQc: (orderId: string) => void;
-  onRejectQc: (orderId: string, reason: string) => void;
+  onUpdateStage: (orderId: string, stage: StageKey) => void;
 }
 
-export function QcView({
-  orders,
-  onSelectOrder,
-  onApproveQc,
-  onRejectQc,
-}: QcViewProps) {
-  const qcOrders = orders.filter((o) => o.stage === "qc" || o.issue?.toLowerCase().includes("qc"));
+export function QcView({ orders, onSelectOrder, onUpdateStage }: QcViewProps) {
+  // Orders in May, QC, Sua hang, QC lai
+  const qcOrders = orders.filter(
+    (o) =>
+      o.current_stage === "may" ||
+      o.current_stage === "qc" ||
+      o.current_stage === "sua_hang" ||
+      o.current_stage === "qc_lai"
+  );
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-slate-700" />
-            PHÂN HỆ KIỂM ĐỊNH CHẤT LƯỢNG (QC)
-          </h2>
-          <p className="text-xs text-slate-500">
-            Duyệt sản phẩm đạt tiêu chuẩn xuất xưởng hoặc trả về tổ may xử lý lại
-          </p>
-        </div>
+    <div className="space-y-5 text-xs">
+      <div>
+        <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide flex items-center gap-2">
+          <ShieldCheck className="h-4 w-4 text-slate-800" />
+          Khu Vực Kiểm Định Chất Lượng (QC) LUUTA
+        </h2>
+        <p className="text-[11px] text-slate-500">
+          Quy trình bắt buộc: May → QC → Sửa hàng → QC lại → Chỉ khi đạt mới chuyển Đóng gói
+        </p>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-xs">
-        <div className="p-4 border-b border-slate-100 bg-slate-50/60 flex items-center justify-between">
-          <span className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-            Đơn hàng cần nghiệm thu QC ({qcOrders.length})
-          </span>
-          <span className="text-xs text-slate-400">Tiêu chuẩn: Đường may, kích thước, độ sạch vải</span>
-        </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Khâu 1: Chờ QC / Đang QC */}
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-2xs space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <h3 className="font-bold text-xs uppercase text-slate-800 flex items-center gap-1.5">
+              <ShieldCheck className="h-3.5 w-3.5 text-slate-600" />
+              1. Đơn Đang Kiểm QC
+            </h3>
+            <span className="font-mono text-xs text-slate-500">
+              {qcOrders.filter((o) => o.current_stage === "qc" || o.current_stage === "may").length} đơn
+            </span>
+          </div>
 
-        <div className="divide-y divide-slate-100">
-          {qcOrders.length > 0 ? (
-            qcOrders.map((order) => {
-              const hasQcIssue = order.issue?.toLowerCase().includes("qc");
-
-              return (
+          <div className="space-y-2">
+            {qcOrders
+              .filter((o) => o.current_stage === "qc" || o.current_stage === "may")
+              .map((ord) => (
                 <div
-                  key={order.id}
-                  className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/60 transition-colors"
+                  key={ord.id}
+                  onClick={() => onSelectOrder(ord)}
+                  className="p-3 rounded-lg border border-slate-100 bg-slate-50/60 hover:bg-slate-100/70 cursor-pointer space-y-2 transition-colors"
                 >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-medium text-xs text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
-                        {order.id}
-                      </span>
-                      <span className="font-medium text-slate-800 text-xs">
-                        {order.customer}
-                      </span>
-                      <span className="text-slate-300">•</span>
-                      <span className="text-xs text-slate-600">
-                        {order.item_name}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-3 text-xs text-slate-500">
-                      <span>Số lượng: <strong className="text-slate-700">{order.quantity} cái</strong></span>
-                      <span>Hạn giao: <strong>{formatDate(order.deadline)}</strong></span>
-                      {hasQcIssue && (
-                        <span className="text-rose-600 font-medium flex items-center gap-1">
-                          • {order.issue}
-                        </span>
-                      )}
-                    </div>
-
-                    {order.notes && (
-                      <p className="text-[11px] text-slate-400">
-                        Lưu ý: {order.notes}
-                      </p>
-                    )}
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono font-bold text-xs bg-slate-900 text-white px-2 py-0.5 rounded">
+                      {ord.id}
+                    </span>
+                    <span className="text-[11px] text-slate-500 font-mono">
+                      Hạn: {formatDate(ord.deadline)}
+                    </span>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div>
+                    <h4 className="font-semibold text-slate-900">{ord.product_name}</h4>
+                    <p className="text-[11px] text-slate-500">
+                      Khách: {ord.customer} • Tổng SL: <strong>{ord.total_quantity} cái</strong>
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1 border-t border-slate-100">
                     <Button
                       size="sm"
                       variant="outline"
-                      className="text-slate-600 border-slate-200 hover:bg-slate-100 text-xs gap-1"
-                      onClick={() => {
-                        const reason = prompt("Nhập lý do QC không đạt (ví dụ: lỗi đường may, bẩn vải):", "QC chưa đạt");
-                        if (reason) onRejectQc(order.id, reason);
+                      className="h-7 text-[11px] border-slate-200 text-slate-700 hover:bg-slate-200 gap-1"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUpdateStage(ord.id, "sua_hang");
                       }}
                     >
-                      <XCircle className="h-3.5 w-3.5 text-slate-400" />
-                      Trả về sửa
+                      <XCircle className="h-3 w-3 text-rose-500" />
+                      Lỗi (Chuyển Sửa)
                     </Button>
-
                     <Button
                       size="sm"
-                      className="bg-slate-900 hover:bg-slate-800 text-white text-xs gap-1"
-                      onClick={() => onApproveQc(order.id)}
+                      className="h-7 text-[11px] bg-slate-900 text-white hover:bg-slate-800 gap-1 ml-auto"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUpdateStage(ord.id, "dong_goi");
+                      }}
                     >
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      QC Đạt (Đóng gói)
+                      <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+                      QC Đạt (Đóng Gói)
                     </Button>
                   </div>
                 </div>
-              );
-            })
-          ) : (
-            <div className="p-8 text-center text-xs text-slate-400">
-              Hiện tại không có đơn nào đang chờ duyệt QC.
-            </div>
-          )}
+              ))}
+          </div>
+        </div>
+
+        {/* Khâu 2: Sửa hàng & QC lại */}
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-2xs space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <h3 className="font-bold text-xs uppercase text-slate-800 flex items-center gap-1.5">
+              <Wrench className="h-3.5 w-3.5 text-amber-600" />
+              2. Đang Sửa Hàng & QC Lại
+            </h3>
+            <span className="font-mono text-xs text-slate-500">
+              {qcOrders.filter((o) => o.current_stage === "sua_hang" || o.current_stage === "qc_lai").length} đơn
+            </span>
+          </div>
+
+          <div className="space-y-2">
+            {qcOrders
+              .filter((o) => o.current_stage === "sua_hang" || o.current_stage === "qc_lai")
+              .map((ord) => (
+                <div
+                  key={ord.id}
+                  onClick={() => onSelectOrder(ord)}
+                  className="p-3 rounded-lg border border-amber-200/60 bg-amber-50/30 hover:bg-amber-50/60 cursor-pointer space-y-2 transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono font-bold text-xs bg-amber-900 text-white px-2 py-0.5 rounded">
+                      {ord.id}
+                    </span>
+                    <span className="text-[10px] font-semibold text-amber-800 bg-amber-100 px-1.5 py-0.2 rounded">
+                      {ord.current_stage === "sua_hang" ? "Đang sửa hàng" : "Đang QC lại"}
+                    </span>
+                  </div>
+
+                  <div>
+                    <h4 className="font-semibold text-slate-900">{ord.product_name}</h4>
+                    <p className="text-[11px] text-slate-500">
+                      Khách: {ord.customer} • Lỗi: Nhảy mũi chỉ & lệch ve áo
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1 border-t border-amber-200/40">
+                    {ord.current_stage === "sua_hang" ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-[11px] border-amber-300 text-amber-900 hover:bg-amber-100 gap-1 w-full"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onUpdateStage(ord.id, "qc_lai");
+                        }}
+                      >
+                        <RefreshCw className="h-3 w-3" />
+                        Đã sửa xong → Chuyển QC lại
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        className="h-7 text-[11px] bg-slate-900 text-white hover:bg-slate-800 gap-1 w-full"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onUpdateStage(ord.id, "dong_goi");
+                        }}
+                      >
+                        <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+                        QC Lại Đạt → Chuyển Đóng Gói
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+            {qcOrders.filter((o) => o.current_stage === "sua_hang" || o.current_stage === "qc_lai").length === 0 && (
+              <div className="py-8 text-center text-slate-400 italic">
+                Không có đơn hàng nào bị lỗi cần sửa
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

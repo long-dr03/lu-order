@@ -1,11 +1,10 @@
 "use client";
 
 import React from "react";
-import { Search, Plus, Edit3 } from "lucide-react";
+import { Search, Plus, Filter, Eye, AlertCircle, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Progress } from "./ui/progress";
-import { Order } from "@/lib/db";
+import { Order, LUUTA_STAGES } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
 interface OrderTableProps {
@@ -27,46 +26,36 @@ export function OrderTable({
   onCreateNew,
   onSelectOrder,
 }: OrderTableProps) {
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: string, stage: string) => {
+    if (stage === "hoan_thanh") {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-50 text-slate-600 border border-slate-200">
+          <span className="h-1.5 w-1.5 rounded-full bg-slate-400"></span>
+          Đã hoàn thành
+        </span>
+      );
+    }
+
     switch (status) {
-      case "normal":
+      case "on_track":
         return (
-          <span
-            title="Bình thường / Đúng tiến độ"
-            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-50 text-slate-700 border border-slate-200/80"
-          >
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200/60">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-600"></span>
-            Bình thường
+            🟢 Đúng tiến độ
           </span>
         );
-      case "warning":
+      case "at_risk":
         return (
-          <span
-            title="Sắp đến hạn giao"
-            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-amber-50/60 text-amber-800 border border-amber-200/60"
-          >
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-amber-50 text-amber-800 border border-amber-200/60">
             <span className="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
-            Sắp trễ
+            🟡 Nguy cơ trễ
           </span>
         );
-      case "danger":
+      case "delayed":
         return (
-          <span
-            title="Đã trễ hoặc có sự cố"
-            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-rose-50/60 text-rose-800 border border-rose-200/60"
-          >
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-rose-50 text-rose-800 border border-rose-200/60">
             <span className="h-1.5 w-1.5 rounded-full bg-rose-500"></span>
-            Trễ hạn
-          </span>
-        );
-      case "completed":
-        return (
-          <span
-            title="Đã hoàn thành"
-            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-50 text-slate-500 border border-slate-200/60"
-          >
-            <span className="h-1.5 w-1.5 rounded-full bg-slate-400"></span>
-            Hoàn thành
+            🔴 Đã trễ hạn
           </span>
         );
       default:
@@ -74,174 +63,179 @@ export function OrderTable({
     }
   };
 
-  const getStageBadge = (stage: string) => {
-    const map: Record<string, string> = {
-      cat: "Cắt",
-      may: "May",
-      qc: "QC",
-      dong_goi: "Đóng gói",
-      giao_hang: "Giao hàng",
-      hoan_thanh: "Xong",
-    };
-    const label = map[stage] || stage;
-    return (
-      <span className="inline-block px-1.5 py-0.5 text-[10px] font-medium rounded bg-slate-100 text-slate-600 border border-slate-200/60">
-        {label}
-      </span>
-    );
+  const getStageLabel = (stageKey: string) => {
+    return LUUTA_STAGES.find((s) => s.key === stageKey)?.label || stageKey;
   };
 
-  // Convert progress number into wireframe block characters
+  // Convert progress into wireframe ASCII block representation
   const getAsciiBlocks = (progress: number) => {
     const total = 8;
     const filled = Math.round((progress / 100) * total);
     return "█".repeat(filled) + "░".repeat(Math.max(0, total - filled));
   };
 
+  const filterTabs = [
+    { key: "all", label: "Tất cả" },
+    { key: "on_track", label: "🟢 Đang sản xuất" },
+    { key: "at_risk", label: "🟡 Nguy cơ trễ" },
+    { key: "delayed", label: "🔴 Đã trễ" },
+    { key: "cho_qc", label: "Chờ QC" },
+    { key: "cho_dong_goi", label: "Chờ đóng gói" },
+    { key: "cho_giao", label: "Chờ giao" },
+    { key: "da_giao_du", label: "Hoàn thành" },
+  ];
+
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-xs overflow-hidden">
-      {/* Control Bar: Search & Create */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-4 border-b border-slate-100 bg-white">
+    <div className="rounded-xl border border-slate-200 bg-white shadow-2xs overflow-hidden text-xs">
+      {/* Control Bar */}
+      <div className="p-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white">
+        {/* Search */}
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
           <Input
             value={searchTerm}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="🔍 Tìm mã đơn / khách hàng / mẫu..."
-            className="pl-9 bg-slate-50/50 border-slate-200/80 focus:bg-white text-xs"
+            placeholder="🔍 Tìm mã đơn, khách, sản phẩm, màu, size..."
+            className="pl-9 bg-slate-50/50 border-slate-200 focus:bg-white text-xs h-9"
           />
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Quick status filter pills */}
-          <div className="hidden lg:flex items-center rounded-lg border border-slate-200/80 bg-slate-50/50 p-0.5 text-xs">
-            {[
-              { key: "all", label: "Tất cả" },
-              { key: "normal", label: "Bình thường" },
-              { key: "warning", label: "Sắp trễ" },
-              { key: "danger", label: "Trễ/Sự cố" },
-            ].map((f) => (
-              <button
-                key={f.key}
-                onClick={() => onStatusFilterChange(f.key)}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                  statusFilter === f.key
-                    ? "bg-white text-slate-900 shadow-xs border border-slate-200/80 font-semibold"
-                    : "text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-
           <Button
             onClick={onCreateNew}
             size="sm"
-            className="bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs gap-1.5 shadow-xs"
+            className="bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs gap-1.5 h-9 px-3.5 shadow-2xs"
           >
-            <Plus className="h-3.5 w-3.5" />
+            <Plus className="h-4 w-4" />
             + TẠO ĐƠN MỚI
           </Button>
         </div>
       </div>
 
-      {/* Desktop Table View */}
+      {/* Filter Tabs Chips */}
+      <div className="flex items-center gap-1 px-4 py-2 border-b border-slate-100 bg-slate-50/60 overflow-x-auto text-xs">
+        {filterTabs.map((f) => (
+          <button
+            key={f.key}
+            onClick={() => onStatusFilterChange(f.key)}
+            className={`px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border ${
+              statusFilter === f.key
+                ? "bg-slate-900 text-white border-slate-900 font-semibold"
+                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Orders Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs border-collapse">
           <thead>
-            <tr className="border-b border-slate-100 bg-slate-50/60 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
-              <th className="py-2.5 px-4 font-medium">MÃ ĐƠN</th>
-              <th className="py-2.5 px-4 font-medium">KHÁCH</th>
-              <th className="py-2.5 px-4 font-medium">MẪU</th>
-              <th className="py-2.5 px-4 text-right font-medium">SL</th>
-              <th className="py-2.5 px-4 font-medium">HẠN GIAO</th>
-              <th className="py-2.5 px-4 min-w-[150px] font-medium">TIẾN ĐỘ</th>
-              <th className="py-2.5 px-4 font-medium">TT</th>
-              <th className="py-2.5 px-4 text-center font-medium">THAO TÁC</th>
+            <tr className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              <th className="py-2.5 px-3">MÃ ĐƠN</th>
+              <th className="py-2.5 px-3">KHÁCH</th>
+              <th className="py-2.5 px-3">SẢN PHẨM (MÀU × SIZE)</th>
+              <th className="py-2.5 px-3 text-right">SL</th>
+              <th className="py-2.5 px-3">DEADLINE</th>
+              <th className="py-2.5 px-3 min-w-[140px]">TIẾN ĐỘ</th>
+              <th className="py-2.5 px-3">TRẠNG THÁI</th>
+              <th className="py-2.5 px-3 text-center">CHI TIẾT</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 font-sans">
             {orders.length > 0 ? (
               orders.map((order) => {
                 const asciiBlocks = getAsciiBlocks(order.progress);
+                const variants = order.variants || [];
+                const colorSummary = Array.from(new Set(variants.map((v) => v.color))).join(", ");
+                const sizeSummary = Array.from(new Set(variants.map((v) => v.size))).join(", ");
 
                 return (
                   <tr
                     key={order.id}
-                    className="hover:bg-slate-50/60 transition-colors cursor-pointer group"
                     onClick={() => onSelectOrder(order)}
+                    className="hover:bg-slate-50/70 transition-colors cursor-pointer group"
                   >
-                    {/* Mã Đơn */}
-                    <td className="py-2.5 px-4 font-mono font-medium text-slate-900 whitespace-nowrap">
-                      <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 group-hover:bg-slate-900 group-hover:text-white transition-colors text-[11px]">
+                    {/* Mã đơn */}
+                    <td className="py-2.5 px-3 font-mono font-bold text-slate-900 whitespace-nowrap">
+                      <span className="px-1.5 py-0.5 rounded bg-slate-100 group-hover:bg-slate-900 group-hover:text-white transition-colors">
                         {order.id}
                       </span>
                     </td>
 
-                    {/* Khách Hàng */}
-                    <td className="py-2.5 px-4 font-medium text-slate-700 max-w-[150px] truncate">
+                    {/* Khách hàng */}
+                    <td className="py-2.5 px-3 font-semibold text-slate-800 max-w-[130px] truncate">
                       {order.customer}
                     </td>
 
-                    {/* Mẫu */}
-                    <td className="py-2.5 px-4 max-w-[200px]">
-                      <div className="flex items-center gap-1.5">
-                        {getStageBadge(order.stage)}
-                        <span className="text-slate-600 truncate" title={order.item_name}>
-                          {order.item_name}
-                        </span>
-                      </div>
-                      {order.issue && (
-                        <div className="text-[10px] text-rose-600 truncate mt-0.5">
-                          • {order.issue}
+                    {/* Sản phẩm & biến thể */}
+                    <td className="py-2.5 px-3 max-w-[240px]">
+                      <div>
+                        <div className="font-medium text-slate-900 truncate">
+                          {order.product_name} <span className="font-mono text-slate-400 text-[10px]">({order.product_code})</span>
                         </div>
-                      )}
+                        <div className="text-[10px] text-slate-500 truncate flex items-center gap-1.5 mt-0.5">
+                          <span>Màu: <strong>{colorSummary || "Đủ màu"}</strong></span>
+                          <span>•</span>
+                          <span>Size: <strong className="font-mono">{sizeSummary || "Đủ size"}</strong></span>
+                          <span>•</span>
+                          <span className="bg-slate-100 px-1 py-0.2 rounded text-slate-700 font-medium">
+                            {getStageLabel(order.current_stage)}
+                          </span>
+                        </div>
+                      </div>
                     </td>
 
                     {/* Số lượng */}
-                    <td className="py-2.5 px-4 text-right font-mono text-slate-700">
-                      {order.quantity}
+                    <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
+                      {order.total_quantity}
                     </td>
 
-                    {/* Hạn giao */}
-                    <td className="py-2.5 px-4 whitespace-nowrap text-slate-600">
+                    {/* Deadline */}
+                    <td className="py-2.5 px-3 whitespace-nowrap text-slate-700 font-mono font-medium">
                       {formatDate(order.deadline)}
                     </td>
 
                     {/* Tiến độ (Kèm khối ASCII như wireframe) */}
-                    <td className="py-2.5 px-4">
+                    <td className="py-2.5 px-3">
                       <div className="space-y-1">
-                        <div className="flex items-center justify-between text-[11px]">
-                          <span className="font-mono text-xs tracking-wider text-slate-500">
+                        <div className="flex items-center justify-between text-[10px]">
+                          <span className="font-mono tracking-widest text-slate-600">
                             {asciiBlocks}
                           </span>
-                          <span className="font-mono text-[10px] text-slate-400">
+                          <span className="font-mono font-bold text-slate-700">
                             {order.progress}%
                           </span>
                         </div>
-                        <Progress value={order.progress} className="h-1" />
+                        <div className="w-full bg-slate-100 rounded-full h-1">
+                          <div
+                            className="bg-slate-800 h-1 rounded-full transition-all"
+                            style={{ width: `${order.progress}%` }}
+                          />
+                        </div>
                       </div>
                     </td>
 
-                    {/* Trạng thái đèn TT */}
-                    <td className="py-2.5 px-4 whitespace-nowrap">
-                      {getStatusBadge(order.status)}
+                    {/* Trạng thái */}
+                    <td className="py-2.5 px-3 whitespace-nowrap">
+                      {getStatusBadge(order.status, order.current_stage)}
                     </td>
 
-                    {/* Thao tác */}
-                    <td className="py-2.5 px-4 text-center">
+                    {/* Chi tiết */}
+                    <td className="py-2.5 px-3 text-center">
                       <Button
-                        variant="ghost"
                         size="sm"
-                        className="h-6 text-[11px] text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+                        variant="ghost"
+                        className="h-6 text-[11px] text-slate-500 hover:text-slate-900 hover:bg-slate-100 gap-1"
                         onClick={(e) => {
                           e.stopPropagation();
                           onSelectOrder(order);
                         }}
                       >
-                        <Edit3 className="h-3 w-3 mr-1" />
-                        Sửa
+                        <Eye className="h-3 w-3" />
+                        Xem
                       </Button>
                     </td>
                   </tr>
@@ -249,7 +243,7 @@ export function OrderTable({
               })
             ) : (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-slate-400 text-xs">
+                <td colSpan={8} className="py-8 text-center text-slate-400">
                   Không tìm thấy đơn hàng nào phù hợp với bộ lọc.
                 </td>
               </tr>
@@ -258,13 +252,13 @@ export function OrderTable({
         </table>
       </div>
 
-      {/* Table Footer info */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-t border-slate-100 bg-slate-50/30 text-[11px] text-slate-400">
+      {/* Footer */}
+      <div className="p-3 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between text-[11px] text-slate-500">
         <span>
           Tổng số <strong>{orders.length}</strong> đơn hàng
         </span>
-        <span>
-          Nhấp dòng để xem chi tiết hoặc sửa
+        <span className="text-slate-400">
+          * Bấm vào dòng bất kỳ để xem Ma trận Màu × Size và Timeline 11 công đoạn
         </span>
       </div>
     </div>

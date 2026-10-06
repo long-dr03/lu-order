@@ -1,26 +1,35 @@
 import { NextResponse } from "next/server";
-import { getAllOrders, getStats, createOrder, generateNextOrderId } from "@/lib/db";
+import {
+  getAllOrders,
+  getDirectorDashboardStats,
+  createOrderWithVariants,
+  generateNextOrderCode,
+  getLines,
+} from "@/lib/db";
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const search = searchParams.get("search") || undefined;
     const status = searchParams.get("status") || undefined;
+    const line_id = searchParams.get("line_id") ? Number(searchParams.get("line_id")) : undefined;
 
-    const orders = getAllOrders(search, status);
-    const stats = getStats();
-    const nextId = generateNextOrderId();
+    const orders = getAllOrders({ search, status, line_id });
+    const stats = getDirectorDashboardStats();
+    const lines = getLines();
+    const nextCode = generateNextOrderCode();
 
     return NextResponse.json({
       success: true,
       data: {
         orders,
         stats,
-        nextId,
+        lines,
+        nextCode,
       },
     });
   } catch (error: any) {
-    console.error("API GET /orders error:", error);
+    console.error("GET /api/orders error:", error);
     return NextResponse.json(
       { success: false, error: error.message || "Failed to fetch orders" },
       { status: 500 }
@@ -31,39 +40,35 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { customer, item_name, quantity, deadline, stage, issue, notes } = body;
+    const { order, variants } = body;
 
-    if (!customer || !item_name || !quantity || !deadline) {
+    if (!order?.customer || !order?.product_name || !variants || variants.length === 0) {
       return NextResponse.json(
-        { success: false, error: "Vui lòng điền đầy đủ các thông tin bắt buộc" },
+        { success: false, error: "Vui lòng nhập đầy đủ thông tin đơn và ma trận Màu x Size" },
         { status: 400 }
       );
     }
 
-    const id = body.id || generateNextOrderId();
-    const stageVal = stage || "may";
-    const progressVal = Number(body.progress) || 10;
-    const statusVal = body.status || "normal";
+    const orderId = order.id || generateNextOrderCode();
 
-    const newOrder = createOrder({
-      id,
-      customer,
-      item_name,
-      quantity: Number(quantity),
-      deadline,
-      stage: stageVal,
-      progress: progressVal,
-      status: statusVal,
-      issue: issue || null,
-      notes: notes || null,
+    const created = createOrderWithVariants({
+      order: {
+        ...order,
+        id: orderId,
+        priority: order.priority || "normal",
+        assigned_to: order.assigned_to || "Chuyền 1",
+        current_stage: "nhan_don",
+        line_id: Number(order.line_id || 1),
+      },
+      variants,
     });
 
     return NextResponse.json({
       success: true,
-      data: newOrder,
+      data: created,
     });
   } catch (error: any) {
-    console.error("API POST /orders error:", error);
+    console.error("POST /api/orders error:", error);
     return NextResponse.json(
       { success: false, error: error.message || "Failed to create order" },
       { status: 500 }

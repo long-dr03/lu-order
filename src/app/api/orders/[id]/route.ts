@@ -1,5 +1,32 @@
 import { NextResponse } from "next/server";
-import { updateOrder, deleteOrder } from "@/lib/db";
+import { getOrderById, updateOrderStage, StageKey } from "@/lib/db";
+
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const order = getOrderById(id);
+
+    if (!order) {
+      return NextResponse.json(
+        { success: false, error: "Không tìm thấy đơn hàng" },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: order,
+    });
+  } catch (error: any) {
+    return NextResponse.json(
+      { success: false, error: error.message },
+      { status: 500 }
+    );
+  }
+}
 
 export async function PATCH(
   request: Request,
@@ -9,40 +36,20 @@ export async function PATCH(
     const { id } = await params;
     const body = await request.json();
 
-    const updated = updateOrder(id, body);
-    if (!updated) {
-      return NextResponse.json(
-        { success: false, error: "Đơn hàng không tồn tại" },
-        { status: 404 }
-      );
+    if (body.stage) {
+      const updated = updateOrderStage(id, body.stage as StageKey, body.user_name || "Quản lý");
+      return NextResponse.json({
+        success: true,
+        data: updated,
+      });
     }
 
     return NextResponse.json({
       success: true,
-      data: updated,
     });
   } catch (error: any) {
     return NextResponse.json(
-      { success: false, error: error.message || "Lỗi cập nhật" },
-      { status: 500 }
-    );
-  }
-}
-
-export async function DELETE(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    const ok = deleteOrder(id);
-
-    return NextResponse.json({
-      success: ok,
-    });
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message || "Lỗi xóa đơn" },
+      { success: false, error: error.message },
       { status: 500 }
     );
   }

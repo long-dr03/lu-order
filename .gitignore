@@ -24,6 +24,7 @@
 .DS_Store
 *.pem
 *.db
+*.db-*
 *.db-journal
 
 # debug

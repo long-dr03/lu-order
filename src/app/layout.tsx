@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "L u Garment - Quản Lý Đơn Hàng & Tiến Độ Sản Xuất",
-  description: "Hệ thống quản lý đơn hàng, tiến độ may, QC và cảnh báo sự cố xưởng",
+  title: "LUUTA - Quản Lý Toàn Bộ Quy Trình Sản Xuất & Tính Lương Sản Phẩm",
+  description: "Hệ thống quản lý sản xuất thời trang LUUTA: Nhận đơn → Kiểm NPL → Rập → Cắt → May → QC → Sửa → QC lại → Đóng gói → Giao hàng, quản lý 5 chuyền và tính lương sản phẩm",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
