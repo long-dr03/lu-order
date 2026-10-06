@@ -32,43 +32,43 @@ interface SidebarProps {
 export const navItems = [
   {
     key: "tong_quan" as NavItemKey,
-    label: "TỔNG QUAN",
+    label: "Tổng quan",
     icon: LayoutDashboard,
     badge: "Dashboard",
   },
   {
     key: "don_hang" as NavItemKey,
-    label: "ĐƠN HÀNG",
+    label: "Đơn hàng",
     icon: ShoppingBag,
     badge: "Màu x Size",
   },
   {
     key: "chuyen_may" as NavItemKey,
-    label: "5 CHUYỀN MAY",
+    label: "Chuyền may",
     icon: Layers,
     badge: "Chuyền 1-5",
   },
   {
     key: "nhap_san_luong" as NavItemKey,
-    label: "NHẬP SẢN LƯỢNG",
+    label: "Nhập sản lượng",
     icon: Edit3,
     badge: "Điện thoại",
   },
   {
     key: "luong_san_luong" as NavItemKey,
-    label: "LƯƠNG & SẢN LƯỢNG",
+    label: "Lương sản phẩm",
     icon: DollarSign,
     badge: "Chốt lương",
   },
   {
     key: "qc" as NavItemKey,
-    label: "PHÂN HỆ QC",
+    label: "Kiểm soát chất lượng",
     icon: ShieldCheck,
     badge: "May - Sửa",
   },
   {
     key: "giao_hang" as NavItemKey,
-    label: "GIAO HÀNG",
+    label: "Giao hàng",
     icon: Truck,
     badge: "Đã giao đủ",
   },
@@ -86,7 +86,7 @@ export function Sidebar({
       {/* Mobile backdrop */}
       {isOpenMobile && (
         <div
-          className="fixed inset-0 z-40 bg-slate-900/30 backdrop-blur-xs md:hidden"
+          className="fixed inset-0 z-40 bg-zinc-900/30 backdrop-blur-xs md:hidden"
           onClick={onCloseMobile}
         />
       )}
@@ -94,14 +94,15 @@ export function Sidebar({
       {/* Sidebar container */}
       <aside
         className={cn(
-          "fixed top-14 bottom-0 left-0 z-40 flex w-56 flex-col border-r border-slate-200 bg-white transition-transform duration-200 ease-in-out md:static md:translate-x-0",
+          "fixed top-0 bottom-0 left-0 z-50 flex w-60 shrink-0 flex-col border-r border-zinc-200 bg-zinc-50 transition-transform duration-200 ease-in-out md:sticky md:top-0 md:h-screen md:translate-x-0",
           isOpenMobile ? "translate-x-0" : "-translate-x-full md:translate-x-0"
         )}
       >
         <div className="flex flex-1 flex-col justify-between overflow-y-auto px-2.5 py-4">
-          <nav className="space-y-1">
-            <div className="px-3 pb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Quy trình LUUTA
+          <nav className="space-y-1" aria-label="Điều hướng chính">
+            <div className="mb-8 px-3 pt-2 text-xl font-semibold tracking-tight text-zinc-900">LUUTA<span className="mt-1 block text-xs font-normal tracking-normal text-zinc-500">Quản lý sản xuất</span></div>
+            <div className="px-3 pb-2 text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+              Xưởng may
             </div>
 
             {navItems.map((item) => {
@@ -116,52 +117,34 @@ export function Sidebar({
               return (
                 <button
                   key={item.key}
+                  aria-current={isActive ? "page" : undefined}
                   onClick={() => {
                     onSelectTab(item.key);
                     if (onCloseMobile) onCloseMobile();
                   }}
                   className={cn(
-                    "flex w-full items-center justify-between rounded-lg px-3 py-2 text-xs font-medium tracking-wide transition-colors cursor-pointer text-left",
+                    "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-colors cursor-pointer text-left",
                     isActive
-                      ? "bg-slate-900 text-white font-semibold shadow-xs"
-                      : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                      ? "bg-zinc-200/60 text-zinc-900 font-semibold"
+                      : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
                   )}
                 >
                   <div className="flex items-center gap-2.5">
                     <Icon
                       className={cn(
                         "h-4 w-4 shrink-0",
-                        isActive ? "text-white" : "text-slate-400"
+                        isActive ? "text-zinc-900" : "text-zinc-400"
                       )}
                     />
                     <span>{item.label}</span>
                   </div>
-                  <span
-                    className={cn(
-                      "text-[9px] px-1 py-0.2 rounded font-mono",
-                      isActive ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-500"
-                    )}
-                  >
-                    {item.badge}
-                  </span>
+
                 </button>
               );
             })}
           </nav>
 
-          {/* Bottom Card / System Status */}
-          <div className="rounded-xl border border-slate-200/80 bg-slate-50 p-3 mt-4">
-            <div className="text-xs font-bold text-slate-900 font-serif">
-              LUUTA GARMENT
-            </div>
-            <p className="mt-1 text-[11px] text-slate-500 leading-tight">
-              11 công đoạn chuẩn xưởng
-            </p>
-            <div className="mt-2 pt-2 border-t border-slate-200 text-[10px] text-slate-400 flex items-center justify-between">
-              <span>5 Chuyền may</span>
-              <span className="text-emerald-700 font-medium">● Đang chạy</span>
-            </div>
-          </div>
+          <div className="border-t border-zinc-200 px-3 pt-4 text-xs text-zinc-500">LUUTA Garment</div>
         </div>
       </aside>
     </>

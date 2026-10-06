@@ -25,20 +25,20 @@ export function Progress({
     <div className="flex flex-col gap-1 w-full" {...props}>
       <div
         className={cn(
-          "relative h-1.5 w-full overflow-hidden rounded-full bg-slate-100",
+          "relative h-1.5 w-full overflow-hidden rounded-full bg-zinc-100",
           className
         )}
       >
         <div
           className={cn(
-            "h-full transition-all duration-300 rounded-full bg-slate-700",
+            "h-full transition-all duration-300 rounded-full bg-zinc-700",
             indicatorClassName
           )}
           style={{ width: `${percentage}%` }}
         />
       </div>
       {showBlocks && (
-        <span className="font-mono text-[10px] tracking-tight text-slate-500">
+        <span className="font-sans text-[10px] tracking-tight text-zinc-500">
           {blockString} ({percentage}%)
         </span>
       )}

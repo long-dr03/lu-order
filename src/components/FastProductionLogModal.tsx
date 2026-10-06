@@ -106,24 +106,24 @@ export function FastProductionLogModal({
     : ["XS", "S", "M", "L", "XL"];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-2 sm:p-4 backdrop-blur-2xs animate-in fade-in overflow-y-auto">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden my-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/40 p-2 sm:p-4 backdrop-blur-2xs animate-in fade-in overflow-y-auto">
+      <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white shadow-2xl overflow-hidden my-auto">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5 bg-slate-50/70">
+        <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-3.5 bg-zinc-50/70">
           <div className="flex items-center gap-2">
-            <Smartphone className="h-4 w-4 text-slate-700" />
+            <Smartphone className="h-4 w-4 text-zinc-700" />
             <div>
-              <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wide">
+              <h3 className="text-xs font-bold text-zinc-900 uppercase tracking-wide">
                 Cập Nhật Sản Lượng Nhân Viên
               </h3>
-              <p className="text-[10px] text-slate-500">
+              <p className="text-[10px] text-zinc-500">
                 Ghi nhận số lượng hoàn thành để tính tiền công
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-1 text-slate-400 hover:bg-slate-200 cursor-pointer"
+            className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-200 cursor-pointer"
           >
             <X className="h-4 w-4" />
           </button>
@@ -139,7 +139,7 @@ export function FastProductionLogModal({
 
           <div className="grid grid-cols-2 gap-2.5">
             <div>
-              <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+              <label className="block text-[11px] font-semibold text-zinc-700 mb-1">
                 Ngày thực hiện
               </label>
               <Input
@@ -151,11 +151,11 @@ export function FastProductionLogModal({
               />
             </div>
             <div>
-              <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+              <label className="block text-[11px] font-semibold text-zinc-700 mb-1">
                 Chuyền
               </label>
               <select
-                className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs"
+                className="flex h-8 w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs"
                 value={formData.line_id}
                 onChange={(e) => setFormData({ ...formData, line_id: Number(e.target.value) })}
               >
@@ -169,11 +169,11 @@ export function FastProductionLogModal({
           </div>
 
           <div>
-            <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+            <label className="block text-[11px] font-semibold text-zinc-700 mb-1">
               Nhân viên thực hiện *
             </label>
             <select
-              className="flex h-9 w-full rounded-md border border-slate-200 bg-white px-3 py-1 text-xs font-medium"
+              className="flex h-9 w-full rounded-md border border-zinc-200 bg-white px-3 py-1 text-xs font-medium"
               value={formData.employee_id}
               onChange={(e) => handleEmpChange(e.target.value)}
             >
@@ -186,11 +186,11 @@ export function FastProductionLogModal({
           </div>
 
           <div>
-            <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+            <label className="block text-[11px] font-semibold text-zinc-700 mb-1">
               Đơn hàng & Sản phẩm *
             </label>
             <select
-              className="flex h-9 w-full rounded-md border border-slate-200 bg-white px-3 py-1 text-xs font-medium"
+              className="flex h-9 w-full rounded-md border border-zinc-200 bg-white px-3 py-1 text-xs font-medium"
               value={formData.order_id}
               onChange={(e) => handleOrderChange(e.target.value)}
             >
@@ -205,11 +205,11 @@ export function FastProductionLogModal({
           {/* Color & Size selection */}
           <div className="grid grid-cols-3 gap-2">
             <div>
-              <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+              <label className="block text-[11px] font-semibold text-zinc-700 mb-1">
                 Màu sắc
               </label>
               <select
-                className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs"
+                className="flex h-8 w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs"
                 value={formData.color}
                 onChange={(e) => setFormData({ ...formData, color: e.target.value })}
               >
@@ -222,11 +222,11 @@ export function FastProductionLogModal({
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+              <label className="block text-[11px] font-semibold text-zinc-700 mb-1">
                 Kích cỡ (Size)
               </label>
               <select
-                className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-mono font-bold"
+                className="flex h-8 w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-sans font-bold"
                 value={formData.size}
                 onChange={(e) => setFormData({ ...formData, size: e.target.value })}
               >
@@ -239,11 +239,11 @@ export function FastProductionLogModal({
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+              <label className="block text-[11px] font-semibold text-zinc-700 mb-1">
                 Công đoạn
               </label>
               <select
-                className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs"
+                className="flex h-8 w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs"
                 value={formData.stage}
                 onChange={(e) => setFormData({ ...formData, stage: e.target.value })}
               >
@@ -259,7 +259,7 @@ export function FastProductionLogModal({
           {/* Quantity & Unit Price */}
           <div className="grid grid-cols-2 gap-3 pt-1">
             <div>
-              <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+              <label className="block text-[11px] font-semibold text-zinc-700 mb-1">
                 SL hoàn thành (cái) *
               </label>
               <Input
@@ -268,12 +268,12 @@ export function FastProductionLogModal({
                 required
                 value={formData.quantity}
                 onChange={(e) => setFormData({ ...formData, quantity: Number(e.target.value) })}
-                className="font-mono text-center text-sm font-bold h-9"
+                className="font-sans text-center text-sm font-bold h-9"
               />
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+              <label className="block text-[11px] font-semibold text-zinc-700 mb-1">
                 Đơn giá sản phẩm (đ) *
               </label>
               <Input
@@ -283,24 +283,24 @@ export function FastProductionLogModal({
                 required
                 value={formData.unit_price}
                 onChange={(e) => setFormData({ ...formData, unit_price: Number(e.target.value) })}
-                className="font-mono text-right text-xs h-9"
+                className="font-sans text-right text-xs h-9"
               />
             </div>
           </div>
 
           {/* Pay summary card */}
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 flex items-center justify-between">
+          <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Calculator className="h-4 w-4 text-slate-500" />
-              <span className="text-xs text-slate-600">Thành tiền tạm tính:</span>
+              <Calculator className="h-4 w-4 text-zinc-500" />
+              <span className="text-xs text-zinc-600">Thành tiền tạm tính:</span>
             </div>
-            <span className="font-mono text-base font-bold text-slate-950">
+            <span className="font-sans text-base font-bold text-zinc-950">
               {totalPay.toLocaleString()} đ
             </span>
           </div>
 
           {/* Submit */}
-          <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-200">
+          <div className="pt-2 flex items-center justify-end gap-2 border-t border-zinc-200">
             <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={loading}>
               Đóng
             </Button>
@@ -309,9 +309,9 @@ export function FastProductionLogModal({
               variant="default"
               size="sm"
               disabled={loading}
-              className="bg-slate-900 text-white hover:bg-slate-800 font-semibold h-9 px-4"
+              className="bg-zinc-900 text-white hover:bg-zinc-800 font-semibold h-9 px-4"
             >
-              {loading ? "Đang lưu..." : "✓ Xác Nhận Sản Lượng"}
+              {loading ? "Đang lưu..." : " Xác Nhận Sản Lượng"}
             </Button>
           </div>
         </form>

@@ -56,7 +56,7 @@ export interface Order {
   assigned_to: string;
   current_stage: StageKey;
   progress: number; // 0 - 100
-  status: "on_track" | "at_risk" | "delayed" | "completed"; // 🟢 🟡 🔴 ⚪
+  status: "on_track" | "at_risk" | "delayed" | "completed";
   notes: string | null;
   created_at: string;
   variants?: OrderVariant[];

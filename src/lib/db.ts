@@ -575,7 +575,13 @@ export function getAllOrders(filter?: {
   }
 
   if (filter?.status && filter.status !== "all") {
-    if (filter.status === "cho_qc") {
+    if (filter.status === "running") {
+      sql += " AND status != 'completed'";
+    } else if (filter.status === "needs_attention") {
+      sql += " AND status IN ('at_risk', 'delayed')";
+    } else if (filter.status === "waiting_delivery") {
+      sql += " AND current_stage IN ('dong_goi', 'giao_hang')";
+    } else if (filter.status === "cho_qc") {
       sql += " AND current_stage IN ('may', 'qc')";
     } else if (filter.status === "cho_dong_goi") {
       sql += " AND current_stage = 'dong_goi'";

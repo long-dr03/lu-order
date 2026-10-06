@@ -23,18 +23,18 @@ export function LinesView({
     <div className="space-y-5 text-xs">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
-          <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide flex items-center gap-2">
-            <Layers className="h-4 w-4 text-slate-700" />
+          <h2 className="text-base font-bold text-zinc-900 uppercase tracking-wide flex items-center gap-2">
+            <Layers className="h-4 w-4 text-zinc-700" />
             Quản Lý 5 Chuyền Sản Xuất LUUTA
           </h2>
-          <p className="text-[11px] text-slate-500">
+          <p className="text-[11px] text-zinc-500">
             Theo dõi tiến độ, đơn hàng đang chạy và công suất thực tế từng chuyền
           </p>
         </div>
 
         <Button
           size="sm"
-          className="bg-slate-900 text-white hover:bg-slate-800 gap-1.5 h-8 font-semibold"
+          className="bg-zinc-900 text-white hover:bg-zinc-800 gap-1.5 h-8 font-semibold"
           onClick={() => onOpenLogModal()}
         >
           <Plus className="h-3.5 w-3.5" />
@@ -55,37 +55,37 @@ export function LinesView({
           return (
             <div
               key={line.id}
-              className="rounded-xl border border-slate-200 bg-white shadow-xs p-4 flex flex-col justify-between space-y-4 hover:border-slate-300 transition-colors"
+              className="rounded-xl border border-zinc-200 bg-white shadow-xs p-4 flex flex-col justify-between space-y-4 hover:border-zinc-300 transition-colors"
             >
               {/* Line Header */}
               <div>
-                <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                <div className="flex items-center justify-between border-b border-zinc-100 pb-2.5">
                   <div>
-                    <h3 className="font-bold text-sm text-slate-900 font-mono">
+                    <h3 className="font-bold text-sm text-zinc-900 font-sans">
                       {line.name}
                     </h3>
-                    <p className="text-[11px] text-slate-500">
-                      Tổ trưởng: <strong className="text-slate-700">{line.leader_name}</strong>
+                    <p className="text-[11px] text-zinc-500">
+                      Tổ trưởng: <strong className="text-zinc-700">{line.leader_name}</strong>
                     </p>
                   </div>
                   <div className="text-right">
-                    <span className="font-mono text-xs font-semibold text-slate-800">
+                    <span className="font-sans text-xs font-semibold text-zinc-800">
                       {line.workers_count} thợ
                     </span>
-                    <p className="text-[10px] text-slate-400">
+                    <p className="text-[10px] text-zinc-400">
                       ~{line.capacity_per_day} cái/ngày
                     </p>
                   </div>
                 </div>
 
                 {/* Overload / Capacity Alert */}
-                <div className="mt-2.5 flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-100">
-                  <span className="text-[11px] text-slate-600">
+                <div className="mt-2.5 flex items-center justify-between p-2 rounded-lg bg-zinc-50 border border-zinc-100">
+                  <span className="text-[11px] text-zinc-600">
                     Tồn đọng: <strong>{totalRemaining} cái</strong> ({daysNeeded} ngày làm)
                   </span>
                   {isOverloaded ? (
                     <span className="text-[10px] font-semibold text-amber-800 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200/60">
-                      ⚠️ Quá tải
+                      Quá tải
                     </span>
                   ) : (
                     <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200/60">
@@ -96,7 +96,7 @@ export function LinesView({
 
                 {/* Active Orders List */}
                 <div className="mt-3 space-y-2">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
                     Đơn hàng đang sản xuất ({lineOrders.length})
                   </span>
 
@@ -109,30 +109,30 @@ export function LinesView({
                         <div
                           key={ord.id}
                           onClick={() => onSelectOrder(ord)}
-                          className="p-2.5 rounded-lg border border-slate-100 bg-white hover:bg-slate-50/80 cursor-pointer transition-colors space-y-1.5"
+                          className="p-2.5 rounded-lg border border-zinc-100 bg-white hover:bg-zinc-50/80 cursor-pointer transition-colors space-y-1.5"
                         >
                           <div className="flex items-center justify-between">
-                            <span className="font-mono font-bold text-xs text-slate-900 bg-slate-100 px-1.5 py-0.2 rounded">
+                            <span className="font-sans font-bold text-xs text-zinc-900 bg-zinc-100 px-1.5 py-0.2 rounded">
                               {ord.id}
                             </span>
-                            <span className="text-[11px] text-slate-500 font-mono">
+                            <span className="text-[11px] text-zinc-500 font-sans">
                               Hạn: {formatDate(ord.deadline)}
                             </span>
                           </div>
 
-                          <div className="font-medium text-slate-800 truncate">
+                          <div className="font-medium text-zinc-800 truncate">
                             {ord.product_name}
                           </div>
 
-                          <div className="flex items-center justify-between text-[11px] text-slate-500">
+                          <div className="flex items-center justify-between text-[11px] text-zinc-500">
                             <span>Màu: {colorSummary || "Đủ màu"}</span>
                             <span>SL: <strong>{ord.total_quantity}</strong></span>
                           </div>
 
                           {/* Progress bar */}
-                          <div className="w-full bg-slate-100 rounded-full h-1 mt-1">
+                          <div className="w-full bg-zinc-100 rounded-full h-1 mt-1">
                             <div
-                              className="bg-slate-800 h-1 rounded-full transition-all"
+                              className="bg-zinc-800 h-1 rounded-full transition-all"
                               style={{ width: `${ord.progress}%` }}
                             />
                           </div>
@@ -140,7 +140,7 @@ export function LinesView({
                       );
                     })
                   ) : (
-                    <div className="py-6 text-center text-slate-400 italic text-xs">
+                    <div className="py-6 text-center text-zinc-400 italic text-xs">
                       Chuyền chưa có đơn hàng mới
                     </div>
                   )}
@@ -151,7 +151,7 @@ export function LinesView({
               <Button
                 variant="outline"
                 size="sm"
-                className="w-full h-8 text-xs border-slate-200 text-slate-700 hover:bg-slate-100 gap-1"
+                className="w-full h-8 text-xs border-zinc-200 text-zinc-700 hover:bg-zinc-100 gap-1"
                 onClick={() => onOpenLogModal(line.id)}
               >
                 Nhập sản lượng cho {line.name}

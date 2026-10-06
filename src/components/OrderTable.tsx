@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Search, Plus, Filter, Eye, AlertCircle, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Search, Plus, Eye } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Order, LUUTA_STAGES } from "@/lib/types";
@@ -29,8 +29,8 @@ export function OrderTable({
   const getStatusBadge = (status: string, stage: string) => {
     if (stage === "hoan_thanh") {
       return (
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-50 text-slate-600 border border-slate-200">
-          <span className="h-1.5 w-1.5 rounded-full bg-slate-400"></span>
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-zinc-50 text-zinc-600 border border-zinc-200">
+          <span className="h-1.5 w-1.5 rounded-full bg-zinc-400"></span>
           Đã hoàn thành
         </span>
       );
@@ -39,23 +39,23 @@ export function OrderTable({
     switch (status) {
       case "on_track":
         return (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200/60">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-600"></span>
-            🟢 Đúng tiến độ
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-white text-zinc-600 border border-zinc-200">
+            <span className="h-1.5 w-1.5 rounded-full bg-zinc-400"></span>
+            Đúng tiến độ
           </span>
         );
       case "at_risk":
         return (
           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-amber-50 text-amber-800 border border-amber-200/60">
             <span className="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
-            🟡 Nguy cơ trễ
+            Nguy cơ trễ
           </span>
         );
       case "delayed":
         return (
           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-rose-50 text-rose-800 border border-rose-200/60">
             <span className="h-1.5 w-1.5 rounded-full bg-rose-500"></span>
-            🔴 Đã trễ hạn
+            Đã trễ hạn
           </span>
         );
       default:
@@ -67,36 +67,33 @@ export function OrderTable({
     return LUUTA_STAGES.find((s) => s.key === stageKey)?.label || stageKey;
   };
 
-  // Convert progress into wireframe ASCII block representation
-  const getAsciiBlocks = (progress: number) => {
-    const total = 8;
-    const filled = Math.round((progress / 100) * total);
-    return "█".repeat(filled) + "░".repeat(Math.max(0, total - filled));
-  };
-
   const filterTabs = [
     { key: "all", label: "Tất cả" },
-    { key: "on_track", label: "🟢 Đang sản xuất" },
-    { key: "at_risk", label: "🟡 Nguy cơ trễ" },
-    { key: "delayed", label: "🔴 Đã trễ" },
+    { key: "running", label: "Đang sản xuất" },
+    { key: "on_track", label: "Đúng tiến độ" },
+    { key: "needs_attention", label: "Cần chú ý" },
+    { key: "waiting_delivery", label: "Đóng gói / giao" },
+    { key: "at_risk", label: "Nguy cơ trễ" },
+    { key: "delayed", label: "Đã trễ" },
     { key: "cho_qc", label: "Chờ QC" },
     { key: "cho_dong_goi", label: "Chờ đóng gói" },
     { key: "cho_giao", label: "Chờ giao" },
-    { key: "da_giao_du", label: "Hoàn thành" },
+    { key: "completed", label: "Hoàn thành" },
   ];
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-2xs overflow-hidden text-xs">
+    <div className="rounded-xl border border-zinc-200 bg-white shadow-2xs overflow-hidden text-xs">
       {/* Control Bar */}
-      <div className="p-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white">
+      <div className="p-4 border-b border-zinc-100 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white">
         {/* Search */}
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
           <Input
             value={searchTerm}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="🔍 Tìm mã đơn, khách, sản phẩm, màu, size..."
-            className="pl-9 bg-slate-50/50 border-slate-200 focus:bg-white text-xs h-9"
+            aria-label="Tìm đơn hàng"
+            placeholder="Tìm đơn hàng, khách hàng…"
+            className="pl-9 bg-zinc-50/50 border-zinc-200 focus:bg-white text-xs h-9"
           />
         </div>
 
@@ -104,50 +101,41 @@ export function OrderTable({
           <Button
             onClick={onCreateNew}
             size="sm"
-            className="bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs gap-1.5 h-9 px-3.5 shadow-2xs"
+            className="bg-zinc-900 hover:bg-zinc-800 text-white font-semibold text-xs gap-1.5 h-9 px-3.5 shadow-2xs"
           >
             <Plus className="h-4 w-4" />
-            + TẠO ĐƠN MỚI
+            Tạo đơn hàng
           </Button>
         </div>
       </div>
 
-      {/* Filter Tabs Chips */}
-      <div className="flex items-center gap-1 px-4 py-2 border-b border-slate-100 bg-slate-50/60 overflow-x-auto text-xs">
-        {filterTabs.map((f) => (
-          <button
-            key={f.key}
-            onClick={() => onStatusFilterChange(f.key)}
-            className={`px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border ${
-              statusFilter === f.key
-                ? "bg-slate-900 text-white border-slate-900 font-semibold"
-                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-zinc-200">
+        <h2 className="text-sm font-semibold text-zinc-900">Danh sách đơn hàng</h2>
+        <select aria-label="Lọc trạng thái đơn hàng" value={statusFilter}
+          onChange={(event) => onStatusFilterChange(event.target.value)}
+          className="h-9 max-w-full rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-600">
+          {filterTabs.map((filter) => <option key={filter.key} value={filter.key}>{filter.label}</option>)}
+        </select>
       </div>
 
       {/* Orders Table */}
       <div className="overflow-x-auto">
-        <table className="w-full text-left text-xs border-collapse">
+        <table className="w-full min-w-[960px] text-left text-sm border-collapse">
           <thead>
-            <tr className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-              <th className="py-2.5 px-3">MÃ ĐƠN</th>
-              <th className="py-2.5 px-3">KHÁCH</th>
-              <th className="py-2.5 px-3">SẢN PHẨM (MÀU × SIZE)</th>
-              <th className="py-2.5 px-3 text-right">SL</th>
-              <th className="py-2.5 px-3">DEADLINE</th>
-              <th className="py-2.5 px-3 min-w-[140px]">TIẾN ĐỘ</th>
-              <th className="py-2.5 px-3">TRẠNG THÁI</th>
-              <th className="py-2.5 px-3 text-center">CHI TIẾT</th>
+            <tr className="border-b border-zinc-200 bg-zinc-50/80 text-xs font-medium text-zinc-500">
+              <th className="py-4 px-4">Mã đơn</th>
+              <th className="py-4 px-4">Khách hàng</th>
+              <th className="py-4 px-4">Sản phẩm</th>
+              <th className="py-4 px-4 text-right">SL</th>
+              <th className="py-4 px-4">Hạn giao</th>
+              <th className="py-4 px-4 min-w-[140px]">Tiến độ</th>
+              <th className="py-4 px-4">Trạng thái</th>
+              <th className="py-4 px-4 text-center">Chi tiết</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 font-sans">
+          <tbody className="divide-y divide-zinc-100 font-sans">
             {orders.length > 0 ? (
               orders.map((order) => {
-                const asciiBlocks = getAsciiBlocks(order.progress);
                 const variants = order.variants || [];
                 const colorSummary = Array.from(new Set(variants.map((v) => v.color))).join(", ");
                 const sizeSummary = Array.from(new Set(variants.map((v) => v.size))).join(", ");
@@ -156,62 +144,57 @@ export function OrderTable({
                   <tr
                     key={order.id}
                     onClick={() => onSelectOrder(order)}
-                    className="hover:bg-slate-50/70 transition-colors cursor-pointer group"
+                    className="hover:bg-zinc-50/70 transition-colors cursor-pointer group"
                   >
                     {/* Mã đơn */}
-                    <td className="py-2.5 px-3 font-mono font-bold text-slate-900 whitespace-nowrap">
-                      <span className="px-1.5 py-0.5 rounded bg-slate-100 group-hover:bg-slate-900 group-hover:text-white transition-colors">
+                    <td className="py-4 px-4 font-sans font-bold text-zinc-900 whitespace-nowrap">
+                      <span className="px-1.5 py-0.5 rounded bg-zinc-100 group-hover:bg-zinc-200 transition-colors">
                         {order.id}
                       </span>
                     </td>
 
                     {/* Khách hàng */}
-                    <td className="py-2.5 px-3 font-semibold text-slate-800 max-w-[130px] truncate">
+                    <td className="py-4 px-4 font-semibold text-zinc-800 max-w-[130px] truncate">
                       {order.customer}
                     </td>
 
                     {/* Sản phẩm & biến thể */}
-                    <td className="py-2.5 px-3 max-w-[240px]">
+                    <td className="py-4 px-4 max-w-[240px]">
                       <div>
-                        <div className="font-medium text-slate-900 truncate">
-                          {order.product_name} <span className="font-mono text-slate-400 text-[10px]">({order.product_code})</span>
+                        <div className="font-medium text-zinc-900 truncate">
+                          {order.product_name} <span className="font-sans text-zinc-400 text-[10px]">({order.product_code})</span>
                         </div>
-                        <div className="text-[10px] text-slate-500 truncate flex items-center gap-1.5 mt-0.5">
+                        <div className="text-[10px] text-zinc-500 truncate flex items-center gap-1.5 mt-0.5">
                           <span>Màu: <strong>{colorSummary || "Đủ màu"}</strong></span>
                           <span>•</span>
-                          <span>Size: <strong className="font-mono">{sizeSummary || "Đủ size"}</strong></span>
-                          <span>•</span>
-                          <span className="bg-slate-100 px-1 py-0.2 rounded text-slate-700 font-medium">
-                            {getStageLabel(order.current_stage)}
-                          </span>
+                          <span>Size: <strong className="font-sans">{sizeSummary || "Đủ size"}</strong></span>
+
                         </div>
                       </div>
                     </td>
 
                     {/* Số lượng */}
-                    <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
+                    <td className="py-4 px-4 text-right font-sans font-bold text-zinc-900">
                       {order.total_quantity}
                     </td>
 
                     {/* Deadline */}
-                    <td className="py-2.5 px-3 whitespace-nowrap text-slate-700 font-mono font-medium">
+                    <td className="py-4 px-4 whitespace-nowrap text-zinc-700 font-sans font-medium">
                       {formatDate(order.deadline)}
                     </td>
 
                     {/* Tiến độ (Kèm khối ASCII như wireframe) */}
-                    <td className="py-2.5 px-3">
+                    <td className="py-4 px-4">
                       <div className="space-y-1">
                         <div className="flex items-center justify-between text-[10px]">
-                          <span className="font-mono tracking-widest text-slate-600">
-                            {asciiBlocks}
-                          </span>
-                          <span className="font-mono font-bold text-slate-700">
+                          <span className="text-zinc-500">{getStageLabel(order.current_stage)}</span>
+                          <span className="font-sans font-bold text-zinc-700">
                             {order.progress}%
                           </span>
                         </div>
-                        <div className="w-full bg-slate-100 rounded-full h-1">
+                        <div className="w-full bg-zinc-100 rounded-full h-1">
                           <div
-                            className="bg-slate-800 h-1 rounded-full transition-all"
+                            className="bg-zinc-800 h-1 rounded-full transition-all"
                             style={{ width: `${order.progress}%` }}
                           />
                         </div>
@@ -219,16 +202,16 @@ export function OrderTable({
                     </td>
 
                     {/* Trạng thái */}
-                    <td className="py-2.5 px-3 whitespace-nowrap">
+                    <td className="py-4 px-4 whitespace-nowrap">
                       {getStatusBadge(order.status, order.current_stage)}
                     </td>
 
                     {/* Chi tiết */}
-                    <td className="py-2.5 px-3 text-center">
+                    <td className="py-4 px-4 text-center">
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="h-6 text-[11px] text-slate-500 hover:text-slate-900 hover:bg-slate-100 gap-1"
+                        className="h-6 text-[11px] text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 gap-1"
                         onClick={(e) => {
                           e.stopPropagation();
                           onSelectOrder(order);
@@ -243,7 +226,7 @@ export function OrderTable({
               })
             ) : (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-slate-400">
+                <td colSpan={8} className="py-8 text-center text-zinc-400">
                   Không tìm thấy đơn hàng nào phù hợp với bộ lọc.
                 </td>
               </tr>
@@ -253,13 +236,11 @@ export function OrderTable({
       </div>
 
       {/* Footer */}
-      <div className="p-3 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between text-[11px] text-slate-500">
+      <div className="p-3 border-t border-zinc-100 bg-zinc-50/50 flex items-center justify-between text-[11px] text-zinc-500">
         <span>
           Tổng số <strong>{orders.length}</strong> đơn hàng
         </span>
-        <span className="text-slate-400">
-          * Bấm vào dòng bất kỳ để xem Ma trận Màu × Size và Timeline 11 công đoạn
-        </span>
+
       </div>
     </div>
   );

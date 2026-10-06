@@ -138,26 +138,26 @@ export function CreateOrderModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-2 sm:p-4 backdrop-blur-2xs animate-in fade-in overflow-y-auto">
-      <div className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden my-auto max-h-[95vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/40 p-2 sm:p-4 backdrop-blur-2xs animate-in fade-in overflow-y-auto">
+      <div className="w-full max-w-3xl rounded-2xl border border-zinc-200 bg-white shadow-xl overflow-hidden my-auto max-h-[95vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4 bg-slate-50/70 shrink-0">
+        <div className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 bg-zinc-50/70 shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-white">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-900 text-white">
               <PackageCheck className="h-4 w-4" />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
+              <h2 className="text-sm font-bold text-zinc-900 uppercase tracking-wide">
                 Tạo Đơn Hàng Mới (LUUTA)
               </h2>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-zinc-500">
                 Nhập thông tin sản phẩm và phân bổ ma trận Màu × Size
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700 cursor-pointer"
+            className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 cursor-pointer"
           >
             <X className="h-5 w-5" />
           </button>
@@ -174,7 +174,7 @@ export function CreateOrderModal({
           {/* Basic Order Info */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-zinc-700 mb-1">
                 Mã đơn hàng *
               </label>
               <Input
@@ -182,11 +182,11 @@ export function CreateOrderModal({
                 value={orderInfo.id}
                 onChange={(e) => setOrderInfo({ ...orderInfo, id: e.target.value.toUpperCase() })}
                 placeholder="LU-005"
-                className="font-mono"
+                className="font-sans"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-zinc-700 mb-1">
                 Khách hàng / Đối tác *
               </label>
               <Input
@@ -197,11 +197,11 @@ export function CreateOrderModal({
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-zinc-700 mb-1">
                 Chuyền sản xuất
               </label>
               <select
-                className="flex h-9 w-full rounded-md border border-slate-200 bg-white px-3 py-1 text-xs shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-950"
+                className="flex h-9 w-full rounded-md border border-zinc-200 bg-white px-3 py-1 text-xs shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-950"
                 value={orderInfo.line_id}
                 onChange={(e) => {
                   const id = Number(e.target.value);
@@ -230,7 +230,7 @@ export function CreateOrderModal({
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-zinc-700 mb-1">
                 Mã sản phẩm *
               </label>
               <Input
@@ -238,11 +238,11 @@ export function CreateOrderModal({
                 value={orderInfo.product_code}
                 onChange={(e) => setOrderInfo({ ...orderInfo, product_code: e.target.value.toUpperCase() })}
                 placeholder="VD: DL-05, AO-12..."
-                className="font-mono"
+                className="font-sans"
               />
             </div>
             <div className="sm:col-span-2">
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-zinc-700 mb-1">
                 Tên sản phẩm *
               </label>
               <Input
@@ -256,7 +256,7 @@ export function CreateOrderModal({
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-zinc-700 mb-1">
                 Ngày nhận đơn
               </label>
               <Input
@@ -267,7 +267,7 @@ export function CreateOrderModal({
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-zinc-700 mb-1">
                 Ngày cần giao (Deadline) *
               </label>
               <Input
@@ -278,11 +278,11 @@ export function CreateOrderModal({
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-zinc-700 mb-1">
                 Mức độ ưu tiên
               </label>
               <select
-                className="flex h-9 w-full rounded-md border border-slate-200 bg-white px-3 py-1 text-xs shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-950"
+                className="flex h-9 w-full rounded-md border border-zinc-200 bg-white px-3 py-1 text-xs shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-950"
                 value={orderInfo.priority}
                 onChange={(e) => setOrderInfo({ ...orderInfo, priority: e.target.value as any })}
               >
@@ -294,38 +294,38 @@ export function CreateOrderModal({
           </div>
 
           {/* COLOR & SIZE MATRIX CONFIGURATION */}
-          <div className="rounded-xl border border-slate-200 p-4 space-y-4 bg-slate-50/50">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2">
+          <div className="rounded-xl border border-zinc-200 p-4 space-y-4 bg-zinc-50/50">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-200 pb-2">
               <div>
-                <h3 className="font-bold text-xs uppercase tracking-wider text-slate-800">
+                <h3 className="font-bold text-xs uppercase tracking-wider text-zinc-800">
                   Cấu hình Ma trận Size × Màu (BẮT BUỘC)
                 </h3>
-                <p className="text-[11px] text-slate-500">
+                <p className="text-[11px] text-zinc-500">
                   Thêm các màu sản xuất và chọn kích cỡ áp dụng
                 </p>
               </div>
-              <div className="font-mono text-xs font-bold text-slate-900 bg-white px-2.5 py-1 rounded border border-slate-200">
+              <div className="font-sans text-xs font-bold text-zinc-900 bg-white px-2.5 py-1 rounded border border-zinc-200">
                 Tổng đơn: {totalQuantity} cái
               </div>
             </div>
 
             {/* Colors picker */}
             <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-1.5">
+              <label className="block text-[11px] font-semibold text-zinc-600 mb-1.5">
                 1. Danh sách màu sắc:
               </label>
               <div className="flex flex-wrap items-center gap-1.5">
                 {colors.map((c) => (
                   <span
                     key={c}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white border border-slate-200 text-xs font-medium text-slate-800"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white border border-zinc-200 text-xs font-medium text-zinc-800"
                   >
                     {c}
                     {colors.length > 1 && (
                       <button
                         type="button"
                         onClick={() => handleRemoveColor(c)}
-                        className="text-slate-400 hover:text-rose-600 cursor-pointer ml-1"
+                        className="text-zinc-400 hover:text-rose-600 cursor-pointer ml-1"
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -338,7 +338,7 @@ export function CreateOrderModal({
                     placeholder="Thêm màu..."
                     value={newColorInput}
                     onChange={(e) => setNewColorInput(e.target.value)}
-                    className="h-7 w-24 px-2 text-xs border border-slate-200 rounded-md bg-white"
+                    className="h-7 w-24 px-2 text-xs border border-zinc-200 rounded-md bg-white"
                   />
                   <Button
                     type="button"
@@ -355,7 +355,7 @@ export function CreateOrderModal({
 
             {/* Sizes picker */}
             <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-1.5">
+              <label className="block text-[11px] font-semibold text-zinc-600 mb-1.5">
                 2. Kích cỡ áp dụng (Tùy chọn):
               </label>
               <div className="flex items-center gap-1.5">
@@ -366,10 +366,10 @@ export function CreateOrderModal({
                       key={s}
                       type="button"
                       onClick={() => toggleSize(s)}
-                      className={`h-7 px-3 rounded-md font-mono text-xs font-bold transition-colors cursor-pointer border ${
+                      className={`h-7 px-3 rounded-md font-sans text-xs font-bold transition-colors cursor-pointer border ${
                         isChecked
-                          ? "bg-slate-900 text-white border-slate-900"
-                          : "bg-white text-slate-500 border-slate-200 hover:text-slate-900"
+                          ? "bg-zinc-900 text-white border-zinc-900"
+                          : "bg-white text-zinc-500 border-zinc-200 hover:text-zinc-900"
                       }`}
                     >
                       {s}
@@ -381,23 +381,23 @@ export function CreateOrderModal({
 
             {/* Matrix Input Table */}
             <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-1.5">
+              <label className="block text-[11px] font-semibold text-zinc-600 mb-1.5">
                 3. Nhập số lượng chi tiết từng ô (Màu × Size):
               </label>
-              <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+              <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
                 <table className="w-full text-center text-xs">
                   <thead>
-                    <tr className="bg-slate-100/70 border-b border-slate-200 text-slate-700 font-semibold">
+                    <tr className="bg-zinc-100/70 border-b border-zinc-200 text-zinc-700 font-semibold">
                       <th className="py-2 px-3 text-left">Màu</th>
                       {selectedSizes.map((s) => (
-                        <th key={s} className="py-2 px-2 font-mono">
+                        <th key={s} className="py-2 px-2 font-sans">
                           {s}
                         </th>
                       ))}
-                      <th className="py-2 px-3 text-right bg-slate-100">Tổng màu</th>
+                      <th className="py-2 px-3 text-right bg-zinc-100">Tổng màu</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-zinc-100">
                     {colors.map((color) => {
                       const colorSum = selectedSizes.reduce(
                         (sum, s) => sum + (quantities[`${color}-${s}`] || 0),
@@ -405,7 +405,7 @@ export function CreateOrderModal({
                       );
                       return (
                         <tr key={color}>
-                          <td className="py-2 px-3 text-left font-medium text-slate-800">
+                          <td className="py-2 px-3 text-left font-medium text-zinc-800">
                             {color}
                           </td>
                           {selectedSizes.map((size) => (
@@ -413,7 +413,7 @@ export function CreateOrderModal({
                               <input
                                 type="number"
                                 min="0"
-                                className="w-14 h-7 text-center font-mono text-xs border border-slate-200 rounded focus:border-slate-900 focus:outline-hidden"
+                                className="w-14 h-7 text-center font-sans text-xs border border-zinc-200 rounded focus:border-zinc-900 focus:outline-hidden"
                                 value={quantities[`${color}-${size}`] ?? 0}
                                 onChange={(e) =>
                                   handleQtyChange(color, size, Number(e.target.value))
@@ -421,7 +421,7 @@ export function CreateOrderModal({
                               />
                             </td>
                           ))}
-                          <td className="py-2 px-3 text-right font-mono font-bold text-slate-900 bg-slate-50/50">
+                          <td className="py-2 px-3 text-right font-sans font-bold text-zinc-900 bg-zinc-50/50">
                             {colorSum}
                           </td>
                         </tr>
@@ -434,11 +434,11 @@ export function CreateOrderModal({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
+            <label className="block text-xs font-semibold text-zinc-700 mb-1">
               Ghi chú kỹ thuật / Vải
             </label>
             <textarea
-              className="flex min-h-[50px] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-950"
+              className="flex min-h-[50px] w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-xs shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-950"
               rows={2}
               placeholder="Yêu cầu vải, phụ liệu, quy cách may..."
               value={orderInfo.notes}
@@ -447,7 +447,7 @@ export function CreateOrderModal({
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-200">
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-zinc-200">
             <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={loading}>
               Hủy
             </Button>
@@ -456,7 +456,7 @@ export function CreateOrderModal({
               variant="default"
               size="sm"
               disabled={loading}
-              className="bg-slate-900 text-white hover:bg-slate-800 font-semibold"
+              className="bg-zinc-900 text-white hover:bg-zinc-800 font-semibold"
             >
               {loading ? "Đang tạo..." : `+ Tạo Đơn Hàng (${totalQuantity} cái)`}
             </Button>

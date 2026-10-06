@@ -13,7 +13,7 @@ import { PayrollView } from "@/components/views/PayrollView";
 import { QcView } from "@/components/views/QcView";
 import { DeliveryView } from "@/components/views/DeliveryView";
 import { Order, Line, Employee, StageKey } from "@/lib/types";
-import { RefreshCw, Plus, Smartphone } from "lucide-react";
+import { RefreshCw, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function LuutaAppPage() {
@@ -21,24 +21,25 @@ export default function LuutaAppPage() {
   const [currentRole, setCurrentRole] = useState<UserRole>("giam_doc");
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
+  const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [stats, setStats] = useState({
     orders: {
-      totalRunning: 4,
-      atRisk: 1,
-      delayed: 1,
+      totalRunning: 0,
+      atRisk: 0,
+      delayed: 0,
       completed: 0,
-      waitingQc: 2,
-      waitingDelivery: 1,
+      waitingQc: 0,
+      waitingDelivery: 0,
     },
     production: {
       monthlyQty: 0,
       monthlyPay: 0,
       lineStats: [],
     },
-    employeesCount: 10,
+    employeesCount: 0,
   });
   const [nextCode, setNextCode] = useState("LU-005");
 
@@ -68,6 +69,10 @@ export default function LuutaAppPage() {
         setLines(json.data.lines);
         setNextCode(json.data.nextCode);
       }
+
+      const allRes = await fetch("/api/orders");
+      const allJson = await allRes.json();
+      if (allJson.success) setAllOrders(allJson.data.orders);
 
       // Also fetch employees for quick production log
       const resLogs = await fetch("/api/production/log");
@@ -129,15 +134,7 @@ export default function LuutaAppPage() {
   const canViewPayroll = currentRole !== "nhan_vien";
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
-      {/* Top Header */}
-      <Header
-        currentRole={currentRole}
-        onRoleChange={setCurrentRole}
-        onToggleSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-        atRiskCount={atRiskCount}
-      />
-
+    <div className="min-h-screen bg-zinc-50 flex flex-col font-sans text-zinc-900">
       <div className="flex flex-1">
         {/* Left Navigation Sidebar */}
         <Sidebar
@@ -154,34 +151,41 @@ export default function LuutaAppPage() {
           canViewPayroll={canViewPayroll}
         />
 
+        <div className="min-w-0 flex-1">
+      {/* Top Header */}
+      <Header
+        currentRole={currentRole}
+        onRoleChange={(role) => {
+          setCurrentRole(role);
+          if (role === "nhan_vien" && activeTab === "luong_san_luong") setActiveTab("tong_quan");
+        }}
+        onToggleSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+        atRiskCount={atRiskCount}
+      />
         {/* Main Content View */}
-        <main className="flex-1 p-3.5 sm:p-6 lg:p-8 space-y-5 max-w-7xl mx-auto w-full overflow-x-hidden">
+        <main className="flex-1 p-3.5 sm:p-6 lg:p-8 space-y-5 mx-auto w-full overflow-x-hidden">
           {/* Top Title Action Bar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-slate-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-1">
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-lg md:text-xl font-black tracking-tight text-slate-900 uppercase font-serif">
-                  {activeTab === "tong_quan" && "TỔNG QUAN XƯỞNG MAY LUUTA"}
-                  {activeTab === "don_hang" && "QUẢN LÝ ĐƠN HÀNG (MÀU × SIZE)"}
-                  {activeTab === "chuyen_may" && "QUẢN LÝ 5 CHUYỀN SẢN XUẤT"}
-                  {activeTab === "luong_san_luong" && "SẢN LƯỢNG & TÍNH LƯƠNG SẢN PHẨM"}
-                  {activeTab === "qc" && "PHÂN HỆ KIỂM ĐỊNH CHẤT LƯỢNG (QC)"}
-                  {activeTab === "giao_hang" && "GIAO HÀNG & KIỂM ĐỦ SIZE / MÀU"}
+                <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+                  {activeTab === "tong_quan" && "Tổng quan"}
+                  {activeTab === "don_hang" && "Đơn hàng"}
+                  {activeTab === "chuyen_may" && "Chuyền may"}
+                  {activeTab === "luong_san_luong" && "Lương sản phẩm"}
+                  {activeTab === "qc" && "Kiểm soát chất lượng"}
+                  {activeTab === "giao_hang" && "Giao hàng"}
                 </h1>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-                  v1.0 LUUTA
-                </span>
+
               </div>
-              <p className="text-[11px] text-slate-500">
-                Theo dõi toàn diện: Nhận đơn → Kiểm NPL → Rập → Cắt → May → QC → Sửa → QC lại → Đóng gói → Giao hàng
-              </p>
+
             </div>
 
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
                 variant="outline"
-                className="h-8 text-xs border-slate-200 text-slate-700 hover:bg-slate-100 gap-1"
+                className="h-8 text-xs border-zinc-200 text-zinc-700 hover:bg-zinc-100 gap-1"
                 onClick={() => fetchData()}
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
@@ -190,11 +194,11 @@ export default function LuutaAppPage() {
 
               <Button
                 size="sm"
-                className="h-8 text-xs bg-slate-900 text-white hover:bg-slate-800 gap-1 font-semibold"
+                className="h-8 text-xs bg-zinc-900 text-white hover:bg-zinc-800 gap-1 font-semibold"
                 onClick={() => setIsFastLogOpen(true)}
               >
-                <Smartphone className="h-3.5 w-3.5" />
-                <span>+ Nhập Sản Lượng</span>
+                <Plus className="h-3.5 w-3.5" />
+                <span>Nhập sản lượng</span>
               </Button>
             </div>
           </div>
@@ -205,6 +209,7 @@ export default function LuutaAppPage() {
               {/* 6 KPI Cards & Monthly Snapshot */}
               <KpiCards
                 stats={stats}
+                showPayroll={canViewPayroll}
                 activeFilter={statusFilter}
                 onFilterChange={setStatusFilter}
               />
@@ -241,21 +246,21 @@ export default function LuutaAppPage() {
           {activeTab === "chuyen_may" && (
             <LinesView
               lines={lines}
-              orders={orders}
+              orders={allOrders}
               onSelectOrder={handleOpenOrderDetail}
               onOpenLogModal={(lineId) => setIsFastLogOpen(true)}
             />
           )}
 
           {/* TAB: LƯƠNG & SẢN LƯỢNG */}
-          {activeTab === "luong_san_luong" && (
+          {activeTab === "luong_san_luong" && canViewPayroll && (
             <PayrollView currentRole={currentRole} />
           )}
 
           {/* TAB: PHÂN HỆ QC */}
           {activeTab === "qc" && (
             <QcView
-              orders={orders}
+              orders={allOrders}
               onSelectOrder={handleOpenOrderDetail}
               onUpdateStage={handleUpdateStage}
             />
@@ -264,12 +269,13 @@ export default function LuutaAppPage() {
           {/* TAB: GIAO HÀNG */}
           {activeTab === "giao_hang" && (
             <DeliveryView
-              orders={orders}
+              orders={allOrders}
               onSelectOrder={handleOpenOrderDetail}
               onRefresh={fetchData}
             />
           )}
         </main>
+        </div>
       </div>
 
       {/* MODAL 1: CHI TIẾT ĐƠN HÀNG (Ma trận Màu x Size + Timeline 11 bước) */}
@@ -295,7 +301,7 @@ export default function LuutaAppPage() {
       <FastProductionLogModal
         isOpen={isFastLogOpen}
         onClose={() => setIsFastLogOpen(false)}
-        orders={orders}
+        orders={allOrders}
         employees={employees}
         lines={lines}
         onSuccess={fetchData}
