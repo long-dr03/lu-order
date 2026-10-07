@@ -161,40 +161,14 @@ export function AdminPanel({
                   </div>
                   <div className="inline-actions account-actions">
                     {editable && (
-                      <>
-                        <Action tone="secondary" onClick={() => setSelected(u)}>
-                          {u.status === "pending" ? (
-                            <UserCheck size={18} />
-                          ) : (
-                            <UserRoundCog size={18} />
-                          )}{" "}
-                          {u.status === "pending" ? "Duyệt" : "Cấu hình"}
-                        </Action>
-                        {u.status !== "pending" && (
-                          <>
-                            <Action
-                              tone="secondary"
-                              onClick={() =>
-                                setConfirm({
-                                  user: u,
-                                  action:
-                                    u.status === "locked" ? "unlock" : "lock",
-                                })
-                              }
-                            >
-                              <Lock size={18} />
-                              {u.status === "locked" ? "Mở khóa" : "Khóa"}
-                            </Action>
-                            <Action
-                              tone="secondary"
-                              onClick={() => setReset(u)}
-                            >
-                              <KeyRound size={18} />
-                              Đặt lại mật khẩu
-                            </Action>
-                          </>
-                        )}
-                      </>
+                      <Action tone="secondary" onClick={() => setSelected(u)}>
+                        {u.status === "pending" ? (
+                          <UserCheck size={16} />
+                        ) : (
+                          <UserRoundCog size={16} />
+                        )}{" "}
+                        {u.status === "pending" ? "Duyệt" : "Cấu hình"}
+                      </Action>
                     )}
                     {u.status === "active" &&
                       u.employee_id &&
@@ -208,10 +182,34 @@ export function AdminPanel({
                           tone="secondary"
                           onClick={() => setRepresent(u)}
                         >
-                          <Eye size={18} />
+                          <Eye size={16} />
                           Thao tác thay
                         </Action>
                       )}
+                    {editable && u.status !== "pending" && (
+                      <>
+                        <Action
+                          tone="secondary"
+                          onClick={() => setReset(u)}
+                        >
+                          <KeyRound size={16} />
+                          Đổi mật khẩu
+                        </Action>
+                        <Action
+                          tone="secondary"
+                          onClick={() =>
+                            setConfirm({
+                              user: u,
+                              action:
+                                u.status === "locked" ? "unlock" : "lock",
+                            })
+                          }
+                        >
+                          <Lock size={16} />
+                          {u.status === "locked" ? "Mở khóa" : "Khóa"}
+                        </Action>
+                      </>
+                    )}
                   </div>
                 </article>
               );
