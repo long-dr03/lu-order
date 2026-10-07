@@ -576,103 +576,53 @@ export function OrderDetail({
             }
           }}
         >
-          <h3>
-            {available.find((a) => a.key === chosen)?.label} theo màu / size
-          </h3>
-          <div className="record-totals">
-            <span>
-              Còn chờ xử lý: <strong>{remaining}</strong>
-            </span>
-            {["qc", "reinspect"].includes(chosen) && (
-              <span>
-                Số lỗi: <strong>{Math.max(0, qty - passed)}</strong>
-              </span>
-            )}
+          <div className="qc-totals-strip">
+            <div>
+              <span className="muted" style={{ display: "block", fontSize: 11, fontWeight: 600 }}>CÔNG ĐOẠN</span>
+              <strong style={{ fontSize: 15 }}>{available.find((a) => a.key === chosen)?.label}</strong>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <span className="muted" style={{ display: "block", fontSize: 11, fontWeight: 600 }}>CÒN CHỜ XỬ LÝ</span>
+              <strong style={{ fontSize: 16, color: remaining > 0 ? "var(--foreground)" : "#16a34a" }}>
+                {remaining} SP
+              </strong>
+            </div>
           </div>
           {remaining === 0 && (
-            <p role="status" className="muted">
+            <p role="status" className="muted" style={{ padding: "8px 12px", background: "#f4f4f5", borderRadius: 6, fontSize: 13 }}>
               Màu–size này đã xử lý đủ hoặc chưa có đầu vào. Chọn màu–size khác;
               khi đã xong, mở Công đoạn để chuyển bước phù hợp.
             </p>
           )}
-          <div className="form-grid">
-            <Field label="Ngày xử lý">
-              <input
-                name="operation_date"
-                type="date"
-                defaultValue={day()}
-                min={order.order_date}
-                max={day()}
-                required
-              />
-            </Field>
-            {["qc", "reinspect"].includes(chosen) || selfDelivery ? (
-              <div className="field">
-                <span>
-                  {selfDelivery ? "Người giao hàng" : "Người kiểm QC"}
-                </span>
-                <strong>{session.user.name}</strong>
-                <span className="muted">
-                  Tự ghi nhận theo tài khoản đang thao tác.
-                </span>
-              </div>
-            ) : (
-              <Field label="Người thực hiện">
-                <select name="worker_id">
-                  <option value="">Tài khoản đang thao tác</option>
-                  {employees
-                    .filter((e) => e.line_id === order.line_id)
-                    .map((e) => (
-                      <option key={e.id} value={e.id}>
-                        {e.name}
-                      </option>
-                    ))}
-                </select>
-              </Field>
-            )}
-            {chosen === "pack" && (
-              <Field label="Số kiện">
-                <input
-                  name="packages"
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  max={1000000}
-                  defaultValue={1}
-                  required
-                />
-              </Field>
-            )}
-            <Field label="Thao tác">
-              <select
-                value={chosen}
-                onChange={(e) => setAction(e.target.value)}
-              >
-                {available.map((a) => (
-                  <option key={a.key} value={a.key}>
-                    {a.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Màu / size">
-              <select
-                value={variantIndex}
-                onChange={(e) => {
-                  setVariantIndex(Number(e.target.value));
-                  setQty(1);
-                  setPassed(1);
-                  setNotice("");
-                }}
-              >
-                {variants.map((v, i) => (
+
+          {/* 1. Ưu tiên hàng đầu: Chọn Màu & Size */}
+          <Field label="Màu / size">
+            <select
+              value={variantIndex}
+              onChange={(e) => {
+                const idx = Number(e.target.value);
+                setVariantIndex(idx);
+                const rem = remainingOperation(variants[idx], chosen);
+                const newQty = Math.max(1, Math.min(qty, rem || 1));
+                setQty(newQty);
+                setPassed(newQty);
+                setNotice("");
+              }}
+            >
+              {variants.map((v, i) => {
+                const rem = remainingOperation(v, chosen);
+                return (
                   <option key={v.id} value={i}>
-                    {v.color} / {v.size}
+                    {v.color} / {v.size} — Còn chờ: {rem} SP (tổng {v.quantity})
                   </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Số lượng xử lý">
+                );
+              })}
+            </select>
+          </Field>
+
+          {/* 2. Số lượng & Số đạt xếp cạnh nhau */}
+          <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="Số lượng kiểm">
               <input
                 type="number"
                 inputMode="numeric"
@@ -687,7 +637,7 @@ export function OrderDetail({
                 }}
               />
             </Field>
-            {["qc", "reinspect"].includes(chosen) && (
+            {["qc", "reinspect"].includes(chosen) ? (
               <Field label="Số đạt">
                 <input
                   type="number"
@@ -699,34 +649,129 @@ export function OrderDetail({
                   onChange={(e) => setPassed(Number(e.target.value))}
                 />
               </Field>
-            )}
+            ) : chosen === "pack" ? (
+              <Field label="Số kiện">
+                <input
+                  name="packages"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={1000000}
+                  defaultValue={1}
+                  required
+                />
+              </Field>
+            ) : null}
           </div>
+
+          {/* Nút tiện ích: Đạt tất cả & Trạng thái lỗi */}
           {["qc", "reinspect"].includes(chosen) && (
-            <Field label="Mô tả lỗi">
-              <input name="defect_type" maxLength={500} />
-            </Field>
-          )}
-          {["qc", "reinspect"].includes(chosen) && (
-            <div>
-              <ProductImagePicker
-                label="Ảnh lỗi QC"
-                prompt="Thêm ảnh để mô tả lỗi"
-                existing={defectUrl}
-                file={defectFile}
-                onFile={(f) => {
-                  setDefectFile(f);
-                  setDefectUrl(null);
-                }}
-                onRemove={() => {
-                  setDefectFile(null);
-                  setDefectUrl(null);
-                }}
-              />
+            <div className="qc-quick-row">
+              <button
+                type="button"
+                className={`qc-pass-all-btn ${passed === qty ? "active" : ""}`}
+                onClick={() => setPassed(qty)}
+              >
+                ✓ Đạt tất cả ({qty})
+              </button>
+              <span style={{ fontSize: 13, fontWeight: 600, color: qty - passed > 0 ? "#dc2626" : "#16a34a" }}>
+                {qty - passed > 0 ? `⚠️ Có ${qty - passed} sản phẩm lỗi` : "✓ 100% đạt chuẩn"}
+              </span>
             </div>
           )}
-          <Field label="Ghi chú xử lý">
-            <textarea name="operation_notes" maxLength={2000} />
+
+          {/* Khối thông tin lỗi (chỉ mở rõ khi phát hiện có lỗi) */}
+          {["qc", "reinspect"].includes(chosen) && qty - passed > 0 && (
+            <div className="qc-defect-box">
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, color: "#991b1b", fontWeight: 600, fontSize: 13 }}>
+                <span>Phát hiện {qty - passed} sản phẩm lỗi</span>
+              </div>
+              <Field label="Mô tả loại lỗi (lỗi may, lỗi vải, rập...)">
+                <input
+                  name="defect_type"
+                  placeholder="Ví dụ: Rách đường chỉ sườn, xước vải..."
+                  maxLength={500}
+                  required
+                />
+              </Field>
+              <div style={{ marginTop: 10 }}>
+                <ProductImagePicker
+                  label="Ảnh lỗi QC"
+                  prompt="Thêm ảnh chụp để mô tả lỗi"
+                  existing={defectUrl}
+                  file={defectFile}
+                  onFile={(f) => {
+                    setDefectFile(f);
+                    setDefectUrl(null);
+                  }}
+                  onRemove={() => {
+                    setDefectFile(null);
+                    setDefectUrl(null);
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Dropdown Thao tác (chỉ hiện khi có nhiều hơn 1 thao tác khả dụng) */}
+          {available.length > 1 && (
+            <Field label="Thao tác">
+              <select
+                value={chosen}
+                onChange={(e) => setAction(e.target.value)}
+              >
+                {available.map((a) => (
+                  <option key={a.key} value={a.key}>
+                    {a.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+
+          {/* Thông tin phụ: Ngày & Người kiểm (xếp gọn gàng) */}
+          <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="Ngày xử lý">
+              <input
+                name="operation_date"
+                type="date"
+                defaultValue={day()}
+                min={order.order_date}
+                max={day()}
+                required
+              />
+            </Field>
+            {["qc", "reinspect"].includes(chosen) || selfDelivery ? (
+              <div className="field">
+                <span>{selfDelivery ? "Người giao" : "Người kiểm QC"}</span>
+                <strong style={{ fontSize: 14 }}>{session.user.name}</strong>
+                <span className="muted" style={{ fontSize: 11 }}>Tự ghi nhận</span>
+              </div>
+            ) : (
+              <Field label="Người thực hiện">
+                <select name="worker_id">
+                  <option value="">Tài khoản thao tác</option>
+                  {employees
+                    .filter((e) => e.line_id === order.line_id)
+                    .map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.name}
+                      </option>
+                    ))}
+                </select>
+              </Field>
+            )}
+          </div>
+
+          <Field label="Ghi chú xử lý (tùy chọn)">
+            <textarea
+              name="operation_notes"
+              rows={2}
+              maxLength={2000}
+              placeholder="Ghi chú thêm nếu có..."
+            />
           </Field>
+
           <div className="mobile-form-footer">
             <Action
               type="submit"
@@ -735,7 +780,9 @@ export function OrderDetail({
               disabled={!variant || remaining <= 0 || qty > remaining}
             >
               {["qc", "reinspect"].includes(chosen)
-                ? "Lưu kết quả QC"
+                ? qty - passed > 0
+                  ? `Lưu kết quả QC (${passed} đạt · ${qty - passed} lỗi)`
+                  : `Lưu kết quả QC (${passed} SP đạt)`
                 : "Lưu xử lý"}
             </Action>
           </div>
