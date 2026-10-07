@@ -225,99 +225,120 @@ export function DashboardInsights({
           <strong>{orders.filter((o) => o.delivered_complete).length}</strong>
         </span>
       </div>
-      <div className="table-scroll">
-        <table className="mobile-stack-table">
-          <caption>Sản lượng tháng theo chuyền</caption>
-          <thead>
-            <tr>
-              <th>Chuyền</th>
-              <th>Lượt công việc</th>
-              <th>May thực tế (SP/ngày có ghi nhận)</th>
-              <th>Đơn nguy cơ / trễ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map((l) => {
-              const rows = logs.filter((r) => r.line_id === l.id),
-                may = rows.filter((r) => r.stage === "May");
-              return (
-                <tr key={l.id}>
-                  <td data-label="Chuyền">{l.name}</td>
-                  <td data-label="Lượt công việc">
-                    {rows
-                      .reduce((n, r) => n + r.quantity, 0)
-                      .toLocaleString("vi-VN")}
-                  </td>
-                  <td data-label="May thực tế / ngày">
-                    {(
-                      may.reduce((n, r) => n + r.quantity, 0) /
-                      Math.max(1, new Set(may.map((r) => r.log_date)).size)
-                    ).toLocaleString("vi-VN", { maximumFractionDigits: 1 })}
-                  </td>
-                  <td data-label="Đơn nguy cơ / trễ">
-                    {
-                      orders.filter(
-                        (o) =>
-                          o.line_id === l.id &&
-                          ["at_risk", "delayed"].includes(o.status),
-                      ).length
-                    }
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <div className="table-scroll">
-        <table className="mobile-stack-table">
-          <caption>
-            Lượt công việc và tiền công tháng theo nhân viên trong phạm vi được
-            cấp
-          </caption>
-          <thead>
-            <tr>
-              <th>Nhân viên</th>
-              <th>Sản lượng</th>
-              <th>Tiền công</th>
-            </tr>
-          </thead>
-          <tbody>
-            {people
-              .slice((currentPeoplePage - 1) * 25, currentPeoplePage * 25)
-              .map((id) => {
-                const rows = logs.filter((l) => l.employee_id === id);
+      <div className="insights-block">
+        <div className="panel-toolbar">
+          <h3 className="insights-heading">Sản lượng tháng theo chuyền</h3>
+          <span className="muted">{lines.length} chuyền may</span>
+        </div>
+        <div className="table-scroll">
+          <table className="compact-table">
+            <thead>
+              <tr>
+                <th>Chuyền</th>
+                <th className="num-col">Lượt CV</th>
+                <th className="num-col">May TT / ngày</th>
+                <th className="num-col">Đơn rủi ro</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((l) => {
+                const rows = logs.filter((r) => r.line_id === l.id),
+                  may = rows.filter((r) => r.stage === "May");
+                const atRisk = orders.filter(
+                  (o) =>
+                    o.line_id === l.id &&
+                    ["at_risk", "delayed"].includes(o.status),
+                ).length;
                 return (
-                  <tr key={id}>
-                    <td data-label="Nhân viên">{rows[0].employee_name}</td>
-                    <td data-label="Sản lượng">
+                  <tr key={l.id}>
+                    <td>
+                      <strong>{l.name}</strong>
+                    </td>
+                    <td className="num-col">
                       {rows
                         .reduce((n, r) => n + r.quantity, 0)
                         .toLocaleString("vi-VN")}
                     </td>
-                    <td data-label="Tiền công">
-                      {permits(session.user, "payroll.view", {
-                        employeeId: id,
-                        lineId: rows[0].line_id,
-                      })
-                        ? money(
-                            rows.reduce((n, r) => n + (r.total_pay || 0), 0),
-                          )
-                        : "Không có quyền xem"}
+                    <td className="num-col">
+                      {(
+                        may.reduce((n, r) => n + r.quantity, 0) /
+                        Math.max(1, new Set(may.map((r) => r.log_date)).size)
+                      ).toLocaleString("vi-VN", { maximumFractionDigits: 1 })}
+                    </td>
+                    <td className="num-col">
+                      {atRisk > 0 ? (
+                        <span className="badge-danger-sm">{atRisk} đơn</span>
+                      ) : (
+                        <span className="muted">0</span>
+                      )}
                     </td>
                   </tr>
                 );
               })}
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
       </div>
-      {people.length > 25 && (
-        <Pagination
-          page={currentPeoplePage}
-          total={people.length}
-          onChange={setPeoplePage}
-        />
-      )}
+      <div className="insights-block">
+        <div className="panel-toolbar">
+          <h3 className="insights-heading">
+            Lượt công việc và tiền công theo nhân viên
+          </h3>
+          <span className="muted">{people.length} nhân viên</span>
+        </div>
+        <div className="table-scroll">
+          <table className="compact-table">
+            <thead>
+              <tr>
+                <th>Nhân viên</th>
+                <th className="num-col">Sản lượng</th>
+                <th className="num-col">Tiền công</th>
+              </tr>
+            </thead>
+            <tbody>
+              {people
+                .slice((currentPeoplePage - 1) * 25, currentPeoplePage * 25)
+                .map((id) => {
+                  const rows = logs.filter((l) => l.employee_id === id);
+                  const canViewPay = permits(session.user, "payroll.view", {
+                    employeeId: id,
+                    lineId: rows[0]?.line_id,
+                  });
+                  return (
+                    <tr key={id}>
+                      <td>
+                        <strong>{rows[0]?.employee_name}</strong>
+                      </td>
+                      <td className="num-col">
+                        {rows
+                          .reduce((n, r) => n + r.quantity, 0)
+                          .toLocaleString("vi-VN")}
+                      </td>
+                      <td className="num-col">
+                        {canViewPay ? (
+                          <span className="money-cell">
+                            {money(
+                              rows.reduce((n, r) => n + (r.total_pay || 0), 0),
+                            )}
+                          </span>
+                        ) : (
+                          <span className="muted">Không xem được</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
+        {people.length > 25 && (
+          <Pagination
+            page={currentPeoplePage}
+            total={people.length}
+            onChange={setPeoplePage}
+          />
+        )}
+      </div>
     </section>
   );
 }

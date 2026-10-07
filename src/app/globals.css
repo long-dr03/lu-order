@@ -135,10 +135,13 @@ input::placeholder {
   color: #a1a1aa;
 }
 caption {
+  display: block;
+  width: 100%;
   text-align: left;
-  padding: 18px;
-  font-size: 16px;
+  padding: 14px 16px 8px 16px;
+  font-size: 15px;
   font-weight: 600;
+  box-sizing: border-box;
 }
 .logo {
   display: flex;
@@ -1372,9 +1375,25 @@ td strong {
     padding: 16px;
   }
   .record-totals {
-    padding: 16px;
-    gap: 12px;
-    flex-direction: column;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px 14px !important;
+    padding: 12px 14px !important;
+    background: #fafafa;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+  }
+  .record-totals span {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .record-totals strong {
+    font-size: 16px;
+    color: var(--foreground);
+    margin-left: 6px;
   }
   .modal-content {
     padding: 20px;
@@ -1863,12 +1882,21 @@ input:not([type="checkbox"]), select, textarea { font-size: 16px; }
   .stack { gap: 16px; }
   .padded { padding: 16px; }
   .modal-body { padding: 20px; }
+  .mobile-stack-table caption,
+  caption {
+    display: block !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    white-space: normal !important;
+    overflow-wrap: break-word !important;
+    padding: 14px 0 8px 0;
+  }
   .mobile-stack-table { min-width: 0 !important; }
   .mobile-stack-table, .mobile-stack-table tbody, .mobile-stack-table tr { display: block; width: 100%; }
   .mobile-stack-table thead { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .mobile-stack-table tbody tr { padding: 14px 16px; border-bottom: 1px solid var(--border); }
   .mobile-stack-table tbody tr:nth-child(even) { background: #fafafa; }
-  .mobile-stack-table td { display: grid; grid-template-columns: minmax(96px, 0.8fr) minmax(0, 1.2fr); align-items: start; gap: 12px; padding: 7px 0 !important; border: 0; overflow-wrap: anywhere; white-space: normal; }
+  .mobile-stack-table td { display: grid; grid-template-columns: minmax(110px, 0.9fr) minmax(0, 1.1fr); align-items: start; gap: 12px; padding: 7px 0 !important; border: 0; overflow-wrap: anywhere; white-space: normal; }
   .mobile-stack-table td::before { content: attr(data-label); font-size: 14px; color: var(--muted); font-weight: 400; }
   .mobile-stack-table td .text-button { padding: 0; white-space: normal; overflow-wrap: anywhere; }
   .mobile-stack-table td > * { min-width: 0; }
@@ -1957,6 +1985,74 @@ th.sticky-col {
   border-top: 1px solid var(--border);
   margin-top: 16px;
   width: 100%;
+}
+
+.insights-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+.insights-block .panel-toolbar {
+  padding: 12px 14px;
+  background: #fbfbfb;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.insights-heading {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--foreground);
+}
+.compact-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 0;
+}
+.compact-table th,
+.compact-table td {
+  padding: 10px 12px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.compact-table th {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  background: #fafafa;
+  white-space: nowrap;
+}
+.compact-table .num-col {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.compact-table tr:last-child td {
+  border-bottom: none;
+}
+.compact-table tr:hover {
+  background: #fafafa;
+}
+.money-cell {
+  font-weight: 600;
+  color: #15803d;
+  font-variant-numeric: tabular-nums;
+}
+.badge-danger-sm {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 @media (max-width: 639px) {
