@@ -163,7 +163,7 @@ export function ProductionForm({
         event.preventDefault();
         void submit(new FormData(event.currentTarget));
       }}
-      className="stack"
+      className="stack production-form"
     >
       <ErrorNotice error={error} />
       {!selectedEmp && (
@@ -201,22 +201,29 @@ export function ProductionForm({
               ))}
           </select>
         </Field>
-        <Field label="Nhân viên">
-          <select
-            value={selectedEmp}
-            onChange={(e) => setEmp(e.target.value)}
-            required
-          >
-            {!allowedEmployees.length && (
-              <option value="">Không có nhân viên phù hợp</option>
-            )}
-            {allowedEmployees.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.name}
-              </option>
-            ))}
-          </select>
-        </Field>
+        {allowedEmployees.length === 1 ? (
+          <div className="field field-readonly">
+            <span>Người ghi nhận</span>
+            <strong>{allowedEmployees[0].name}</strong>
+          </div>
+        ) : (
+          <Field label="Nhân viên">
+            <select
+              value={selectedEmp}
+              onChange={(e) => setEmp(e.target.value)}
+              required
+            >
+              {!allowedEmployees.length && (
+                <option value="">Không có nhân viên phù hợp</option>
+              )}
+              {allowedEmployees.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
         <Field label="Công đoạn">
           <select
             value={stage}
@@ -262,6 +269,7 @@ export function ProductionForm({
         <Field label="Số lượng">
           <input
             type="number"
+            inputMode="numeric"
             min={1}
             max={1000000}
             required
@@ -292,7 +300,7 @@ export function ProductionForm({
             cộng vào lương.
           </p>
           {variant.packed_qty > 0 && (
-            <label>
+            <label className="checkbox-field">
               <input
                 type="checkbox"
                 checked={packingWagesOnly}
@@ -316,17 +324,24 @@ export function ProductionForm({
         Đơn giá do quản lý cấu hình. QC và sửa hàng cần được ghi nhận xử lý
         trước khi tính công.
       </p>
-      {entryProblem && (
-        <p role="status" className="error-text">
-          {entryProblem}
-        </p>
-      )}
-      <Action type="submit" busy={busy} disabled={!!entryProblem}>
-        <Check size={18} />
-        {stage === "Đóng gói" && !packingWagesOnly
-          ? "Xác nhận đóng gói và ghi công"
-          : "Ghi nhận sản lượng"}
-      </Action>
+      <div className="mobile-form-footer">
+        {entryProblem && (
+          <p role="status" className="error-text">
+            {entryProblem}
+          </p>
+        )}
+        <Action
+          type="submit"
+          className="mobile-form-submit"
+          busy={busy}
+          disabled={!!entryProblem}
+        >
+          <Check size={18} />
+          {stage === "Đóng gói" && !packingWagesOnly
+            ? "Xác nhận đóng gói và ghi công"
+            : "Ghi nhận sản lượng"}
+        </Action>
+      </div>
     </form>
   );
 }
@@ -442,8 +457,8 @@ export function OrderDetail({
             </p>
             <p className="muted">
               {LUUTA_STAGES.find((s) => s.key === order.current_stage)?.label} ·
-              Tổ {order.line_id} · {order.total_quantity} sản phẩm · Hạn{" "}
-              {order.deadline}
+              Tổ {order.line_id} · {order.total_quantity} sản phẩm ·{" "}
+              <span className="nowrap">Hạn {order.deadline}</span>
             </p>
           </div>
           <Status order={order} />
@@ -473,7 +488,11 @@ export function OrderDetail({
           </p>
         </details>
       )}
-      <div className="segmented">
+      <div
+        className="segmented detail-tabs"
+        role="group"
+        aria-label="Thông tin đơn hàng"
+      >
         {!!available.length && (
           <button
             aria-pressed={tab === "operation"}
@@ -616,6 +635,7 @@ export function OrderDetail({
                 <input
                   name="packages"
                   type="number"
+                  inputMode="numeric"
                   min={1}
                   max={1000000}
                   defaultValue={1}
@@ -655,6 +675,7 @@ export function OrderDetail({
             <Field label="Số lượng xử lý">
               <input
                 type="number"
+                inputMode="numeric"
                 min={1}
                 max={Math.max(1, remaining)}
                 value={qty}
@@ -670,6 +691,7 @@ export function OrderDetail({
               <Field label="Số đạt">
                 <input
                   type="number"
+                  inputMode="numeric"
                   min={0}
                   max={qty}
                   value={passed}
@@ -686,8 +708,9 @@ export function OrderDetail({
           )}
           {["qc", "reinspect"].includes(chosen) && (
             <div>
-              <h3>Ảnh lỗi (nếu có)</h3>
               <ProductImagePicker
+                label="Ảnh lỗi QC"
+                prompt="Thêm ảnh để mô tả lỗi"
                 existing={defectUrl}
                 file={defectFile}
                 onFile={(f) => {
@@ -704,15 +727,18 @@ export function OrderDetail({
           <Field label="Ghi chú xử lý">
             <textarea name="operation_notes" maxLength={2000} />
           </Field>
-          <Action
-            type="submit"
-            busy={busy}
-            disabled={!variant || remaining <= 0 || qty > remaining}
-          >
-            {["qc", "reinspect"].includes(chosen)
-              ? "Lưu kết quả QC"
-              : "Lưu xử lý"}
-          </Action>
+          <div className="mobile-form-footer">
+            <Action
+              type="submit"
+              className="mobile-form-submit"
+              busy={busy}
+              disabled={!variant || remaining <= 0 || qty > remaining}
+            >
+              {["qc", "reinspect"].includes(chosen)
+                ? "Lưu kết quả QC"
+                : "Lưu xử lý"}
+            </Action>
+          </div>
         </form>
       )}
 
@@ -721,25 +747,33 @@ export function OrderDetail({
       )}
       {tab === "variants" && (
         <>
-          <div className="table-scroll">
+          <div
+            className="table-scroll"
+            tabIndex={0}
+            role="region"
+            aria-label="Số lượng theo màu và size"
+          >
+            <div className="table-scroll-hint mobile-only">
+              <span>← Vuốt ngang xem đủ 9 cột công đoạn →</span>
+            </div>
             <table>
               <thead>
                 <tr>
-                  <th>Màu</th>
+                  <th className="sticky-col">Màu</th>
                   <th>Size</th>
-                  <th>Yêu cầu</th>
-                  <th>Cắt</th>
-                  <th>May</th>
-                  <th>QC đạt</th>
-                  <th>Đóng gói</th>
-                  <th>Đã giao</th>
-                  <th>Thiếu</th>
+                  <th className="num-col">Yêu cầu</th>
+                  <th className="num-col">Cắt</th>
+                  <th className="num-col">May</th>
+                  <th className="num-col">QC đạt</th>
+                  <th className="num-col">Đóng gói</th>
+                  <th className="num-col">Đã giao</th>
+                  <th className="num-col">Thiếu</th>
                 </tr>
               </thead>
               <tbody>
                 {variants.map((v) => (
                   <tr key={v.id}>
-                    <td>
+                    <td className="sticky-col">
                       {(v.colors?.length
                         ? v.colors
                         : v.color_hex
@@ -759,23 +793,55 @@ export function OrderDetail({
                       {v.color}
                     </td>
                     <td>{v.size}</td>
-                    <td>{v.quantity}</td>
-                    <td>{v.cut_qty}</td>
-                    <td>{v.sewn_qty}</td>
-                    <td>{v.qc_passed_qty}</td>
-                    <td>{v.packed_qty}</td>
-                    <td>{v.delivered_qty}</td>
-                    <td>{v.quantity - v.delivered_qty}</td>
+                    <td className="num-col">{v.quantity}</td>
+                    <td className="num-col">{v.cut_qty}</td>
+                    <td className="num-col">{v.sewn_qty}</td>
+                    <td className="num-col">{v.qc_passed_qty}</td>
+                    <td className="num-col">{v.packed_qty}</td>
+                    <td className="num-col">{v.delivered_qty}</td>
+                    <td className="num-col">{v.quantity - v.delivered_qty}</td>
                   </tr>
                 ))}
               </tbody>
+              <tfoot>
+                <tr className="table-total-row">
+                  <th className="sticky-col">Tổng cộng</th>
+                  <th>-</th>
+                  <th className="num-col">
+                    {variants.reduce((n, v) => n + v.quantity, 0)}
+                  </th>
+                  <th className="num-col">
+                    {variants.reduce((n, v) => n + v.cut_qty, 0)}
+                  </th>
+                  <th className="num-col">
+                    {variants.reduce((n, v) => n + v.sewn_qty, 0)}
+                  </th>
+                  <th className="num-col">
+                    {variants.reduce((n, v) => n + v.qc_passed_qty, 0)}
+                  </th>
+                  <th className="num-col">
+                    {variants.reduce((n, v) => n + v.packed_qty, 0)}
+                  </th>
+                  <th className="num-col">
+                    {variants.reduce((n, v) => n + v.delivered_qty, 0)}
+                  </th>
+                  <th className="num-col">
+                    {variants.reduce((n, v) => n + Math.max(0, v.quantity - v.delivered_qty), 0)}
+                  </th>
+                </tr>
+              </tfoot>
             </table>
           </div>
           {order.notes && <p className="muted">{order.notes}</p>}
           <p className="muted">{order.risk_reason}</p>
           <h3>Lịch sử xử lý / đóng gói / giao hàng</h3>
-          <div className="table-scroll">
-            <table>
+          <div
+            className="table-scroll"
+            tabIndex={0}
+            role="region"
+            aria-label="Lịch sử xử lý đơn hàng"
+          >
+            <table className="mobile-stack-table">
               <thead>
                 <tr>
                   <th>Ngày</th>
@@ -790,8 +856,8 @@ export function OrderDetail({
               <tbody>
                 {order.operations?.map((r) => (
                   <tr key={r.id}>
-                    <td>{r.operation_date}</td>
-                    <td>
+                    <td data-label="Ngày">{r.operation_date}</td>
+                    <td data-label="Thao tác">
                       {{
                         qc: "QC",
                         rework: "Sửa hàng",
@@ -800,17 +866,21 @@ export function OrderDetail({
                         deliver: "Giao hàng",
                       }[r.action] || r.action}
                     </td>
-                    <td>
+                    <td data-label="Màu / size">
                       {r.color}/{r.size}
                     </td>
-                    <td>{r.quantity}</td>
-                    <td>{r.packages || "—"}</td>
-                    <td>{r.worker_name}</td>
-                    <td>
-                      {r.notes}
-                      {r.image_url && (
-                        <ProductPhoto url={r.image_url} name="Ảnh lỗi QC" />
-                      )}
+                    <td data-label="Số lượng">
+                      {r.quantity.toLocaleString("vi-VN")}
+                    </td>
+                    <td data-label="Số kiện">{r.packages || "—"}</td>
+                    <td data-label="Người thực hiện">{r.worker_name}</td>
+                    <td data-label="Ghi chú">
+                      <div className="mobile-cell-value">
+                        {r.notes || "—"}
+                        {r.image_url && (
+                          <ProductPhoto url={r.image_url} name="Ảnh lỗi QC" />
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -976,10 +1046,12 @@ export function OrderDetail({
               </select>
             </Field>
           )}
-          <Action type="submit" busy={busy}>
-            <Save size={18} />
-            Lưu thay đổi
-          </Action>
+          <div className="mobile-form-footer">
+            <Action type="submit" className="mobile-form-submit" busy={busy}>
+              <Save size={18} />
+              Lưu thay đổi
+            </Action>
+          </div>
         </form>
       )}
     </div>
@@ -1184,7 +1256,7 @@ export function RatesPanel({
           <span className="muted">{visibleRates.length} mức giá</span>
         </div>
         <div className="table-scroll">
-          <table>
+          <table className="mobile-stack-table">
             <thead>
               <tr>
                 <th>Đơn hàng / sản phẩm</th>
@@ -1198,22 +1270,28 @@ export function RatesPanel({
                 <tr
                   key={`${rate.order_id}-${rate.stage}-${rate.work_item_id || "whole"}`}
                 >
-                  <td>
-                    <strong>{rate.order_id}</strong>
-                    <span className="table-subtitle">
-                      {rate.order.product_name}
-                    </span>
-                  </td>
-                  <td>
-                    {rate.stage}
-                    {rate.work_item_name && (
+                  <td data-label="Đơn / sản phẩm">
+                    <div className="mobile-cell-value">
+                      <strong>{rate.order_id}</strong>
                       <span className="table-subtitle">
-                        {rate.work_item_name}
+                        {rate.order.product_name}
                       </span>
-                    )}
+                    </div>
                   </td>
-                  <td className="rate-price">{money(rate.unit_price)}</td>
-                  <td>
+                  <td data-label="Công đoạn">
+                    <div className="mobile-cell-value">
+                      {rate.stage}
+                      {rate.work_item_name && (
+                        <span className="table-subtitle">
+                          {rate.work_item_name}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td data-label="Đơn giá / sản phẩm" className="rate-price">
+                    {money(rate.unit_price)}
+                  </td>
+                  <td data-label="Thao tác">
                     <button
                       type="button"
                       className="action secondary"
@@ -1251,7 +1329,7 @@ export function ProductionHistory({
 }) {
   return (
     <div className="table-scroll">
-      <table>
+      <table className="mobile-stack-table">
         <thead>
           <tr>
             <th>Ngày</th>
@@ -1265,22 +1343,30 @@ export function ProductionHistory({
         <tbody>
           {logs.map((l) => (
             <tr key={l.id}>
-              <td>{l.log_date}</td>
-              {!hideEmployee && <td>{l.employee_name}</td>}
-              <td>
-                {l.order_id}
-                <span className="table-subtitle">
-                  {l.color} / {l.size}
-                </span>
+              <td data-label="Ngày">{l.log_date}</td>
+              {!hideEmployee && (
+                <td data-label="Nhân viên">{l.employee_name}</td>
+              )}
+              <td data-label="Đơn / màu / size">
+                <div className="mobile-cell-value">
+                  {l.order_id}
+                  <span className="table-subtitle">
+                    {l.color} / {l.size}
+                  </span>
+                </div>
               </td>
-              <td>
-                {l.stage}
-                {l.work_item_name && (
-                  <span className="table-subtitle">{l.work_item_name}</span>
-                )}
+              <td data-label="Công đoạn">
+                <div className="mobile-cell-value">
+                  {l.stage}
+                  {l.work_item_name && (
+                    <span className="table-subtitle">{l.work_item_name}</span>
+                  )}
+                </div>
               </td>
-              <td>{l.quantity}</td>
-              <td>
+              <td data-label="Số lượng">
+                {l.quantity.toLocaleString("vi-VN")}
+              </td>
+              <td data-label="Tiền công">
                 {l.total_pay === null
                   ? "Không có quyền xem"
                   : money(l.total_pay)}
@@ -1362,7 +1448,7 @@ function WorkPlanForm({
           form phía trên.
         </p>
         {rows.map((row, i) => (
-          <div className="form-grid" key={row.key}>
+          <div className="form-grid work-plan-row" key={row.key}>
             <Field label={`Phần việc ${i + 1}`}>
               <input
                 required

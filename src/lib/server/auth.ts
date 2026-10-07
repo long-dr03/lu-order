@@ -162,8 +162,17 @@ export function guardWrite(
   options = { contentType: "application/json", maxBytes: 100_000 },
 ) {
   const origin = request.headers.get("origin");
-  const expected = process.env.APP_ORIGIN || new URL(request.url).origin;
-  ensure(origin === expected, 403, "Nguồn yêu cầu không hợp lệ.");
+  const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
+  const proto = request.headers.get("x-forwarded-proto") || (request.url.startsWith("https") ? "https" : "http");
+  const hostOrigin = host ? `${proto}://${host}` : new URL(request.url).origin;
+  const expected = process.env.APP_ORIGIN || hostOrigin;
+  const isAllowedOrigin =
+    origin === expected ||
+    (origin && host && new URL(origin).host === host) ||
+    (!process.env.APP_ORIGIN &&
+      origin &&
+      (origin.includes("localhost") || origin.includes("127.0.0.1") || origin.includes("192.168.")));
+  ensure(isAllowedOrigin, 403, "Nguồn yêu cầu không hợp lệ.");
   ensure(
     request.headers.get("content-type")?.startsWith(options.contentType),
     415,

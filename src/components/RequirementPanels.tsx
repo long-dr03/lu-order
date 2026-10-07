@@ -64,6 +64,7 @@ export function LinesPanel({
         </Field>
         <Field label="Tìm đơn trong chuyền">
           <input
+            type="search"
             value={search}
             placeholder="Mã đơn, sản phẩm, khách hàng…"
             onChange={(e) => {
@@ -89,7 +90,7 @@ export function LinesPanel({
         </p>
       </div>
       <div className="table-scroll">
-        <table>
+        <table className="mobile-stack-table">
           <thead>
             <tr>
               <th>Đơn / sản phẩm</th>
@@ -106,27 +107,33 @@ export function LinesPanel({
               .slice((currentPage - 1) * 25, currentPage * 25)
               .map((o) => (
                 <tr key={o.id}>
-                  <td>
-                    <button className="text-button" onClick={() => onOpen(o)}>
-                      {o.id} · {o.product_name}
-                    </button>
-                    <span className="table-subtitle">{o.customer}</span>
+                  <td data-label="Đơn / sản phẩm">
+                    <div className="mobile-cell-value">
+                      <button className="text-button" onClick={() => onOpen(o)}>
+                        {o.id} · {o.product_name}
+                      </button>
+                      <span className="table-subtitle">{o.customer}</span>
+                    </div>
                   </td>
-                  <td>
+                  <td data-label="Công đoạn">
                     {LUUTA_STAGES.find((s) => s.key === o.current_stage)?.label}
                   </td>
-                  <td>{o.deadline.split("-").reverse().join("/")}</td>
-                  <td>{o.total_quantity}</td>
-                  <td>
+                  <td data-label="Hạn giao">
+                    {o.deadline.split("-").reverse().join("/")}
+                  </td>
+                  <td data-label="Số nhận">
+                    {o.total_quantity.toLocaleString("vi-VN")}
+                  </td>
+                  <td data-label="Đã may">
                     {(o.variants || []).reduce((n, v) => n + v.sewn_qty, 0)}
                   </td>
-                  <td>
+                  <td data-label="Chưa giao">
                     {(o.variants || []).reduce(
                       (n, v) => n + Math.max(0, v.quantity - v.delivered_qty),
                       0,
                     )}
                   </td>
-                  <td>
+                  <td data-label="Tiến độ">
                     <span title={o.risk_reason}>
                       {o.status === "delayed"
                         ? "Trễ hạn"
@@ -162,6 +169,7 @@ export function DashboardInsights({
 }) {
   const [logs, setLogs] = useState<ViewLog[]>([]),
     [error, setError] = useState("");
+  const [peoplePage, setPeoplePage] = useState(1);
   useEffect(() => {
     let live = true;
     void api<{ logs: ViewLog[] }>(
@@ -178,6 +186,10 @@ export function DashboardInsights({
     };
   }, [api]);
   const people = [...new Set(logs.map((l) => l.employee_id))];
+  const currentPeoplePage = Math.min(
+    peoplePage,
+    Math.max(1, Math.ceil(people.length / 25)),
+  );
   return (
     <section className="panel padded stack">
       <h2>Tình hình xưởng</h2>
@@ -214,7 +226,7 @@ export function DashboardInsights({
         </span>
       </div>
       <div className="table-scroll">
-        <table>
+        <table className="mobile-stack-table">
           <caption>Sản lượng tháng theo chuyền</caption>
           <thead>
             <tr>
@@ -230,15 +242,19 @@ export function DashboardInsights({
                 may = rows.filter((r) => r.stage === "May");
               return (
                 <tr key={l.id}>
-                  <td>{l.name}</td>
-                  <td>{rows.reduce((n, r) => n + r.quantity, 0)}</td>
-                  <td>
+                  <td data-label="Chuyền">{l.name}</td>
+                  <td data-label="Lượt công việc">
+                    {rows
+                      .reduce((n, r) => n + r.quantity, 0)
+                      .toLocaleString("vi-VN")}
+                  </td>
+                  <td data-label="May thực tế / ngày">
                     {(
                       may.reduce((n, r) => n + r.quantity, 0) /
                       Math.max(1, new Set(may.map((r) => r.log_date)).size)
                     ).toLocaleString("vi-VN", { maximumFractionDigits: 1 })}
                   </td>
-                  <td>
+                  <td data-label="Đơn nguy cơ / trễ">
                     {
                       orders.filter(
                         (o) =>
@@ -254,7 +270,7 @@ export function DashboardInsights({
         </table>
       </div>
       <div className="table-scroll">
-        <table>
+        <table className="mobile-stack-table">
           <caption>
             Lượt công việc và tiền công tháng theo nhân viên trong phạm vi được
             cấp
@@ -267,26 +283,41 @@ export function DashboardInsights({
             </tr>
           </thead>
           <tbody>
-            {people.map((id) => {
-              const rows = logs.filter((l) => l.employee_id === id);
-              return (
-                <tr key={id}>
-                  <td>{rows[0].employee_name}</td>
-                  <td>{rows.reduce((n, r) => n + r.quantity, 0)}</td>
-                  <td>
-                    {permits(session.user, "payroll.view", {
-                      employeeId: id,
-                      lineId: rows[0].line_id,
-                    })
-                      ? money(rows.reduce((n, r) => n + (r.total_pay || 0), 0))
-                      : "Không có quyền xem"}
-                  </td>
-                </tr>
-              );
-            })}
+            {people
+              .slice((currentPeoplePage - 1) * 25, currentPeoplePage * 25)
+              .map((id) => {
+                const rows = logs.filter((l) => l.employee_id === id);
+                return (
+                  <tr key={id}>
+                    <td data-label="Nhân viên">{rows[0].employee_name}</td>
+                    <td data-label="Sản lượng">
+                      {rows
+                        .reduce((n, r) => n + r.quantity, 0)
+                        .toLocaleString("vi-VN")}
+                    </td>
+                    <td data-label="Tiền công">
+                      {permits(session.user, "payroll.view", {
+                        employeeId: id,
+                        lineId: rows[0].line_id,
+                      })
+                        ? money(
+                            rows.reduce((n, r) => n + (r.total_pay || 0), 0),
+                          )
+                        : "Không có quyền xem"}
+                    </td>
+                  </tr>
+                );
+              })}
           </tbody>
         </table>
       </div>
+      {people.length > 25 && (
+        <Pagination
+          page={currentPeoplePage}
+          total={people.length}
+          onChange={setPeoplePage}
+        />
+      )}
     </section>
   );
 }
@@ -480,6 +511,7 @@ export function AdjustmentControls({
           Chọn bản ghi cần sửa. Mọi thay đổi lưu lý do và lịch sử trước–sau.
         </p>
         <input
+          type="search"
           aria-label="Tìm bản ghi cần điều chỉnh"
           placeholder="Mã đơn, nhân viên…"
           value={search}

@@ -2,7 +2,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { type Api, message } from "@/lib/client";
 import type { BackupConfig } from "@/lib/server/backup";
-import { Action, Field, ErrorNotice } from "./Primitives";
+import { Action, Field, ErrorNotice, Empty } from "./Primitives";
+import { Pagination } from "./Pagination";
 import { Download, DatabaseBackup } from "lucide-react";
 type Data = { config: BackupConfig; files: { name: string; bytes: number }[] };
 export function BackupPanel({ api }: { api: Api }) {
@@ -10,6 +11,11 @@ export function BackupPanel({ api }: { api: Api }) {
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [notice, setNotice] = useState("");
+  const [page, setPage] = useState(1);
+  const currentPage = Math.min(
+    page,
+    Math.max(1, Math.ceil((data?.files.length || 0) / 10)),
+  );
   const refresh = useCallback(async () => {
     try {
       setData(await api<Data>("/api/admin/backups"));
@@ -69,7 +75,7 @@ export function BackupPanel({ api }: { api: Api }) {
               });
             }}
           >
-            <label>
+            <label className="check-label">
               <input
                 type="checkbox"
                 name="enabled"
@@ -82,6 +88,7 @@ export function BackupPanel({ api }: { api: Api }) {
                 <input
                   name="interval"
                   type="number"
+                  inputMode="numeric"
                   min={1}
                   max={8760}
                   defaultValue={data.config.intervalHours}
@@ -92,6 +99,7 @@ export function BackupPanel({ api }: { api: Api }) {
                 <input
                   name="days"
                   type="number"
+                  inputMode="numeric"
                   min={1}
                   max={3650}
                   defaultValue={data.config.windowDays}
@@ -100,22 +108,30 @@ export function BackupPanel({ api }: { api: Api }) {
               </Field>
             </div>
             <p className="muted">
-              Lịch chạy khi server local đang hoạt động, kiểm tra mỗi phút. Nếu
-              tắt máy qua hạn, ứng dụng sao lưu khi mở lại. Trình duyệt không tự
-              tải file; dùng nút tải bên dưới để lưu sang thiết bị khác.
+              Lịch chạy khi hệ thống đang hoạt động, kiểm tra mỗi phút. Nếu hệ
+              thống dừng qua hạn, ứng dụng sao lưu khi chạy lại. Dùng nút tải
+              bên dưới để lưu bản sao sang điện thoại hoặc máy tính của bạn.
             </p>
             <Action busy={busy}>Lưu lịch</Action>
           </form>
-          <div>
-            Lần gần nhất:{" "}
-            {data.config.lastAt
-              ? new Date(data.config.lastAt).toLocaleString("vi-VN")
-              : "Chưa có"}{" "}
-            · Lần tiếp theo:{" "}
-            {data.config.enabled
-              ? new Date(data.config.nextAt).toLocaleString("vi-VN")
-              : "Đã tắt"}
-          </div>
+          <dl className="backup-schedule-times">
+            <div>
+              <dt>Lần gần nhất</dt>
+              <dd>
+                {data.config.lastAt
+                  ? new Date(data.config.lastAt).toLocaleString("vi-VN")
+                  : "Chưa có"}
+              </dd>
+            </div>
+            <div>
+              <dt>Lần tiếp theo</dt>
+              <dd>
+                {data.config.enabled
+                  ? new Date(data.config.nextAt).toLocaleString("vi-VN")
+                  : "Đã tắt"}
+              </dd>
+            </div>
+          </dl>
           <ErrorNotice error={data.config.lastError || ""} />
           <Action
             type="button"
@@ -126,27 +142,43 @@ export function BackupPanel({ api }: { api: Api }) {
           </Action>
           <p role="status">{notice}</p>
           <h3>Bản sao đã lưu</h3>
-          {data.files.map((f) => (
-            <div className="backup-file" key={f.name}>
-              <span>
-                {f.name}
-                <small>
-                  {" "}
-                  ·{" "}
-                  {(f.bytes / 1024).toLocaleString("vi-VN", {
-                    maximumFractionDigits: 1,
-                  })}{" "}
-                  KB
-                </small>
-              </span>
-              <a
-                className="action secondary"
-                href={`/api/admin/backups?file=${encodeURIComponent(f.name)}`}
-              >
-                <Download size={18} /> Tải file
-              </a>
-            </div>
-          ))}
+          {data.files
+            .slice((currentPage - 1) * 10, currentPage * 10)
+            .map((f) => (
+              <div className="backup-file" key={f.name}>
+                <span className="backup-file-name">
+                  {f.name}
+                  <small>
+                    {" "}
+                    ·{" "}
+                    {(f.bytes / 1024).toLocaleString("vi-VN", {
+                      maximumFractionDigits: 1,
+                    })}{" "}
+                    KB
+                  </small>
+                </span>
+                <a
+                  className="action secondary"
+                  href={`/api/admin/backups?file=${encodeURIComponent(f.name)}`}
+                  aria-label={`Tải bản sao lưu ${f.name}`}
+                >
+                  <Download size={18} /> Tải file
+                </a>
+              </div>
+            ))}
+          {!data.files.length && (
+            <Empty>
+              Chưa có bản sao lưu. Nhấn “Sao lưu ngay” để tạo bản đầu tiên.
+            </Empty>
+          )}
+          {data.files.length > 10 && (
+            <Pagination
+              page={currentPage}
+              total={data.files.length}
+              pageSize={10}
+              onChange={setPage}
+            />
+          )}
         </>
       )}
     </section>

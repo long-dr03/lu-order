@@ -217,12 +217,6 @@ export function RecordsPanel({
               }}
             />
           </Field>
-          <Field label="Sản phẩm / mã đơn / mã hàng">
-            <input
-              value={product}
-              onChange={(e) => setProduct(e.target.value)}
-            />
-          </Field>
           <Field label="Công đoạn">
             <select value={stage} onChange={(e) => setStage(e.target.value)}>
               <option value="">Tất cả công đoạn</option>
@@ -230,6 +224,12 @@ export function RecordsPanel({
                 <option key={s}>{s}</option>
               ))}
             </select>
+          </Field>
+          <Field label="Sản phẩm / mã đơn / mã hàng" className="filter-product-field">
+            <input
+              value={product}
+              onChange={(e) => setProduct(e.target.value)}
+            />
           </Field>
           {!personal && (
             <Field label="Nhân viên">
@@ -372,7 +372,7 @@ export function RecordsPanel({
                 </span>
               </div>
               <div className="table-scroll">
-                <table>
+                <table className="mobile-stack-table">
                   <thead>
                     <tr>
                       <th>Nhân viên</th>
@@ -386,7 +386,7 @@ export function RecordsPanel({
                       .slice((summaryPage - 1) * 25, summaryPage * 25)
                       .map((s) => (
                         <tr key={`${s.employee_id}-${s.line_id}`}>
-                          <td>
+                          <td data-label="Nhân viên">
                             <button
                               className="text-button"
                               onClick={() => setEmployee(s.employee_id)}
@@ -394,9 +394,16 @@ export function RecordsPanel({
                               {s.employee_name}
                             </button>
                           </td>
-                          <td>{s.line_id}</td>
-                          <td>{s.total_qty}</td>
-                          <td>{money(s.total_salary)}</td>
+                          <td data-label="Chuyền">
+                            {lines.find((l) => l.id === s.line_id)?.name ||
+                              `Chuyền ${s.line_id}`}
+                          </td>
+                          <td data-label="Lượt công việc">
+                            {s.total_qty.toLocaleString("vi-VN")}
+                          </td>
+                          <td data-label="Tiền lương">
+                            {money(s.total_salary)}
+                          </td>
                         </tr>
                       ))}
                   </tbody>
@@ -431,7 +438,7 @@ export function RecordsPanel({
                 </select>
               </Field>
               <div className="table-scroll">
-                <table>
+                <table className="mobile-stack-table">
                   <thead>
                     <tr>
                       <th>Nhóm</th>
@@ -444,9 +451,11 @@ export function RecordsPanel({
                       .slice((groupPage - 1) * 25, groupPage * 25)
                       .map(([group, row]) => (
                         <tr key={group}>
-                          <td>{group}</td>
-                          <td>{row.quantity}</td>
-                          <td>
+                          <td data-label="Nhóm">{group}</td>
+                          <td data-label="Lượt công việc">
+                            {row.quantity.toLocaleString("vi-VN")}
+                          </td>
+                          <td data-label="Tiền công">
                             {row.visible
                               ? money(row.total)
                               : "Không có quyền xem"}
@@ -529,6 +538,8 @@ export function RecordsPanel({
 export function AuditPanel({ api }: { api: Api }) {
   const [logs, setLogs] = useState<AuditEntry[]>([]);
   const [error, setError] = useState("");
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
   useEffect(() => {
     let live = true;
     void api<AuditEntry[]>("/api/audit")
@@ -542,6 +553,15 @@ export function AuditPanel({ api }: { api: Api }) {
       live = false;
     };
   }, [api]);
+  const filtered = logs.filter((l) =>
+    `${l.user_name} ${l.action} ${l.details}`
+      .toLocaleLowerCase("vi")
+      .includes(search.toLocaleLowerCase("vi")),
+  );
+  const currentPage = Math.min(
+    page,
+    Math.max(1, Math.ceil(filtered.length / 25)),
+  );
   return (
     <section className="panel padded">
       <h2>
@@ -552,8 +572,19 @@ export function AuditPanel({ api }: { api: Api }) {
         sử.
       </p>
       <ErrorNotice error={error} />
+      <Field label="Tìm thao tác hoặc người thực hiện">
+        <input
+          type="search"
+          value={search}
+          placeholder="Tên, đơn hàng, nội dung thao tác…"
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
+        />
+      </Field>
       <div className="audit-list">
-        {logs.map((l) => (
+        {filtered.slice((currentPage - 1) * 25, currentPage * 25).map((l) => (
           <article key={l.id}>
             <div>
               <strong>{l.user_name}</strong>
@@ -567,7 +598,14 @@ export function AuditPanel({ api }: { api: Api }) {
           </article>
         ))}
       </div>
-      {!logs.length && <Empty>Chưa có nhật ký trong phạm vi được xem.</Empty>}
+      {!filtered.length && (
+        <Empty>Không có nhật ký phù hợp trong phạm vi được xem.</Empty>
+      )}
+      <Pagination
+        page={currentPage}
+        total={filtered.length}
+        onChange={setPage}
+      />
     </section>
   );
 }
@@ -639,47 +677,49 @@ export function OperationsPanel({
           </a>
         )}
       </div>
-      <Pagination
-        page={currentPage}
-        total={visible.length}
-        pageSize={12}
-        onChange={setPage}
-      />
       <div className="operations-grid">
         {visible.slice((currentPage - 1) * 12, currentPage * 12).map((o) => (
-          <article key={o.id} className="panel padded">
-            <div className="card-top">
-              <strong>{o.id}</strong>
-              <span className="muted">Chuyền {o.line_id}</span>
+          <article key={o.id} className="panel padded operation-card">
+            <div className="operation-card-header">
+              <ProductPhoto url={o.image_url} name={o.product_name} />
+              <div className="operation-card-info">
+                <div className="card-top">
+                  <strong>{o.id}</strong>
+                  <span className="muted">Chuyền {o.line_id}</span>
+                </div>
+                <h3>{o.product_name}</h3>
+                <p className="muted">{o.customer}</p>
+              </div>
             </div>
-            <ProductPhoto url={o.image_url} name={o.product_name} large />
-            <h3>{o.product_name}</h3>
-            <p className="muted">{o.customer}</p>
             <dl className="numbers">
               <div>
                 <dt>Yêu cầu</dt>
-                <dd>{o.total_quantity}</dd>
+                <dd>{o.total_quantity.toLocaleString("vi-VN")}</dd>
               </div>
               <div>
                 <dt>{mode === "qc" ? "QC đạt" : "Đã giao"}</dt>
                 <dd>
-                  {o.variants?.reduce(
-                    (n, v) =>
-                      n + (mode === "qc" ? v.qc_passed_qty : v.delivered_qty),
-                    0,
-                  )}
+                  {o.variants
+                    ?.reduce(
+                      (n, v) =>
+                        n + (mode === "qc" ? v.qc_passed_qty : v.delivered_qty),
+                      0,
+                    )
+                    .toLocaleString("vi-VN")}
                 </dd>
               </div>
               <div>
                 <dt>Còn thiếu</dt>
                 <dd>
-                  {o.variants?.reduce(
-                    (n, v) =>
-                      n +
-                      v.quantity -
-                      (mode === "qc" ? v.qc_passed_qty : v.delivered_qty),
-                    0,
-                  )}
+                  {o.variants
+                    ?.reduce(
+                      (n, v) =>
+                        n +
+                        v.quantity -
+                        (mode === "qc" ? v.qc_passed_qty : v.delivered_qty),
+                      0,
+                    )
+                    .toLocaleString("vi-VN")}
                 </dd>
               </div>
             </dl>
@@ -702,6 +742,12 @@ export function OperationsPanel({
           </article>
         ))}
       </div>
+      <Pagination
+        page={currentPage}
+        total={visible.length}
+        pageSize={12}
+        onChange={setPage}
+      />
       {!visible.length && <Empty>Chưa có đơn hàng ở phân hệ này.</Empty>}
     </div>
   );

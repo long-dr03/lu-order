@@ -1,8 +1,13 @@
 "use client";
 import * as Dialog from "@radix-ui/react-dialog";
-import { AnimatePresence, motion, type HTMLMotionProps } from "motion/react";
+import {
+  AnimatePresence,
+  motion,
+  useReducedMotion,
+  type HTMLMotionProps,
+} from "motion/react";
 import { X, LoaderCircle } from "lucide-react";
-import { useRef, type ReactNode } from "react";
+import { useId, useRef, type ReactNode } from "react";
 export function Logo({ compact = false }: { compact?: boolean }) {
   return (
     <div className="logo">
@@ -36,18 +41,21 @@ export function Action({
   children,
   busy = false,
   tone = "primary",
+  className,
   ...props
 }: Omit<HTMLMotionProps<"button">, "children"> & {
   children?: ReactNode;
   busy?: boolean;
   tone?: "primary" | "secondary" | "danger";
 }) {
+  const reduceMotion = useReducedMotion();
   return (
     <motion.button
-      whileTap={{ scale: 0.98 }}
-      className={`action ${tone} ${props.className || ""}`}
       {...props}
+      whileTap={reduceMotion ? undefined : { scale: 0.98 }}
+      className={`action ${tone} ${className || ""}`}
       disabled={props.disabled || busy}
+      aria-busy={busy || undefined}
     >
       {busy && <LoaderCircle size={18} className="spin" />}
       {children}
@@ -72,6 +80,8 @@ export function Modal({
   drawer?: boolean;
 }) {
   const returnFocus = useRef<HTMLElement | null>(null);
+  const descriptionId = useId();
+  const reduceMotion = useReducedMotion();
   return (
     <Dialog.Root
       open={open}
@@ -88,7 +98,7 @@ export function Modal({
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                transition={{ duration: 0.18 }}
+                transition={{ duration: reduceMotion ? 0 : 0.18 }}
               />
             </Dialog.Overlay>
             <Dialog.Content
@@ -109,17 +119,25 @@ export function Modal({
             >
               <motion.div
                 className={`modal-content ${wide ? "wide" : ""} ${drawer ? "navigation-drawer" : ""}`}
-                initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                initial={
+                  reduceMotion
+                    ? { opacity: 1 }
+                    : { opacity: 0, y: 12, scale: 0.98 }
+                }
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 8, scale: 0.98 }}
-                transition={{ duration: 0.18 }}
-                aria-describedby={description ? "modal-description" : undefined}
+                exit={
+                  reduceMotion
+                    ? { opacity: 0 }
+                    : { opacity: 0, y: 8, scale: 0.98 }
+                }
+                transition={{ duration: reduceMotion ? 0 : 0.18 }}
+                aria-describedby={description ? descriptionId : undefined}
               >
                 <div className="modal-heading">
                   <div>
                     <Dialog.Title>{title}</Dialog.Title>
                     {description && (
-                      <Dialog.Description id="modal-description">
+                      <Dialog.Description id={descriptionId}>
                         {description}
                       </Dialog.Description>
                     )}
@@ -131,7 +149,7 @@ export function Modal({
                     <X size={20} />
                   </Dialog.Close>
                 </div>
-                {children}
+                <div className="modal-body">{children}</div>
               </motion.div>
             </Dialog.Content>
           </Dialog.Portal>
@@ -144,13 +162,15 @@ export function Field({
   label,
   children,
   hint,
+  className,
 }: {
   label: string;
   children: ReactNode;
   hint?: string;
+  className?: string;
 }) {
   return (
-    <label className="field">
+    <label className={`field ${className || ""}`.trim()}>
       <span>{label}</span>
       {children}
       {hint && <small>{hint}</small>}

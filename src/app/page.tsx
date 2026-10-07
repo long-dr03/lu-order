@@ -438,12 +438,6 @@ export default function Page() {
                 setWorkPage(1);
               }}
             />
-            <Pagination
-              page={currentWorkPage}
-              total={workerOrders.length}
-              pageSize={12}
-              onChange={setWorkPage}
-            />
             <div className="operations-grid">
               {workerOrders
                 .slice((currentWorkPage - 1) * 12, currentWorkPage * 12)
@@ -516,6 +510,12 @@ export default function Page() {
                 <Empty>Chưa có công việc trong chuyền của bạn.</Empty>
               )}
             </div>
+            <Pagination
+              page={currentWorkPage}
+              total={workerOrders.length}
+              pageSize={12}
+              onChange={setWorkPage}
+            />
           </div>
         ) : (
           <OrderWorkspace {...orderProps} />
@@ -619,11 +619,14 @@ export default function Page() {
               <button
                 className="icon-button mobile-menu"
                 aria-label="Mở điều hướng"
+                aria-expanded={sidebar}
+                aria-haspopup="dialog"
                 onClick={() => setSidebar(true)}
               >
                 <Menu size={22} />
               </button>
               <span className="header-label">Không gian làm việc</span>
+              <span className="mobile-brand">LUUTA</span>
             </div>
             <button
               className="profile-button"
@@ -686,17 +689,24 @@ export default function Page() {
                   <RefreshCw size={18} />
                   Làm mới
                 </Action>
-                {hasPermission(session.user, "production.create") && (
-                  <Action
-                    onClick={() => {
-                      setProductionOrder("");
-                      setProduction(true);
-                    }}
-                  >
-                    <Plus size={18} />
-                    {isWorker ? "Ghi nhận công việc" : "Nhập sản lượng"}
-                  </Action>
-                )}
+                {hasPermission(session.user, "production.create") &&
+                  [
+                    "overview",
+                    "orders",
+                    "lines",
+                    "production",
+                    "payroll",
+                  ].includes(active?.id || "") && (
+                    <Action
+                      onClick={() => {
+                        setProductionOrder("");
+                        setProduction(true);
+                      }}
+                    >
+                      <Plus size={18} />
+                      {isWorker ? "Ghi nhận công việc" : "Nhập sản lượng"}
+                    </Action>
+                  )}
               </div>
             </div>
             <ErrorNotice error={error} />

@@ -22,6 +22,7 @@ import {
 import type { Employee, Line } from "@/lib/types";
 import { type Api, message } from "@/lib/client";
 import { Action, Modal, Field, ErrorNotice, Empty } from "./Primitives";
+import { Pagination } from "./Pagination";
 interface AdminData {
   users: Account[];
   roles: Role[];
@@ -53,6 +54,7 @@ export function AdminPanel({
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
+  const [page, setPage] = useState(1);
   useEffect(() => {
     let live = true;
     void api<AdminData>(`/api/admin/${mode}`)
@@ -94,6 +96,7 @@ export function AdminPanel({
           .includes(search.toLowerCase()) &&
         (filter === "all" || u.status === filter),
     ) || [];
+  const currentPage = Math.min(page, Math.max(1, Math.ceil(users.length / 25)));
   return (
     <div className="stack">
       <ErrorNotice error={error} />
@@ -101,15 +104,22 @@ export function AdminPanel({
         <section className="panel">
           <div className="panel-toolbar">
             <input
+              type="search"
               aria-label="Tìm tài khoản"
               placeholder="Tên hoặc tài khoản…"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
             />
             <select
               aria-label="Trạng thái tài khoản"
               value={filter}
-              onChange={(e) => setFilter(e.target.value)}
+              onChange={(e) => {
+                setFilter(e.target.value);
+                setPage(1);
+              }}
             >
               <option value="all">Tất cả tài khoản</option>
               <option value="pending">Chờ duyệt</option>
@@ -118,12 +128,12 @@ export function AdminPanel({
             </select>
           </div>
           <div className="admin-users">
-            {users.map((u) => {
+            {users.slice((currentPage - 1) * 25, currentPage * 25).map((u) => {
               const editable =
                 u.id !== session.user.id &&
                 u.roles.every((r) => r.position < top);
               return (
-                <article key={u.id}>
+                <article key={u.id} className="account-list-entry">
                   <div>
                     <strong>{u.name}</strong>
                     <p className="muted">
@@ -140,11 +150,16 @@ export function AdminPanel({
                       ))}
                     </div>
                     <p className="muted">
-                      {u.line_ids.map((id) => `Chuyền ${id}`).join(", ") ||
-                        "Chưa gán chuyền"}
+                      {u.line_ids
+                        .map(
+                          (id) =>
+                            data?.lines.find((line) => line.id === id)?.name ||
+                            `Chuyền ${id}`,
+                        )
+                        .join(", ") || "Chưa gán chuyền"}
                     </p>
                   </div>
-                  <div className="inline-actions">
+                  <div className="inline-actions account-actions">
                     {editable && (
                       <>
                         <Action tone="secondary" onClick={() => setSelected(u)}>
@@ -194,7 +209,7 @@ export function AdminPanel({
                           onClick={() => setRepresent(u)}
                         >
                           <Eye size={18} />
-                          Xem và thao tác thay
+                          Thao tác thay
                         </Action>
                       )}
                   </div>
@@ -203,6 +218,11 @@ export function AdminPanel({
             })}
           </div>
           {!users.length && <Empty>Không có tài khoản phù hợp.</Empty>}
+          <Pagination
+            page={currentPage}
+            total={users.length}
+            onChange={setPage}
+          />
         </section>
       ) : (
         <>

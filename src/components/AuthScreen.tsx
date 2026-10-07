@@ -61,7 +61,8 @@ export function AuthScreen({
           </div>
         </div>
         <p className="muted">
-          <ShieldCheck size={18} /> Dữ liệu được quản lý trong hệ thống local.
+          <ShieldCheck size={18} /> Truy cập dữ liệu theo vai trò và chuyền được
+          giao.
         </p>
       </section>
       <section className="auth-form">
@@ -108,6 +109,7 @@ export function AuthScreen({
                 pattern="[a-zA-Z0-9_.\-]+"
                 autoComplete="username"
                 autoCapitalize="none"
+                spellCheck={false}
               />
             </Field>
             <Field label="Mật khẩu">

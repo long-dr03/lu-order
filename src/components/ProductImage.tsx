@@ -85,11 +85,15 @@ export function ProductImagePicker({
   file,
   onFile,
   onRemove,
+  label = "Ảnh sản phẩm",
+  prompt = "Thêm ảnh để nhận diện mẫu",
 }: {
   existing?: string | null;
   file: File | null;
   onFile: (file: File) => void;
   onRemove: () => void;
+  label?: string;
+  prompt?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -118,7 +122,7 @@ export function ProductImagePicker({
   return (
     <div className="stack image-field">
       <span className="field-label">
-        Ảnh sản phẩm <span className="muted">(không bắt buộc)</span>
+        {label} <span className="muted">(không bắt buộc)</span>
       </span>
       <div
         className={`image-picker ${dragging ? "drag-over" : ""}`}
@@ -136,7 +140,7 @@ export function ProductImagePicker({
         {url ? (
           <Image
             src={url}
-            alt="Ảnh sản phẩm đã chọn"
+            alt={`${label} đã chọn`}
             width={120}
             height={160}
             unoptimized
@@ -145,10 +149,8 @@ export function ProductImagePicker({
         ) : (
           <ImagePlus size={36} />
         )}
-        <div className="stack">
-          <strong>
-            {url ? "Ảnh mẫu đã chọn" : "Thêm ảnh để nhận diện mẫu"}
-          </strong>
+        <div className="stack image-picker-content">
+          <strong>{url ? `${label} đã chọn` : prompt}</strong>
           <span className="muted">
             Kéo ảnh vào đây hoặc chọn từ thiết bị. JPG, PNG, WebP · tối đa 5 MB.
           </span>
@@ -180,9 +182,12 @@ export function ProductImagePicker({
           ref={input}
           type="file"
           accept="image/jpeg,image/png,image/webp"
-          aria-label="Chọn ảnh sản phẩm"
+          aria-label={`Chọn ${label.toLowerCase()}`}
           className="image-file-input"
-          onChange={(e) => select(e.target.files?.[0])}
+          onChange={(e) => {
+            select(e.target.files?.[0]);
+            e.target.value = "";
+          }}
         />
       </div>
       <ErrorNotice error={error} />

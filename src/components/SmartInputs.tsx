@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, type InputHTMLAttributes } from "react";
+import { useId, useState, useRef, type InputHTMLAttributes } from "react";
 import { Plus, X, Palette } from "lucide-react";
 import { hexToHsv, hsvToHex, type GarmentColor } from "@/lib/colors";
 const palette = [
@@ -35,6 +35,8 @@ export function ColorPicker({
   });
   const [hexText, setHexText] = useState(hex);
   const trigger = useRef<HTMLButtonElement>(null);
+  const pickerId = useId();
+  const presetsId = useId();
   const hsv = hexToHsv(draft.hex);
   const rgb = [1, 3, 5].map((i) => parseInt(draft.hex.slice(i, i + 2), 16));
   const valid = /^#[0-9a-f]{6}$/i.test(hexText);
@@ -67,6 +69,7 @@ export function ColorPicker({
           type="button"
           aria-label="Mở bảng chọn màu"
           aria-expanded={expanded}
+          aria-controls={expanded ? pickerId : undefined}
           onClick={() => {
             if (expanded) {
               close();
@@ -92,6 +95,7 @@ export function ColorPicker({
       </div>
       {expanded && (
         <section
+          id={pickerId}
           className="color-options reference-picker"
           aria-label="Bảng chọn màu"
           onKeyDown={(e) => {
@@ -136,6 +140,10 @@ export function ColorPicker({
               );
             }}
             onPointerUp={(e) => {
+              if (e.currentTarget.hasPointerCapture(e.pointerId))
+                e.currentTarget.releasePointerCapture(e.pointerId);
+            }}
+            onPointerCancel={(e) => {
               if (e.currentTarget.hasPointerCapture(e.pointerId))
                 e.currentTarget.releasePointerCapture(e.pointerId);
             }}
@@ -234,7 +242,7 @@ export function ColorPicker({
             </div>
           </div>
           <div className="picker-channels">
-            <label>
+            <label className="picker-hex">
               HEX
               <input
                 aria-label="Mã HEX"
@@ -257,6 +265,7 @@ export function ColorPicker({
                 <input
                   aria-label={c}
                   type="number"
+                  inputMode="numeric"
                   min={0}
                   max={255}
                   value={rgb[i]}
@@ -285,6 +294,7 @@ export function ColorPicker({
               <input
                 aria-label="A (%)"
                 type="number"
+                inputMode="numeric"
                 min={0}
                 max={100}
                 value={draft.alpha}
@@ -302,7 +312,7 @@ export function ColorPicker({
             </label>
           </div>
           {presets && (
-            <div className="swatches">
+            <div className="swatches" id={presetsId}>
               {palette.map(([name, color]) => (
                 <button
                   type="button"
@@ -322,6 +332,7 @@ export function ColorPicker({
               className="picker-presets"
               aria-label="Màu có sẵn"
               aria-expanded={presets}
+              aria-controls={presets ? presetsId : undefined}
               onClick={() => setPresets(!presets)}
             >
               <Palette size={20} />

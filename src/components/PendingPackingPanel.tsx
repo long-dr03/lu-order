@@ -63,7 +63,7 @@ export function PendingPackingPanel({
               {r.color} / {r.size} · {r.quantity} sản phẩm
             </span>
             <div className="inline-actions">
-              <strong>
+              <strong className="pending-pay-amount">
                 {r.total_pay === null
                   ? "Không có quyền xem tiền"
                   : money(r.total_pay)}

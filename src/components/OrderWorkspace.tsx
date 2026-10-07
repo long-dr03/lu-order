@@ -105,6 +105,7 @@ export function OrderWorkspace({
   const [reason, setReason] = useState("");
   const [columnLimits, setColumnLimits] = useState<Record<string, number>>({});
   const [group, setGroup] = useState<"line" | "stage">("stage");
+  const [showEmptyColumns, setShowEmptyColumns] = useState(false);
   const [move, setMove] = useState<{
     order: Order;
     target: string;
@@ -251,7 +252,7 @@ export function OrderWorkspace({
     ...(line !== "all" ? { line_id: line } : {}),
   });
   return (
-    <section className="panel">
+    <section className="panel order-workspace">
       <div className="panel-toolbar">
         <div className="search-input">
           <Search size={20} />
@@ -345,8 +346,8 @@ export function OrderWorkspace({
         orders.some((o) =>
           permits(session.user, "orders.override", { lineId: o.line_id }),
         ) && (
-          <div className="padded">
-            <label>
+          <div className="padded order-exception-toggle">
+            <label className="check-label">
               <input
                 type="checkbox"
                 checked={exceptionEnabled}
@@ -396,7 +397,17 @@ export function OrderWorkspace({
               },
             }}
           >
-            <div className="kanban">
+            <label className="check-label mobile-board-options">
+              <input
+                type="checkbox"
+                checked={showEmptyColumns}
+                onChange={(event) => setShowEmptyColumns(event.target.checked)}
+              />
+              Hiện cả bước chưa có đơn
+            </label>
+            <div
+              className={`kanban ${showEmptyColumns ? "show-empty-columns" : ""}`}
+            >
               {columns.map((c) => (
                 <DropColumn
                   key={c.id}
@@ -535,23 +546,33 @@ export function OrderWorkspace({
                   <strong>{o.id}</strong>
                   <Status order={o} />
                 </div>
-                <ProductPhoto
-                  url={o.image_url}
-                  name={o.product_name}
-                  large
-                  interactive={false}
-                />
-                <button className="text-button" onClick={() => onOpen(o)}>
-                  {o.product_name}
-                </button>
-                <p>{o.customer}</p>
+                <div className="mobile-order-product">
+                  <ProductPhoto url={o.image_url} name={o.product_name} />
+                  <div>
+                    <button className="text-button" onClick={() => onOpen(o)}>
+                      {o.product_name}
+                    </button>
+                    <p>{o.customer}</p>
+                  </div>
+                </div>
+                <p className="mobile-order-stage">
+                  {LUUTA_STAGES.find((s) => s.key === o.current_stage)?.label}
+                  <span> · {Math.round(o.progress)}% hoàn thành</span>
+                </p>
                 <div className="muted">
                   <span>
                     Chuyền {o.line_id} · {o.total_quantity} sản phẩm
                   </span>
-                  <span>{o.deadline.split("-").reverse().join("/")}</span>
+                  <span>Hạn {o.deadline.split("-").reverse().join("/")}</span>
                 </div>
-                {stageChoices(o)}
+                <div className="mobile-order-actions">
+                  {permits(session.user, "orders.move", {
+                    lineId: o.line_id,
+                  }) && stageChoices(o)}
+                  <Action tone="secondary" onClick={() => onOpen(o)}>
+                    <Eye size={18} /> Chi tiết
+                  </Action>
+                </div>
               </article>
             ))}
           </div>
@@ -644,7 +665,7 @@ function DropColumn({
   return (
     <div
       ref={setNodeRef}
-      className={`kanban-column ${isOver ? (issue ? "blocked" : "allowed") : ""}`}
+      className={`kanban-column ${orders.length ? "" : "empty-column"} ${isOver ? (issue ? "blocked" : "allowed") : ""}`}
     >
       <h3>
         {label}
@@ -860,7 +881,10 @@ export function CreateOrderForm({
             ))}
           </select>
         </Field>
-        <Field label="Người phụ trách">
+        <Field
+          label="Người phụ trách"
+          hint="Đầu mối theo dõi đơn; nhiều nhân viên vẫn có thể cùng ghi nhận công việc."
+        >
           <select name="responsible_id" key={selectedLine}>
             <option value="">Chưa phân công cá nhân</option>
             {employees
@@ -945,6 +969,7 @@ export function CreateOrderForm({
           <Field label="Số lượng">
             <input
               type="number"
+              inputMode="numeric"
               min={1}
               max={1000000}
               required
@@ -985,9 +1010,11 @@ export function CreateOrderForm({
       <Field label="Ghi chú">
         <textarea name="notes" maxLength={2000} />
       </Field>
-      <Action type="submit" busy={busy}>
-        Tạo đơn hàng
-      </Action>
+      <div className="mobile-form-footer">
+        <Action type="submit" busy={busy} className="mobile-form-submit">
+          Tạo đơn hàng
+        </Action>
+      </div>
     </form>
   );
 }
