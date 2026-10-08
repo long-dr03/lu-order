@@ -37,6 +37,12 @@ Fixture độc lập: Admin; Quản lý không quyền giá/lương/quản trị
 | QC-02 | QC gửi sửa hàng; người phụ trách May sửa bằng thợ May được giao | QC bị chặn (403); May ghi sửa, QC kiểm lại được |
 | QC-03 | QC lỗi → sửa → kiểm lại nhiều vòng | Đầu vào/lỗi/đạt đúng; không đóng gói vượt lượng đạt |
 | QC-04 | Thợ A nhận tiền công QC/sửa đã do B xử lý | Bị từ chối, không lấy lượng xử lý của người khác |
+| CUT-01 | Cắt nhập vượt số đặt tới mức cắt dư (mặc định 10%) rồi vượt mức | Nhập được tới mức cho phép, hiện "cắt dư +n"; vượt mức bị từ chối; May không vượt số đặt |
+| CUT-02 | Tắt "Trả công phần cắt dư", nhập cắt dư | Phần dư lưu thành bản ghi đơn giá 0, lý do ghi "không tính công" |
+| SHORT-01 | Bấm số ở cột Thiếu, ghi nguyên nhân | Thấy sản phẩm đang ở công đoạn nào và các nguyên nhân; tổng giải trình không vượt số thiếu; số lượng sản xuất không đổi |
+| NPL-01 | Khai báo vải, ghi nhận về/lỗi/dùng | Còn trong kho và còn thiếu tính đúng; không dùng quá số còn; chỉ Quản lý và Cắt thấy tab |
+| POL-01 | Quản lý (không quyền đơn giá) đổi Quy định xưởng | 403; Admin đổi được và có trong nhật ký |
+| UX-01 | Tổ trưởng mở Bộ phận | Thấy hạn giao, việc cần làm và nút đúng việc; đơn còn việc xếp trên; màn trống nêu lý do |
 | FLOW-01 | Đơn 100: Cắt/May/QC/Đóng gói/Giao 20; làm tiếp 80 | Giao 20 được khi phần còn lại đang sản xuất; cuối đủ 100 |
 | FLOW-02 | Kéo thẻ khi chưa có đầu vào; hoàn thành khi giao thiếu | Bị chặn; không tự thêm sản lượng; chỉ Quản lý xác nhận hoàn thành |
 | FLOW-03 | Bộ phận khác chuyển bước; chuyển khâu chuẩn bị | Kiểm tra đồng thời quyền và bộ phận; chuẩn bị thuộc Quản lý |
@@ -67,7 +73,7 @@ Phải kiểm tra riêng tại **390, 768, 1024, 1366 và 1920px**, cả ngang/d
 | UI-03 | Mở đơn → Phân công → chọn công đoạn/phần việc | Chỉ thợ đúng bộ phận; chọn nhiều thợ; không hiểu nhầm người phụ trách là người làm tất cả |
 | UI-04 | Chưa có phân công, bấm Ghi nhận | Có giải thích/đường dẫn; không có dropdown trống khó hiểu |
 | UI-05 | Nhập bảng nhiều màu–size, Điền tối đa | Lượng còn dễ nhìn, không mất dữ liệu khi đổi thợ/phần việc; tiền chỉ hiện đúng quyền |
-| UI-06 | QC lỗi/sửa/kiểm lại, thêm ảnh lỗi | Người kiểm cố định; thợ sửa chọn được đúng QC; lỗi hiện trong form |
+| UI-06 | QC lỗi/kiểm lại, thêm ảnh lỗi, quy lỗi cho thợ May/Cắt | Người kiểm cố định; chọn được thợ gây lỗi từ thợ đã phân công; tổng lỗi quy cho thợ không vượt số lỗi |
 | UI-07 | Đóng gói/giao 20 rồi 80 | Thấy lượng còn lại, mã đợt, ngày giờ, người làm/người ghi, số kiện và lý do |
 | UI-08 | List/Kanban chuyển bước | Cùng điều kiện/quyền; kéo có tay nắm; trên điện thoại dùng Chuyển bước tương đương |
 | UI-09 | >100 đơn/thợ/phân công/lịch sử | Tìm kiếm/phân trang dùng được; thay bộ lọc trở về trang hợp lệ |
@@ -89,7 +95,7 @@ Lưu bằng chứng lỗi với thao tác, vai trò+bộ phận, dữ liệu đ�
 
 ## Kết quả local ngày 08/10/2026
 
-- 49/49 kiểm thử tự động đạt trên PostgreSQL riêng; TypeScript, ESLint, production build và kiểm tra whitespace đạt.
+- 58/58 kiểm thử tự động đạt trên PostgreSQL riêng; TypeScript, ESLint và production build đạt (kiểm tra lại trên `main` sau khi gộp PR #1).
 - Migration 11 đã thử trên bản khôi phục rồi áp dụng local. Đối chiếu nguồn sau chuyển: giữ nguyên 7 đơn, 15 hồ sơ, 13 dòng tiền công và toàn bộ giá trị lịch sử/mật khẩu đã đối chiếu.
 - 15 hồ sơ cũ chưa phân loại được giữ nguyên để Admin gán bộ phận. Không tạo dữ liệu thử hoặc tự đoán bộ phận trên database local.
 - Đã có snapshot trước chuyển, báo cáo riêng `artifacts/department-migration.json` và log test local. Chưa push/triển khai.

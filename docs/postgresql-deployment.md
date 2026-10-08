@@ -3,8 +3,8 @@
 ## Release checks
 
 - Runtime uses PostgreSQL only (`DATABASE_URL` required); SQLite remains only in the read-only export tool.
-- 63 integration tests run on disposable PostgreSQL databases, including all six roles, production/QC/shipping/payroll, concurrent retries, stale versions, rollback, case-insensitive accounts, and backup restoration into a separate database.
-- Money, IDs, timestamps, binary photos, account hashes and historical records are preserved by the migration. Current migration version: 10.
+- 58 integration tests run on disposable PostgreSQL databases, including all six roles, production/QC/shipping/payroll, concurrent retries, stale versions, rollback, case-insensitive accounts, and backup restoration into a separate database.
+- Money, IDs, timestamps, binary photos, account hashes and historical records are preserved by the migration. Current migration version: 12 (11 = departments, 12 = NPL/vải và quy lỗi cho thợ).
 - Public health probe: `/api/health`, returns 200 only after migrations and a database query succeed; returns no credentials or internal errors.
 
 ## Dokploy layout
