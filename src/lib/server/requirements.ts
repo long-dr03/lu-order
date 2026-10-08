@@ -7,6 +7,7 @@ import { db, getOrderById } from "../db";
 import { LUUTA_STAGES, type ProductionLog } from "../types";
 import { type Context, requirePermission, ensure, audit } from "./auth";
 import { text } from "./validation";
+import { cutLimit, sewLimit } from "../workflow";
 export const stageInfoSchema = z
   .object({
     version: z.number().int().positive(),
@@ -193,7 +194,8 @@ export async function adjustProduction(
           .get(old.work_item_id, old.color, old.size)) as { n: number }
       ).n;
       ensure(
-        paid + delta <= (column === "cut_qty" ? v.quantity : v.cut_qty),
+        paid + delta <=
+          (column === "cut_qty" ? cutLimit(v.quantity) : sewLimit(v)),
         422,
         "Phần việc vượt số lượng đầu vào.",
       );
@@ -204,7 +206,7 @@ export async function adjustProduction(
         : Number(
             (v as unknown as { qc_inspected_qty: number }).qc_inspected_qty,
           );
-    const max = column === "cut_qty" ? v.quantity : v.cut_qty;
+    const max = column === "cut_qty" ? cutLimit(v.quantity) : sewLimit(v);
     ensure(
       next >= min && next <= max,
       422,

@@ -15,6 +15,8 @@ import {
   transitionProblem,
   exceptionalTransitionProblem,
   transitionPermissionProblem,
+  cutLimit,
+  sewLimit,
 } from "../workflow";
 import { z } from "zod";
 import {
@@ -117,6 +119,11 @@ export async function orderFor(
     work_totals: await db
       .prepare(
         "SELECT stage,work_item_id,color,size,SUM(quantity) quantity FROM production_logs WHERE order_id=? GROUP BY stage,work_item_id,color,size",
+      )
+      .all(id),
+    production_reasons: await db
+      .prepare(
+        "SELECT id,log_date,stage,color,size,quantity,employee_name,reason FROM production_logs WHERE order_id=? AND reason IS NOT NULL AND reason<>'' ORDER BY id DESC",
       )
       .all(id),
     pending_totals: await db
@@ -1170,7 +1177,7 @@ async function recordProductionSingle(
       422,
       "Đơn hàng chưa ở công đoạn cần nhập.",
     );
-    const maximum = input.stage === "Cắt" ? v.quantity : v.cut_qty;
+    const maximum = input.stage === "Cắt" ? cutLimit(v.quantity) : sewLimit(v);
     const paidPart = part
       ? (
           (await db
@@ -1183,7 +1190,9 @@ async function recordProductionSingle(
     ensure(
       paidPart + input.quantity <= maximum,
       422,
-      "Số lượng vượt quá đầu vào của màu–size.",
+      input.stage === "Cắt"
+        ? `Số cắt vượt mức cho phép: đơn ${v.quantity}, tối đa ${maximum} kể cả cắt dư.`
+        : "Số lượng vượt quá đầu vào của màu–size.",
     );
     const next = part
       ? await completedWork(o.id, input.stage, v.color, v.size, {

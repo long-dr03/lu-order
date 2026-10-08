@@ -128,6 +128,13 @@ export function availableOperations(user: Account, order: Order) {
       permits(user, a.permission, { stage: a.key }),
   );
 }
+/** Cutters often cut more than ordered; allow it up to this share above the order. */
+export const OVERCUT_RATIO = 1.5;
+export const cutLimit = (quantity: number) =>
+  Math.floor(quantity * OVERCUT_RATIO);
+/** Sewing never exceeds what was ordered, even when more was cut. */
+export const sewLimit = (v: { quantity: number; cut_qty: number }) =>
+  Math.min(v.quantity, v.cut_qty);
 export function remainingOperation(
   v: OrderVariant | undefined,
   action: string | undefined,

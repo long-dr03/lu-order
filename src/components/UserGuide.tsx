@@ -38,11 +38,21 @@ const sections = [
       "Mở Bộ phận hoặc Nhập sản lượng, chọn đơn và công đoạn thuộc bộ phận mình. Quản lý có thể chọn toàn quy trình theo quyền được cấp.",
       "Chọn phần việc nếu có, rồi bấm tên thợ đã được phân công. Nhiều thợ cùng làm: bấm thợ thứ nhất, nhập số; bấm thợ tiếp theo, nhập số của người đó — một lần lưu ghi cho tất cả, mỗi thợ nhận công riêng. Nếu chưa có thợ, dùng Mở đơn để phân công; không nhập vào hồ sơ của người khác để thay thế.",
       "Nhập lượng vừa làm thêm cho các màu–size trong cùng bảng. Ví dụ hôm qua 5, hôm nay thêm 2 thì ghi 2. Điền tối đa còn lại chỉ dùng khi đã thực sự làm xong số hiển thị.",
+      "Công đoạn Cắt được nhập dư so với đơn (tối đa +50%) vì thực tế thường cắt nhiều hơn. Phần dư vẫn tính công cắt, nhưng May và các bước sau chỉ tính tối đa theo số lượng đặt.",
       "Nhấn Ghi nhận một lần. Cả bảng được lưu trong cùng giao dịch; một dòng sai khiến toàn bộ lần nhập bị từ chối. Nếu dữ liệu đã thay đổi, tải lại số lượng trước khi nhập tiếp.",
     ],
     paragraphs: [
       "Nhiều thợ chia cùng phần việc không được ghi vượt đầu vào. Nếu chia thành nhiều phần việc bắt buộc, số sản phẩm hoàn thành là số đủ tất cả các phần; tiền công vẫn ghi riêng theo thợ và đơn giá tại thời điểm thực hiện.",
       "Lương khóa sẽ chặn ghi công mới. Riêng đóng gói thực tế vẫn có thể ghi với khoản công chờ đối chiếu; người có quyền lương xử lý khoản chờ, không đóng gói lại để tính công.",
+    ],
+  },
+  {
+    title: "Theo dõi tiến trình và giải trình số thiếu",
+    steps: [
+      "Mở chi tiết đơn → Tiến độ. Bảng tiến trình cho thấy từng công đoạn đang Chưa bắt đầu, Đang thực hiện, Hoàn thành hay Có vấn đề, kèm số nhận, số xong, số còn lại, người được giao và giờ bắt đầu/xong.",
+      "Cột Thiếu của bảng màu–size cho biết số sản phẩm chưa giao. Bấm vào số đó để xem sản phẩm đang nằm ở công đoạn nào và mọi nguyên nhân đã ghi (QC, cắt, giao trễ…).",
+      "Người có quyền ghi nhận chọn nguyên nhân (Lỗi vải, Kỹ thuật may, Cắt thiếu, Hỏng khi QC/sửa hàng, Khách đổi hoặc hủy, Chờ xe/chờ giao, Khác), nhập số lượng và giải thích rồi Lưu. Tổng số giải trình không vượt số còn thiếu và không làm đổi số lượng sản xuất.",
+      "Lịch sử giao hàng nằm ngay dưới bảng: mỗi lần giao có ngày giờ cụ thể và số lượng từng màu–size, ví dụ ngày 1/10 giao 5 size S và 5 size M, ngày 3/10 giao 5 size M và 5 size L.",
     ],
   },
   {

@@ -39,6 +39,7 @@ const operationApi =
 const shipmentApi = await import("../src/app/api/orders/[id]/shipments/route");
 const adminApi = await import("../src/app/api/admin/[section]/route");
 const ratesApi = await import("../src/app/api/rates/route");
+const shortageApi = await import("../src/app/api/orders/[id]/shortages/route");
 const payrollApi = await import("../src/app/api/payroll/route");
 const exportApi = await import("../src/app/api/export/excel/route");
 const { today } = await import("../src/lib/server/validation");
@@ -630,12 +631,12 @@ test("Concurrent writes and retries cannot double-pay or exceed available input"
     5000,
   );
 });
-test("Two workers share a task without exceeding its input", async () => {
+test("Two workers share a task without exceeding its limit", async () => {
   const id = await order([{ color: "Đen", size: "M", quantity: 5 }]);
   await assign(id, "Cắt", workers.cutting);
   await result(await record(id, "Cắt", workers.cutting[0], 3, "cutting"), 201);
   assert.equal(
-    (await record(id, "Cắt", workers.cutting[1], 3, "cutting")).status,
+    (await record(id, "Cắt", workers.cutting[1], 5, "cutting")).status,
     422,
   );
   await result(await record(id, "Cắt", workers.cutting[1], 2, "cutting"), 201);
@@ -1845,12 +1846,12 @@ test("Several workers save in one atomic entry, each with own logs and wages", a
         .prepare("SELECT COUNT(*) n FROM production_logs WHERE order_id=?")
         .get(id)) as { n: number }
     ).n;
-  // Shared input is checked across workers: 6 + 5 > 10 rolls back everything.
+  // The cut limit is shared across workers: 9 + 7 > floor(10 * 1.5) rolls back everything.
   assert.equal(
     (
       await send([
-        { employee_id: a, entries: [{ color: "Đen", size: "M", quantity: 6 }] },
-        { employee_id: b, entries: [{ color: "Đen", size: "M", quantity: 5 }] },
+        { employee_id: a, entries: [{ color: "Đen", size: "M", quantity: 9 }] },
+        { employee_id: b, entries: [{ color: "Đen", size: "M", quantity: 7 }] },
       ])
     ).status,
     422,
@@ -2115,6 +2116,155 @@ test("Rates copy from an earlier order without touching locked stages", async ()
     2500,
   );
   assert.equal((await copy(source)).status, 422);
+});
+test("Cutting may exceed the order up to the limit, while sewing never exceeds the order", async () => {
+  const id = await order([{ color: "Đen", size: "M", quantity: 10 }]);
+  await assign(id, "Cắt", workers.cutting);
+  await assign(id, "May", workers.sewing);
+  await result(await record(id, "Cắt", workers.cutting[0], 12, "cutting"), 201);
+  assert.equal((await current(id)).variants?.[0].cut_qty, 12);
+  // 12 + 4 > floor(10 * 1.5) = 15 is rejected; 12 + 3 reaches the limit.
+  const rejected = await record(id, "Cắt", workers.cutting[1], 4, "cutting");
+  assert.equal(rejected.status, 422);
+  assert.match(JSON.stringify(await rejected.json()), /tối đa 15/);
+  await result(await record(id, "Cắt", workers.cutting[1], 3, "cutting"), 201);
+  assert.equal((await current(id)).variants?.[0].cut_qty, 15);
+  // Surplus pieces are paid as cut, but sewing stops at the ordered quantity.
+  await result(await record(id, "May", workers.sewing[0], 10, "sewing"), 201);
+  assert.equal(
+    (await record(id, "May", workers.sewing[1], 1, "sewing")).status,
+    422,
+  );
+  assert.equal((await current(id)).variants?.[0].sewn_qty, 10);
+  assert.equal(
+    (
+      (await db
+        .prepare(
+          "SELECT SUM(total_pay) n FROM production_logs WHERE order_id=? AND stage='Cắt'",
+        )
+        .get(id)) as { n: number }
+    ).n,
+    15000,
+  );
+  // A department leader still cannot record another department's stage.
+  assert.equal(
+    (await record(id, "May", workers.sewing[0], 1, "cutting")).status,
+    403,
+  );
+});
+test("Shortage explanations are limited to the remaining shortage and never move quantities", async () => {
+  const id = await order([
+    { color: "Đen", size: "M", quantity: 10 },
+    { color: "Trắng", size: "L", quantity: 10 },
+  ]);
+  const explain = async (who: string, input: Record<string, unknown>) =>
+    shortageApi.POST(
+      req(`/api/orders/${id}/shortages`, who, input),
+      params("id", id),
+    );
+  const before = JSON.stringify((await current(id)).variants);
+  assert.equal(
+    (
+      await explain("worker", {
+        color: "Đen",
+        size: "M",
+        quantity: 1,
+        cause: "Lỗi vải",
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await explain("management", {
+        color: "Đen",
+        size: "M",
+        quantity: 1,
+        cause: "Không có trong danh sách",
+      })
+    ).status,
+    422,
+  );
+  assert.equal(
+    (
+      await explain("management", {
+        color: "Đỏ",
+        size: "M",
+        quantity: 1,
+        cause: "Lỗi vải",
+      })
+    ).status,
+    422,
+  );
+  await result(
+    await explain("management", {
+      color: "Đen",
+      size: "M",
+      quantity: 6,
+      cause: "Lỗi vải",
+      note: "Cuộn vải bị loang",
+    }),
+    201,
+  );
+  await result(
+    await explain("cutting", {
+      color: "Đen",
+      size: "M",
+      quantity: 4,
+      cause: "Cắt thiếu",
+    }),
+    201,
+  );
+  // Everything is explained now: more would exceed the shortage.
+  assert.equal(
+    (
+      await explain("management", {
+        color: "Đen",
+        size: "M",
+        quantity: 1,
+        cause: "Khác",
+      })
+    ).status,
+    422,
+  );
+  assert.equal(
+    JSON.stringify(
+      (await current(id)).variants?.map((v) => [v.cut_qty, v.delivered_qty]),
+    ),
+    JSON.stringify(
+      JSON.parse(before).map(
+        (v: { cut_qty: number; delivered_qty: number }) => [
+          v.cut_qty,
+          v.delivered_qty,
+        ],
+      ),
+    ),
+  );
+  const detail = await result<{
+    operations: {
+      action: string;
+      color: string;
+      reason: string;
+      notes: string;
+    }[];
+  }>(
+    await detailApi.GET(
+      req(`/api/orders/${id}`, "management"),
+      params("id", id),
+    ),
+  );
+  const rows = detail.operations.filter((r) => r.action === "shortage");
+  assert.deepEqual(rows.map((r) => r.reason).sort(), ["Cắt thiếu", "Lỗi vải"]);
+  assert.ok(rows.some((r) => r.notes === "Cuộn vải bị loang"));
+  assert.ok(
+    (
+      (await db
+        .prepare(
+          "SELECT COUNT(*) n FROM audit_logs WHERE action='Ghi nguyên nhân thiếu'",
+        )
+        .get()) as { n: number }
+    ).n >= 2,
+  );
 });
 test("Workshop simulation: seven operators complete a 100-piece, two-shipment order and close piecework payroll", async () => {
   await operator("scenariofinance", "director", ["management"]);

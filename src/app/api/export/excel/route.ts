@@ -228,7 +228,7 @@ export async function GET(request: Request) {
             r.operation_time || "Chưa có giờ lịch sử",
             r.order_id,
             departmentName(r.department_id),
-            r.action,
+            r.action === "shortage" ? "Giải trình thiếu" : r.action,
             r.color,
             r.size,
             r.quantity,

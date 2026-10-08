@@ -28,7 +28,7 @@ export function assessOrders(
           (variants.reduce(
             (n, v) =>
               n +
-              v.cut_qty +
+              Math.min(v.quantity, v.cut_qty) +
               v.sewn_qty +
               v.qc_passed_qty +
               v.packed_qty +

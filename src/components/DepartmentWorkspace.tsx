@@ -24,7 +24,10 @@ import {
   remainingOperation,
   transitionProblem,
   transitionPermissionProblem,
+  cutLimit,
+  sewLimit,
 } from "@/lib/workflow";
+import { SHORTAGE_CAUSES, shortageBreakdown } from "@/lib/shortage";
 import { Action, Field, ErrorNotice, Empty, Modal } from "./Primitives";
 import { Pagination } from "./Pagination";
 import {
@@ -64,6 +67,16 @@ type Detail = Order & {
   assignments?: Assignment[];
   shipments?: Shipment[];
   work_totals?: Total[];
+  production_reasons?: {
+    id: number;
+    log_date: string;
+    stage: string;
+    color: string;
+    size: string;
+    quantity: number;
+    employee_name: string;
+    reason: string;
+  }[];
   pending_totals?: { color: string; size: string; quantity: number }[];
 };
 const keyFor = (v: { color: string; size: string }) =>
@@ -77,6 +90,7 @@ function recordable(
   stage: string,
   detail: Detail,
   part?: number,
+  ceiling = false,
 ) {
   const paid =
     detail.work_totals
@@ -89,9 +103,12 @@ function recordable(
       )
       .reduce((n, r) => n + r.quantity, 0) || 0;
   if (stage === "Cắt")
-    return Math.max(0, v.quantity - (part ? paid : v.cut_qty));
+    return Math.max(
+      0,
+      (ceiling ? cutLimit(v.quantity) : v.quantity) - (part ? paid : v.cut_qty),
+    );
   if (stage === "May")
-    return Math.max(0, v.cut_qty - (part ? paid : v.sewn_qty));
+    return Math.max(0, sewLimit(v) - (part ? paid : v.sewn_qty));
   if (stage === "Sửa hàng") return remainingOperation(v, "rework");
   return remainingOperation(v, "pack");
 }
@@ -194,16 +211,16 @@ export function ProductionForm({
   const base = (detail?.variants || []).map((v) => ({
     ...v,
     available: detail ? recordable(v, stage, detail, part) : 0,
+    ceiling: detail ? recordable(v, stage, detail, part, true) : 0,
   }));
+  const others = (v: (typeof base)[number]) =>
+    people
+      .filter((p) => p.id !== person)
+      .reduce((n, p) => n + qty(p.id, keyFor(v)), 0);
   const rows = base.map((v) => ({
     ...v,
-    remaining: Math.max(
-      0,
-      v.available -
-        people
-          .filter((p) => p.id !== person)
-          .reduce((n, p) => n + qty(p.id, keyFor(v)), 0),
-    ),
+    remaining: Math.max(0, v.available - others(v)),
+    limit: Math.max(0, v.ceiling - others(v)),
   }));
   const workers = people
     .map((p) => ({
@@ -222,7 +239,7 @@ export function ProductionForm({
     const parts = people.map((p) => qty(p.id, keyFor(v)));
     return (
       parts.some((q) => !Number.isInteger(q) || q < 0) ||
-      parts.reduce((n, q) => n + q, 0) > v.available
+      parts.reduce((n, q) => n + q, 0) > v.ceiling
     );
   });
   const canSeePrice =
@@ -405,6 +422,12 @@ export function ProductionForm({
           )}
         </div>
       )}
+      {stage === "Cắt" && (
+        <p className="muted">
+          Được nhập cắt dư so với đơn (tối đa +50%); phần dư được ghi nhận nhưng
+          May và các bước sau vẫn chỉ tính theo số lượng đặt.
+        </p>
+      )}
       <div className="panel-toolbar">
         <strong>
           {departmentName(departmentFor(stage))} · Nhập nhiều màu và size
@@ -464,7 +487,7 @@ function QuantityGrid({
   amounts,
   onChange,
 }: {
-  rows: (OrderVariant & { remaining: number })[];
+  rows: (OrderVariant & { remaining: number; limit?: number })[];
   amounts: Record<string, number>;
   onChange: (v: Record<string, number>) => void;
 }) {
@@ -482,6 +505,8 @@ function QuantityGrid({
                     <strong>Size {v.size}</strong>
                     <span className="muted">
                       Còn {v.remaining.toLocaleString("vi-VN")}
+                      {(amounts[keyFor(v)] || 0) > v.remaining &&
+                        ` · cắt dư +${((amounts[keyFor(v)] || 0) - v.remaining).toLocaleString("vi-VN")}`}
                     </span>
                   </span>
                   <input
@@ -489,7 +514,7 @@ function QuantityGrid({
                     type="number"
                     inputMode="numeric"
                     min={0}
-                    max={v.remaining}
+                    max={v.limit ?? v.remaining}
                     step={1}
                     value={amounts[keyFor(v)] || ""}
                     placeholder="0"
@@ -624,6 +649,8 @@ export function OrderDetail({
                 <span>{label}</span>
                 <strong>
                   {n}/{order.total_quantity}
+                  {Number(n) > order.total_quantity &&
+                    ` (dư ${Number(n) - order.total_quantity})`}
                 </strong>
               </div>
             ))}
@@ -632,7 +659,29 @@ export function OrderDetail({
             Các bộ phận xử lý song song theo lượng thực tế. Vị trí Kanban không
             thay thế số lượng đã làm.
           </p>
-          <VariantTable order={order} />
+          <StageTimeline order={order} />
+          <VariantTable
+            order={order}
+            session={session}
+            api={api}
+            onChanged={onChanged}
+          />
+          <h3>Lịch sử giao hàng ({order.shipments?.length || 0})</h3>
+          {order.shipments?.slice(0, 5).map((s) => (
+            <p key={s.id}>
+              <strong>{formatDateTime(s.delivered_at)}</strong> ·{" "}
+              {s.items
+                .map((r) => `${r.color}/${r.size} ×${r.quantity}`)
+                .join(", ")}
+              {s.reason ? ` — ${s.reason}` : ""}
+            </p>
+          ))}
+          {!order.shipments?.length && (
+            <Empty>Chưa có đợt giao. Ghi tại tab Đợt giao.</Empty>
+          )}
+          {(order.shipments?.length || 0) > 5 && (
+            <p className="muted">Xem đầy đủ ở tab Đợt giao.</p>
+          )}
           <StageMover
             order={order}
             session={session}
@@ -719,15 +768,7 @@ export function OrderDetail({
                       {r.operation_date}{" "}
                       {r.operation_time || "Chưa có giờ lịch sử"}
                     </td>
-                    <td>
-                      {{
-                        qc: "QC",
-                        rework: "Sửa hàng",
-                        reinspect: "QC lại",
-                        pack: "Đóng gói",
-                        deliver: "Giao hàng",
-                      }[r.action] || r.action}
-                    </td>
+                    <td>{ACTION_LABELS[r.action] || r.action}</td>
                     <td>
                       {r.color} / {r.size}
                     </td>
@@ -906,42 +947,370 @@ function StageMover({
     </div>
   );
 }
-function VariantTable({ order }: { order: Order }) {
+const ACTION_LABELS: Record<string, string> = {
+  qc: "QC",
+  rework: "Sửa hàng",
+  reinspect: "QC lại",
+  pack: "Đóng gói",
+  deliver: "Giao hàng",
+  shortage: "Giải trình thiếu",
+};
+const vnStamp = (iso: string) =>
+  new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(iso));
+function VariantTable({
+  order,
+  session,
+  api,
+  onChanged,
+}: {
+  order: Detail;
+  session: SessionInfo;
+  api: Api;
+  onChanged: () => Promise<void>;
+}) {
+  const [open, setOpen] = useState("");
+  const selected = order.variants?.find((v) => keyFor(v) === open);
   return (
-    <div className="table-scroll">
-      <table>
-        <thead>
-          <tr>
-            {[
-              "Màu",
-              "Size",
-              "Đặt",
-              "Cắt",
-              "May",
-              "QC đạt",
-              "Đóng gói",
-              "Đã giao",
-            ].map((h) => (
-              <th key={h}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {order.variants?.map((v) => (
-            <tr key={keyFor(v)}>
-              <td>{v.color}</td>
-              <td>{v.size}</td>
-              <td>{v.quantity}</td>
-              <td>{v.cut_qty}</td>
-              <td>{v.sewn_qty}</td>
-              <td>{v.qc_passed_qty}</td>
-              <td>{v.packed_qty}</td>
-              <td>{v.delivered_qty}</td>
+    <div className="stack">
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              {[
+                "Màu",
+                "Size",
+                "Đặt",
+                "Cắt",
+                "May",
+                "QC đạt",
+                "Đóng gói",
+                "Đã giao",
+                "Thiếu",
+              ].map((h) => (
+                <th key={h}>{h}</th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {order.variants?.map((v) => {
+              const short = Math.max(0, v.quantity - v.delivered_qty);
+              return (
+                <tr key={keyFor(v)}>
+                  <td>{v.color}</td>
+                  <td>{v.size}</td>
+                  <td>{v.quantity}</td>
+                  <td>
+                    {v.cut_qty}
+                    {v.cut_qty > v.quantity &&
+                      ` (dư +${v.cut_qty - v.quantity})`}
+                  </td>
+                  <td>{v.sewn_qty}</td>
+                  <td>{v.qc_passed_qty}</td>
+                  <td>{v.packed_qty}</td>
+                  <td>{v.delivered_qty}</td>
+                  <td>
+                    {short ? (
+                      <Action
+                        type="button"
+                        tone="secondary"
+                        aria-label={`Xem nguyên nhân thiếu ${v.color} size ${v.size}`}
+                        aria-pressed={open === keyFor(v)}
+                        onClick={() =>
+                          setOpen(open === keyFor(v) ? "" : keyFor(v))
+                        }
+                      >
+                        {short}
+                      </Action>
+                    ) : (
+                      0
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="muted">
+        Bấm số ở cột Thiếu để xem sản phẩm đang nằm ở công đoạn nào và nguyên
+        nhân đã ghi.
+      </p>
+      {selected && (
+        <ShortagePanel
+          key={keyFor(selected)}
+          order={order}
+          variant={selected}
+          session={session}
+          api={api}
+          onChanged={onChanged}
+          onClose={() => setOpen("")}
+        />
+      )}
     </div>
+  );
+}
+const STAGE_ASSIGNMENT: Record<string, string> = {
+  cat: "Cắt",
+  may: "May",
+  sua_hang: "Sửa hàng",
+  dong_goi: "Đóng gói",
+  giao_hang: "Giao hàng",
+};
+// Stage times are stored as Vietnam local "YYYY-MM-DD HH:mm:ss"; only ISO values need conversion.
+const stageTime = (v: string) =>
+  v.includes("T") ? formatDateTime(v) : v.slice(0, 16);
+function StageTimeline({ order }: { order: Detail }) {
+  const rows = (order.stages || []).map((st) => {
+    const flow = ["nhan_don", "kiem_npl", "kiem_rap"].includes(st.stage_key);
+    const worked = st.completed_qty > 0 || st.received_qty > 0;
+    const done = flow
+      ? st.status === "completed"
+      : st.received_qty > 0 && st.remaining_qty === 0 && st.completed_qty > 0;
+    const trouble =
+      st.status === "has_issue" ||
+      (st.stage_key === order.current_stage &&
+        ["delayed", "at_risk"].includes(order.status));
+    const state = trouble
+      ? { label: "Có vấn đề", css: "delayed" }
+      : done || st.status === "completed"
+        ? { label: "Hoàn thành", css: "completed" }
+        : st.status === "in_progress" || (!flow && st.completed_qty > 0)
+          ? { label: "Đang thực hiện", css: "on_track" }
+          : { label: "Chưa bắt đầu", css: "" };
+    const people = [
+      ...new Set(
+        (order.assignments || [])
+          .filter(
+            (a) => a.active === 1 && a.stage === STAGE_ASSIGNMENT[st.stage_key],
+          )
+          .map((a) => a.employee_name),
+      ),
+    ];
+    return { st, flow, worked, state, people };
+  });
+  return (
+    <div className="stack">
+      <p className="muted">
+        Tiến trình theo công đoạn; các bộ phận làm song song theo số lượng thực
+        tế.
+      </p>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              {[
+                "Công đoạn",
+                "Trạng thái",
+                "Nhận",
+                "Hoàn thành",
+                "Còn lại",
+                "Người được giao",
+                "Bắt đầu",
+                "Xong",
+              ].map((h) => (
+                <th key={h}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ st, flow, state, people }) => (
+              <tr key={st.stage_key}>
+                <td>
+                  {LUUTA_STAGES.find((s) => s.key === st.stage_key)?.label ||
+                    st.stage_name}
+                </td>
+                <td>
+                  <span className={`status ${state.css}`.trim()}>
+                    {state.label}
+                  </span>
+                </td>
+                <td>{flow ? "—" : st.received_qty}</td>
+                <td>{flow ? "—" : st.completed_qty}</td>
+                <td>{flow ? "—" : st.remaining_qty}</td>
+                <td>{people.join(", ") || "—"}</td>
+                <td>{st.started_at ? stageTime(st.started_at) : "—"}</td>
+                <td>{st.completed_at ? stageTime(st.completed_at) : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+function ShortagePanel({
+  order,
+  variant: v,
+  session,
+  api,
+  onChanged,
+  onClose,
+}: {
+  order: Detail;
+  variant: OrderVariant;
+  session: SessionInfo;
+  api: Api;
+  onChanged: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const short = Math.max(0, v.quantity - v.delivered_qty);
+  const same = (r: { color: string; size: string }) =>
+    r.color === v.color && r.size === v.size;
+  const entries = [
+    ...(order.operations || [])
+      .filter(
+        (r) => same(r) && (r.action === "shortage" || r.reason || r.notes),
+      )
+      .map((r) => ({
+        key: `op-${r.id}`,
+        stamp: `${r.operation_date} ${r.operation_time || "00:00"}`,
+        source: ACTION_LABELS[r.action] || r.action,
+        who: r.worker_name,
+        quantity: r.quantity,
+        text: [r.reason, r.notes].filter(Boolean).join(": "),
+      })),
+    ...(order.production_reasons || []).filter(same).map((r) => ({
+      key: `log-${r.id}`,
+      stamp: `${r.log_date} 00:00`,
+      source: r.stage,
+      who: r.employee_name,
+      quantity: r.quantity,
+      text: r.reason,
+    })),
+    ...(order.shipments || [])
+      .filter((s) => s.reason && s.items.some(same))
+      .map((s) => ({
+        key: `ship-${s.id}`,
+        stamp: vnStamp(s.delivered_at),
+        source: `Giao hàng ${s.code}`,
+        who: s.worker_name,
+        quantity: s.items.find(same)?.quantity || 0,
+        text: s.reason || "",
+      })),
+  ]
+    .filter((r) => r.text)
+    .sort((a, b) => b.stamp.localeCompare(a.stamp));
+  const explained = (order.operations || [])
+    .filter((r) => r.action === "shortage" && same(r))
+    .reduce((n, r) => n + r.quantity, 0);
+  const open = Math.max(0, short - explained);
+  const canRecord = [
+    "production.create",
+    "qc.manage",
+    "delivery.manage",
+    "orders.edit",
+  ].some((p) => permits(session.user, p as Parameters<typeof permits>[1]));
+  const breakdown = shortageBreakdown(v);
+  return (
+    <section
+      className="quantity-group"
+      aria-label={`Nguyên nhân thiếu ${v.color} size ${v.size}`}
+    >
+      <div className="stack">
+        <div className="card-top">
+          <h3>
+            Thiếu {short} · {v.color} / {v.size}
+          </h3>
+          <Action type="button" tone="secondary" onClick={onClose}>
+            Đóng
+          </Action>
+        </div>
+        <ErrorNotice error={error} />
+        <h4>Đang nằm ở đâu</h4>
+        {breakdown.map((r) => (
+          <p key={r.label}>
+            {r.label}: <strong>{r.quantity}</strong>
+          </p>
+        ))}
+        <h4>Nguyên nhân đã ghi</h4>
+        {entries.slice(0, 20).map((r) => (
+          <p key={r.key}>
+            <span className="muted">{r.stamp.replace(" 00:00", "")}</span> ·{" "}
+            {r.source}
+            {r.who ? ` · ${r.who}` : ""} · <strong>{r.quantity}</strong> —{" "}
+            {r.text}
+          </p>
+        ))}
+        {!entries.length && (
+          <Empty>
+            Chưa có nguyên nhân nào cho màu–size này. Hãy ghi bên dưới để giải
+            trình với khách.
+          </Empty>
+        )}
+        {canRecord && open > 0 && (
+          <form
+            key={explained}
+            className="stack"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const f = new FormData(e.currentTarget);
+              setBusy(true);
+              setError("");
+              try {
+                await api(
+                  `/api/orders/${encodeURIComponent(order.id)}/shortages`,
+                  {
+                    color: v.color,
+                    size: v.size,
+                    quantity: Number(f.get("quantity")),
+                    cause: f.get("cause"),
+                    note: String(f.get("note") || ""),
+                  },
+                );
+                await onChanged();
+              } catch (err) {
+                setError(message(err));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <h4>Ghi nguyên nhân thiếu (còn {open} chưa giải trình)</h4>
+            <div className="form-grid">
+              <Field label="Nguyên nhân">
+                <select name="cause" required>
+                  {SHORTAGE_CAUSES.map((c) => (
+                    <option key={c}>{c}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Số sản phẩm thiếu do nguyên nhân này">
+                <input
+                  name="quantity"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={open}
+                  step={1}
+                  defaultValue={open}
+                  required
+                />
+              </Field>
+            </div>
+            <Field
+              label="Giải thích thêm"
+              hint="Ví dụ: 1 áo lỗi sợi vải, đã báo nhà cung cấp."
+            >
+              <textarea name="note" maxLength={1000} />
+            </Field>
+            <Action type="submit" busy={busy}>
+              <Check size={18} />
+              Lưu nguyên nhân
+            </Action>
+          </form>
+        )}
+      </div>
+    </section>
   );
 }
 function AssignmentForm({
