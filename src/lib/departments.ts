@@ -1,0 +1,46 @@
+import type { Account } from "./permissions";
+
+export const DEPARTMENTS = [
+  { id: "management", name: "Quản lý" },
+  { id: "cutting", name: "Cắt" },
+  { id: "sewing", name: "May" },
+  { id: "quality", name: "QC" },
+  { id: "packing", name: "Đóng gói" },
+  { id: "delivery", name: "Giao hàng" },
+] as const;
+export type DepartmentId = (typeof DEPARTMENTS)[number]["id"];
+export const departmentName = (id?: string | null) =>
+  DEPARTMENTS.find((d) => d.id === id)?.name || "Chưa phân loại";
+export function departmentFor(stage: string): DepartmentId {
+  if (["cat", "Cắt"].includes(stage)) return "cutting";
+  if (["may", "May"].includes(stage)) return "sewing";
+  if (
+    [
+      "qc",
+      "sua_hang",
+      "qc_lai",
+      "QC",
+      "Sửa hàng",
+      "qc",
+      "rework",
+      "reinspect",
+    ].includes(stage)
+  )
+    return "quality";
+  if (["dong_goi", "Đóng gói", "pack"].includes(stage)) return "packing";
+  if (["giao_hang", "Giao hàng", "deliver"].includes(stage)) return "delivery";
+  return "management";
+}
+export const isAdmin = (user: Account) =>
+  user.roles.some((r) => r.id === "admin");
+export const isManagement = (user: Account) =>
+  isAdmin(user) || !!user.department_ids?.includes("management");
+export function departmentAccess(user: Account, department: string) {
+  return (
+    isManagement(user) ||
+    !!user.department_ids?.includes(department as DepartmentId)
+  );
+}
+export const isOperator = (user: Account) =>
+  isAdmin(user) ||
+  (user.roles.some((r) => r.id !== "worker") && !!user.department_ids?.length);

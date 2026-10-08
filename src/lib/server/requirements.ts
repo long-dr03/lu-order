@@ -1,3 +1,5 @@
+import { departmentFor } from "../departments";
+import { requireDepartment } from "./departments";
 import { completedWork, refreshWorkCompletion } from "./work-items";
 import { transitionPermissionProblem } from "../workflow";
 import { z } from "zod";
@@ -30,6 +32,7 @@ export async function updateStageInfo(
 ) {
   const o = await getOrderById(id);
   ensure(o, 404, "Không tìm thấy đơn.");
+  requireDepartment(ctx, input.stage);
   const permissionProblem = transitionPermissionProblem(ctx.user, o);
   ensure(!permissionProblem, 403, permissionProblem || "");
   ensure(o.version === input.version, 409, "Đơn đã thay đổi. Tải lại dữ liệu.");
@@ -38,9 +41,12 @@ export async function updateStageInfo(
   if (["dong_goi", "giao_hang"].includes(input.stage))
     requirePermission(ctx, "delivery.manage", { lineId: o.line_id });
   const employee = (await db
-    .prepare("SELECT * FROM employees WHERE id=? AND line_id=?")
-    .get(input.employee_id, o.line_id)) as { name: string } | undefined;
-  ensure(employee, 422, "Người phụ trách phải thuộc chuyền của đơn.");
+    .prepare(
+      "SELECT e.* FROM employees e JOIN employee_departments d ON d.employee_id=e.id WHERE e.id=? AND e.active=1 AND d.department_id=?",
+    )
+    .get(input.employee_id, departmentFor(input.stage))) as
+    { name: string } | undefined;
+  ensure(employee, 422, "Người phụ trách phải thuộc bộ phận của công đoạn.");
   const before = (await db
     .prepare("SELECT * FROM order_stages WHERE order_id=? AND stage_key=?")
     .get(id, input.stage)) as { status: string } | undefined;
@@ -132,6 +138,7 @@ export async function updateStageInfo(
     "Cập nhật hồ sơ công đoạn",
     `${id} ${input.stage}: ${JSON.stringify(before)} → ${JSON.stringify(after)}`,
     o.line_id,
+    departmentFor(input.stage),
   );
   return await getOrderById(id);
 }
@@ -152,7 +159,10 @@ export async function adjustProduction(
     .prepare("SELECT * FROM production_logs WHERE id=?")
     .get(input.log_id)) as ProductionLog | undefined;
   ensure(old, 404, "Không tìm thấy sản lượng.");
-  requirePermission(ctx, "payroll.adjust", { lineId: old.line_id });
+  requirePermission(ctx, "payroll.adjust", {
+    departmentId: old.department_id,
+    stage: old.stage,
+  });
   ensure(
     old.version === input.version,
     409,
@@ -285,6 +295,7 @@ export async function adjustProduction(
     "Điều chỉnh sản lượng/tiền công",
     `${old.id}: ${JSON.stringify(old)} → ${JSON.stringify(after)}; Lý do: ${input.reason}; ${old.is_locked ? "Tháng đã chốt" : "Chưa chốt"}`,
     old.line_id,
+    old.department_id || departmentFor(old.stage),
   );
   return after;
 }

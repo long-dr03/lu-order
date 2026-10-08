@@ -37,7 +37,8 @@ async function main() {
 
     console.log("Logging in as admin...");
     await page.type('input[name="username"]', "admin");
-    await page.type('input[name="password"]', "123456@ddc");
+    if (!process.env.QA_PASSWORD) throw new Error("QA_PASSWORD is required");
+    await page.type('input[name="password"]', process.env.QA_PASSWORD);
     await page.click('button[type="submit"]');
     await wait(1800);
   }
@@ -70,7 +71,7 @@ async function main() {
       await menu.click();
       await wait(400);
     }
-    const clicked = await page.evaluate((label) => {
+    await page.evaluate((label) => {
       const buttons = Array.from(document.querySelectorAll("nav[aria-label='Điều hướng điện thoại'] button, .navigation-drawer button"));
       const btn = buttons.find((b) => b.textContent?.includes(label));
       if (btn) {

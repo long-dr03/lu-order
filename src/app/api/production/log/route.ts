@@ -1,3 +1,4 @@
+import { DEPARTMENTS } from "@/lib/departments";
 import { adjustmentSchema, adjustProduction } from "@/lib/server/requirements";
 import {
   authenticate,
@@ -11,8 +12,7 @@ import {
   filterLogs,
   queryFilters,
   employeesFor,
-  linesFor,
-  logSchema,
+  productionInputSchema,
   recordProduction,
   idempotent,
 } from "@/lib/server/business";
@@ -30,13 +30,14 @@ export async function GET(request: Request) {
         (l) =>
           permits(ctx.user, "payroll.view", {
             employeeId: l.employee_id,
-            lineId: l.line_id,
+            departmentId: l.department_id,
+            stage: l.stage,
           })
             ? l
             : { ...l, unit_price: null, total_pay: null },
       ),
       employees: await employeesFor(ctx),
-      lines: await linesFor(ctx),
+      departments: DEPARTMENTS,
     });
   } catch (e) {
     return failure(e);
@@ -47,14 +48,29 @@ export async function POST(request: Request) {
     await initializeDatabase();
     const ctx = await authenticate(request);
     guardWrite(request, ctx);
-    const input = logSchema.parse(await body(request));
+    const input = productionInputSchema.parse(await body(request));
+    const result = await idempotent(ctx, request, input, () =>
+      recordProduction(ctx, input),
+    );
+    const sanitize = (log: unknown) => {
+      if (!log || typeof log !== "object") return log;
+      const l = log as Record<string, unknown>;
+      return permits(ctx.user, "payroll.view", {
+        employeeId:
+          typeof l.employee_id === "string"
+            ? l.employee_id
+            : "employee_id" in input
+              ? input.employee_id
+              : undefined,
+        stage: input.stage,
+      })
+        ? l
+        : { ...l, unit_price: null, total_pay: null };
+    };
     return ok(
-      await idempotent(
-        ctx,
-        request,
-        input,
-        async () => await recordProduction(ctx, input),
-      ),
+      result && typeof result === "object" && "logs" in result
+        ? { ...result, logs: result.logs.map(sanitize) }
+        : sanitize(result),
       201,
     );
   } catch (e) {

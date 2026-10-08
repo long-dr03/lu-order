@@ -37,7 +37,8 @@ async function main() {
 
     console.log("Logging in as admin...");
     await page.type('input[name="username"]', "admin");
-    await page.type('input[name="password"]', "123456@ddc");
+    if (!process.env.QA_PASSWORD) throw new Error("QA_PASSWORD is required");
+    await page.type('input[name="password"]', process.env.QA_PASSWORD);
     await page.click('button[type="submit"]');
     await wait(2000);
   }
@@ -97,7 +98,6 @@ async function main() {
   // 5. Order Detail Modal - Tab Màu & Size
   console.log("Opening order detail modal LU-001...");
   const openedDetail = await page.evaluate(() => {
-    const rows = Array.from(document.querySelectorAll("table tbody tr, .orders-table tr"));
     const viewBtn = document.querySelector("button[aria-label*='LU-001'], table tbody tr button") as HTMLElement;
     if (viewBtn) {
       viewBtn.click();

@@ -1,4 +1,11 @@
 "use client";
+import {
+  ProductionForm,
+  OrderDetail,
+  DepartmentsPanel,
+  StaffPanel,
+} from "@/components/DepartmentWorkspace";
+import { departmentName, isManagement } from "@/lib/departments";
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { AnimatePresence, motion, MotionConfig } from "motion/react";
 import {
@@ -20,17 +27,13 @@ import {
   RefreshCw,
   LogOut,
   UserRound,
+  UserCheck,
+  CheckCircle2,
   KeyRound,
   ArrowLeft,
-  CheckCircle2,
   Settings2,
 } from "lucide-react";
-import {
-  type SessionInfo,
-  hasPermission,
-  permits,
-  canRecordProduction,
-} from "@/lib/permissions";
+import { type SessionInfo, hasPermission, permits } from "@/lib/permissions";
 import {
   type DashboardData,
   type Api,
@@ -39,10 +42,8 @@ import {
   money,
   day,
 } from "@/lib/client";
-import { availableOperations } from "@/lib/workflow";
-import { LUUTA_STAGES, type Order } from "@/lib/types";
+import { type Order } from "@/lib/types";
 import type { Rate } from "@/lib/server/business";
-import { Pagination } from "@/components/Pagination";
 import { AuthScreen } from "@/components/AuthScreen";
 import {
   Action,
@@ -53,17 +54,9 @@ import {
   Empty,
 } from "@/components/Primitives";
 import { OrderWorkspace, CreateOrderForm } from "@/components/OrderWorkspace";
-import {
-  ProductionForm,
-  OrderDetail,
-  RatesPanel,
-} from "@/components/ProductionForms";
-import {
-  RecordsPanel,
-  AuditPanel,
-  OperationsPanel,
-} from "@/components/RecordsPanel";
-import { LinesPanel, DashboardInsights } from "@/components/RequirementPanels";
+import { RatesPanel } from "@/components/ProductionForms";
+import { RecordsPanel, AuditPanel } from "@/components/RecordsPanel";
+import { DashboardInsights } from "@/components/RequirementPanels";
 import { BackupPanel } from "@/components/BackupPanel";
 import { AdminPanel } from "@/components/AdminPanel";
 import { UserGuide } from "@/components/UserGuide";
@@ -88,9 +81,15 @@ const navigation = [
   },
   {
     id: "lines",
-    label: "Chuyền sản xuất",
+    label: "Bộ phận",
     icon: Factory,
     permission: "orders.view",
+  },
+  {
+    id: "employees",
+    label: "Danh sách thợ",
+    icon: UserCheck,
+    permission: "employees.manage",
   },
   {
     id: "production",
@@ -170,7 +169,7 @@ export default function Page() {
       "/api/auth/session",
     );
     setSession(value);
-    setTab("overview");
+    setTab(isManagement(value.user) ? "overview" : "lines");
     setData(null);
     setError("");
   }, []);
@@ -178,7 +177,10 @@ export default function Page() {
     let live = true;
     void apiFor(null, () => {})<SessionInfo>("/api/auth/session")
       .then((value) => {
-        if (live) setSession(value);
+        if (live) {
+          setSession(value);
+          setTab(isManagement(value.user) ? "overview" : "lines");
+        }
       })
       .catch(() => {})
       .finally(() => {
@@ -229,56 +231,31 @@ export default function Page() {
     const timer = setTimeout(() => setNotice(""), 4000);
     return () => clearTimeout(timer);
   }, [notice]);
-  const [workPage, setWorkPage] = useState(1);
-  const [workSearch, setWorkSearch] = useState("");
-  const workerOrders = (data?.orders || []).filter(
-    (o) =>
-      o.status !== "completed" &&
-      `${o.id} ${o.product_name} ${o.customer}`
-        .toLocaleLowerCase("vi")
-        .includes(workSearch.toLocaleLowerCase("vi")),
-  );
-  const currentWorkPage = Math.min(
-    workPage,
-    Math.max(1, Math.ceil(workerOrders.length / 12)),
-  );
-  const isWorker =
-    !!session?.user.employee_id &&
-    session.user.roles.length > 0 &&
-    session.user.roles.some((r) => r.id === "worker") &&
-    session.user.roles.every(
-      (r) =>
-        r.id === "worker" ||
-        r.grants.every((g) => g.permission === "delivery.record"),
-    );
   const tabs = session
-    ? navigation
-        .filter(
-          (n) =>
-            (n.permission === null ||
-              hasPermission(session.user, n.permission)) &&
-            (!isWorker ||
-              ["overview", "production", "payroll", "guide"].includes(n.id)) &&
-            (n.id !== "backup" ||
-              session.user.roles.some((r) => r.id === "admin")) &&
-            (!session.representing ||
-              !["users", "roles", "backup"].includes(n.id)),
-        )
-        .map((n) =>
-          isWorker && n.id !== "guide"
-            ? {
-                ...n,
-                label:
-                  n.id === "overview"
-                    ? "Công việc"
-                    : n.id === "production"
-                      ? "Lịch sử sản lượng"
-                      : "Lương của tôi",
-              }
-            : n,
-        )
+    ? navigation.filter(
+        (n) =>
+          (n.permission === null ||
+            hasPermission(session.user, n.permission) ||
+            (n.id === "employees" &&
+              hasPermission(session.user, "users.manage"))) &&
+          (n.id !== "backup" ||
+            session.user.roles.some((r) => r.id === "admin")) &&
+          (!session.representing ||
+            !["users", "roles", "employees", "backup"].includes(n.id)),
+      )
     : [];
   const active = tabs.find((n) => n.id === tab) || tabs[0];
+  const quickProduction =
+    !!session &&
+    ["overview", "orders", "lines", "production", "payroll"].includes(
+      active?.id || "",
+    ) &&
+    ["Cắt", "May", "Sửa hàng", "Đóng gói"].some(
+      (stage) =>
+        permits(session.user, "production.create", { stage }) ||
+        (stage === "Sửa hàng" && permits(session.user, "qc.manage", { stage })),
+    );
+
   async function openOrder(order: Order) {
     try {
       setSelected(await api<Order>(`/api/orders/${order.id}`));
@@ -344,8 +321,8 @@ export default function Page() {
       </div>
     );
   const title =
-    active?.id === "overview" && isWorker
-      ? "Công việc của tôi"
+    active?.id === "lines" && !isManagement(session.user)
+      ? "Công việc bộ phận tôi"
       : active?.label || "Không gian làm việc";
   const orderProps = {
     orders: data?.orders || [],
@@ -364,7 +341,7 @@ export default function Page() {
         <div className="kpi-grid">
           {[
             {
-              label: isWorker ? "Đơn trong chuyền" : "Đang sản xuất",
+              label: "Đang sản xuất",
               value: data?.stats.orders.totalRunning || 0,
               hint: "Đơn hàng chưa hoàn thành",
               tab: "orders",
@@ -401,13 +378,7 @@ export default function Page() {
             <button
               className={`kpi-card ${typeof card.value === "string" ? "kpi-money" : ""}`}
               key={card.label}
-              onClick={() =>
-                setTab(
-                  (isWorker && card.tab === "orders"
-                    ? "overview"
-                    : card.tab) as Tab,
-                )
-              }
+              onClick={() => setTab(card.tab as Tab)}
             >
               <span>{card.label}</span>
               <strong>
@@ -419,7 +390,7 @@ export default function Page() {
             </button>
           ))}
         </div>
-        {!isWorker && hasPermission(session.user, "production.view") && (
+        {hasPermission(session.user, "production.view") && (
           <DashboardInsights
             api={api}
             orders={data?.orders || []}
@@ -427,107 +398,18 @@ export default function Page() {
             session={session}
           />
         )}
-        {isWorker ? (
-          <div className="stack">
-            <input
-              aria-label="Tìm công việc"
-              placeholder="Tìm mã đơn, sản phẩm…"
-              value={workSearch}
-              onChange={(e) => {
-                setWorkSearch(e.target.value);
-                setWorkPage(1);
-              }}
-            />
-            <div className="operations-grid">
-              {workerOrders
-                .slice((currentWorkPage - 1) * 12, currentWorkPage * 12)
-                .map((o) => (
-                  <article className="panel padded stack" key={o.id}>
-                    <div className="card-top">
-                      <strong>{o.id}</strong>
-                      <span className="muted">
-                        {
-                          LUUTA_STAGES.find((s) => s.key === o.current_stage)
-                            ?.label
-                        }
-                      </span>
-                    </div>
-                    <h2>{o.product_name}</h2>
-                    <p className="muted">
-                      {o.total_quantity} sản phẩm · Chuyền {o.line_id}
-                    </p>
-                    {!(data?.employees || []).some((e) =>
-                      canRecordProduction(session.user, e, o),
-                    ) && (
-                      <p className="muted">
-                        Chỉ xem tiến độ · Chưa có quyền ghi nhận cho nhân viên
-                        tại chuyền này.
-                      </p>
-                    )}
-                    {!!o.work_items?.length && (
-                      <ul className="work-progress-list">
-                        {o.work_items.map((p) => (
-                          <li key={p.id}>
-                            <span>
-                              {p.stage} · {p.name}
-                            </span>
-                            <strong>
-                              {p.recorded_quantity || 0}/{o.total_quantity}
-                            </strong>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                    <div className="inline-actions">
-                      {o.current_stage === "giao_hang" &&
-                        availableOperations(session.user, o).some(
-                          (a) => a.key === "deliver",
-                        ) && (
-                          <Action onClick={() => openOrder(o)}>
-                            Ghi nhận giao hàng
-                          </Action>
-                        )}
-                      {o.current_stage !== "giao_hang" &&
-                        (data?.employees || []).some((e) =>
-                          canRecordProduction(session.user, e, o),
-                        ) && (
-                          <Action
-                            onClick={() => {
-                              setProductionOrder(o.id);
-                              setProduction(true);
-                            }}
-                          >
-                            Ghi nhận công việc
-                          </Action>
-                        )}
-                      <Action tone="secondary" onClick={() => openOrder(o)}>
-                        Chi tiết và tiến độ
-                      </Action>
-                    </div>
-                  </article>
-                ))}
-              {!data?.orders.some((o) => o.status !== "completed") && (
-                <Empty>Chưa có công việc trong chuyền của bạn.</Empty>
-              )}
-            </div>
-            <Pagination
-              page={currentWorkPage}
-              total={workerOrders.length}
-              pageSize={12}
-              onChange={setWorkPage}
-            />
-          </div>
-        ) : (
-          <OrderWorkspace {...orderProps} />
-        )}
+        <OrderWorkspace {...orderProps} />
       </div>
     ) : active?.id === "orders" ? (
       <OrderWorkspace {...orderProps} />
     ) : active?.id === "lines" ? (
-      <LinesPanel
-        lines={data?.lines || []}
+      <DepartmentsPanel
+        session={session}
         orders={data?.orders || []}
-        onOpen={openOrder}
+        onOpen={(id) => {
+          const order = data?.orders.find((o) => o.id === id);
+          if (order) void openOrder(order);
+        }}
       />
     ) : active?.id === "production" || active?.id === "payroll" ? (
       <RecordsPanel
@@ -539,11 +421,15 @@ export default function Page() {
         lines={data?.lines || []}
       />
     ) : active?.id === "qc" || active?.id === "delivery" ? (
-      <OperationsPanel
-        mode={active.id}
+      <DepartmentsPanel
+        key={active.id}
+        initialDepartment={active.id === "qc" ? "quality" : "delivery"}
         orders={data?.orders || []}
         session={session}
-        onOpen={openOrder}
+        onOpen={(id) => {
+          const order = data?.orders.find((o) => o.id === id);
+          if (order) void openOrder(order);
+        }}
       />
     ) : active?.id === "rates" ? (
       <RatesPanel
@@ -554,6 +440,8 @@ export default function Page() {
         api={api}
         onSaved={refresh}
       />
+    ) : active?.id === "employees" ? (
+      <StaffPanel session={session} api={api} onSaved={refresh} />
     ) : active?.id === "users" || active?.id === "roles" ? (
       <AdminPanel
         key={active.id}
@@ -596,7 +484,9 @@ export default function Page() {
   }
   return (
     <MotionConfig reducedMotion="user">
-      <div className="app-shell">
+      <div
+        className={`app-shell${quickProduction ? " quick-production-enabled" : ""}`}
+      >
         <aside className="sidebar">
           <Logo />
           <nav aria-label="Điều hướng chính">{renderNavigation(false)}</nav>
@@ -664,16 +554,16 @@ export default function Page() {
               </Action>
             </div>
           )}
-          <main>
+          <main
+            className={quickProduction ? "with-production-shortcut" : undefined}
+          >
             <div className="page-heading">
               <div>
                 <h1>{title}</h1>
                 <p>
                   {active?.id === "guide"
                     ? "Hướng dẫn từng bước, từ nhận đơn đến giao hàng và đối chiếu tiền công."
-                    : isWorker
-                      ? "Theo dõi công việc, sản lượng và tiền công trong phạm vi của bạn."
-                      : "Theo dõi và điều phối hoạt động xưởng may."}
+                    : "Theo dõi và ghi nhận công việc theo bộ phận."}
                 </p>
               </div>
               <div className="inline-actions" hidden={active?.id === "guide"}>
@@ -689,24 +579,6 @@ export default function Page() {
                   <RefreshCw size={18} />
                   Làm mới
                 </Action>
-                {hasPermission(session.user, "production.create") &&
-                  [
-                    "overview",
-                    "orders",
-                    "lines",
-                    "production",
-                    "payroll",
-                  ].includes(active?.id || "") && (
-                    <Action
-                      onClick={() => {
-                        setProductionOrder("");
-                        setProduction(true);
-                      }}
-                    >
-                      <Plus size={18} />
-                      {isWorker ? "Ghi nhận công việc" : "Nhập sản lượng"}
-                    </Action>
-                  )}
               </div>
             </div>
             <ErrorNotice error={error} />
@@ -723,6 +595,20 @@ export default function Page() {
             </AnimatePresence>
           </main>
         </div>
+        {quickProduction && !sidebar && (
+          <Action
+            className="production-shortcut"
+            type="button"
+            aria-haspopup="dialog"
+            onClick={() => {
+              setProductionOrder("");
+              setProduction(true);
+            }}
+          >
+            <Plus size={20} aria-hidden="true" />
+            Nhập sản lượng
+          </Action>
+        )}
         <AnimatePresence>
           {notice && (
             <motion.div
@@ -757,9 +643,7 @@ export default function Page() {
               session={session}
               employees={data.employees}
               nextCode={data.nextCode}
-              lines={data.lines.filter((l) =>
-                permits(session.user, "orders.create", { lineId: l.id }),
-              )}
+              lines={[]}
               onSaved={() => saved(() => setCreate(false))}
             />
           )}
@@ -767,13 +651,18 @@ export default function Page() {
         <Modal
           open={production}
           onClose={() => setProduction(false)}
-          title={isWorker ? "Ghi nhận công việc" : "Nhập sản lượng"}
+          title="Nhập sản lượng"
           description="Ghi nhận số lượng hoàn thành để tính tiền công."
           wide
         >
           {data ? (
             <ProductionForm
               api={api}
+              onAssign={async (id) => {
+                setProduction(false);
+                const order = data.orders.find((o) => o.id === id);
+                if (order) await openOrder(order);
+              }}
               initialOrderId={productionOrder}
               orders={data.orders}
               employees={data.employees}
@@ -817,6 +706,11 @@ export default function Page() {
                 {session.user.roles.map((r) => r.name).join(", ")}
               </p>
             </div>
+            <p className="muted">
+              Bộ phận:{" "}
+              {session.user.department_ids?.map(departmentName).join(", ") ||
+                "Chưa phân loại"}
+            </p>
             {!session.representing && (
               <PasswordForm
                 api={api}

@@ -15,7 +15,8 @@ export interface PendingPacking {
   employee_id: string;
   employee_name: string;
   product_name: string;
-  line_id: number;
+  line_id: number | null;
+  department_id?: string | null;
   color: string;
   size: string;
   work_date: string;
@@ -34,7 +35,7 @@ export async function pendingPackingFor(ctx: Context) {
   return (
     (await db
       .prepare(
-        "SELECT id,order_id,employee_id,employee_name,product_name,line_id,color,size,work_date,quantity,unit_price,total_pay,settled_log_id FROM pending_packing_pay WHERE settled_log_id IS NULL ORDER BY work_date,id",
+        "SELECT id,order_id,employee_id,employee_name,product_name,line_id,department_id,color,size,work_date,quantity,unit_price,total_pay,settled_log_id FROM pending_packing_pay WHERE settled_log_id IS NULL ORDER BY work_date,id",
       )
       .all()) as PendingPacking[]
   )
@@ -42,17 +43,17 @@ export async function pendingPackingFor(ctx: Context) {
       (p) =>
         permits(ctx.user, "production.view", {
           employeeId: p.employee_id,
-          lineId: p.line_id,
+          departmentId: p.department_id || "packing",
         }) ||
         permits(ctx.user, "payroll.view", {
           employeeId: p.employee_id,
-          lineId: p.line_id,
+          departmentId: p.department_id || "packing",
         }),
     )
     .map((p) =>
       permits(ctx.user, "payroll.view", {
         employeeId: p.employee_id,
-        lineId: p.line_id,
+        departmentId: p.department_id || "packing",
       })
         ? p
         : { ...p, unit_price: null, total_pay: null },
@@ -73,10 +74,12 @@ export async function settlePacking(
     .prepare("SELECT * FROM pending_packing_pay WHERE id=?")
     .get(input.id)) as PendingPacking | undefined;
   ensure(p, 404, "Không tìm thấy công chờ đối chiếu.");
-  requirePermission(ctx, "payroll.adjust", { lineId: p.line_id });
+  requirePermission(ctx, "payroll.adjust", {
+    departmentId: p.department_id || "packing",
+  });
   requirePermission(ctx, "payroll.view", {
     employeeId: p.employee_id,
-    lineId: p.line_id,
+    departmentId: p.department_id || "packing",
   });
   ensure(
     !p.settled_log_id,
@@ -154,6 +157,16 @@ export async function settlePacking(
   const logId = Number(log.lastInsertRowid);
   await db
     .prepare(
+      "UPDATE production_logs SET department_id='packing',actor_id=?,represented_id=?,reason=? WHERE id=?",
+    )
+    .run(
+      ctx.actor.id,
+      ctx.representing ? ctx.user.id : null,
+      input.reason,
+      logId,
+    );
+  await db
+    .prepare(
       "UPDATE pending_packing_pay SET settled_log_id=?,settlement_reason=?,settled_at=to_char(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh','YYYY-MM-DD HH24:MI:SS') WHERE id=?",
     )
     .run(logId, input.reason, p.id);
@@ -165,6 +178,7 @@ export async function settlePacking(
     "Đối chiếu công đóng gói",
     `Khoản ${p.id}: ${p.order_id} ${p.employee_name} ${p.quantity} sản phẩm; ngày làm ${p.work_date}; ngày hạch toán ${input.pay_date}; đơn giá giữ nguyên ${p.unit_price}; lý do ${input.reason}; bản ghi công ${logId}`,
     p.line_id,
+    p.department_id || "packing",
   );
   return { log_id: logId };
 }

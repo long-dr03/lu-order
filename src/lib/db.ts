@@ -108,7 +108,7 @@ export async function getOrderById(id: string): Promise<Order | null> {
     cat: ["quantity", "cut_qty"],
     may: ["cut_qty", "sewn_qty"],
     qc: ["sewn_qty", "qc_inspected_qty"],
-    sua_hang: ["qc_defect_qty", "reworked_qty"],
+    sua_hang: ["defect_qty", "reworked_qty"],
     qc_lai: ["reworked_qty", "reinspected_qty"],
     dong_goi: ["qc_passed_qty", "packed_qty"],
     giao_hang: ["packed_qty", "delivered_qty"],
@@ -124,7 +124,7 @@ export async function getOrderById(id: string): Promise<Order | null> {
       );
     stage.received_qty =
       stage.stage_key === "sua_hang"
-        ? sum("qc_defect_qty") + sum("reinspected_qty") - sum("repassed_qty")
+        ? sum("defect_qty") + sum("reinspected_qty") - sum("repassed_qty")
         : sum(columns[0]);
     stage.completed_qty = sum(columns[1]);
     stage.remaining_qty = Math.max(0, stage.received_qty - stage.completed_qty);
@@ -143,8 +143,8 @@ export async function createOrderWithVariants(
   actor = "Hệ thống",
 ): Promise<Order> {
   const insertOrder = db.prepare(`
-    INSERT INTO orders (id, customer, product_code, product_name, image_url, total_quantity, line_id, order_date, deadline, priority, assigned_to, current_stage, progress, status, notes)
-    VALUES (@id, @customer, @product_code, @product_name, @image_url, @total_quantity, @line_id, @order_date, @deadline, @priority, @assigned_to, @current_stage, 0, 'on_track', @notes)
+    INSERT INTO orders (id, customer, product_code, product_name, image_url, total_quantity, line_id, order_date, deadline, priority, assigned_to, current_stage, progress, status, notes, reason)
+    VALUES (@id, @customer, @product_code, @product_name, @image_url, @total_quantity, @line_id, @order_date, @deadline, @priority, @assigned_to, @current_stage, 0, 'on_track', @notes, @reason)
   `);
 
   const insertVariant = db.prepare(`
@@ -165,6 +165,7 @@ export async function createOrderWithVariants(
   const tx = db.transaction(async () => {
     await insertOrder.run({
       ...data.order,
+      reason: data.order.reason || null,
       total_quantity: totalQty,
     });
 
@@ -279,20 +280,25 @@ export async function getEmployees(lineId?: number): Promise<Employee[]> {
   const employees = (await db
     .prepare("SELECT * FROM employees ORDER BY name ASC")
     .all()) as Employee[];
-  const accounts = (await db
-    .prepare(
-      "SELECT employee_id,line_ids FROM accounts WHERE status='active' AND employee_id IS NOT NULL",
-    )
-    .all()) as { employee_id: string; line_ids: string }[];
-  const assignments = new Map(
-    accounts.map((a) => [a.employee_id, JSON.parse(a.line_ids) as number[]]),
-  );
+  const memberships = (await db
+    .prepare("SELECT employee_id,department_id FROM employee_departments")
+    .all()) as {
+    employee_id: string;
+    department_id: import("./departments").DepartmentId;
+  }[];
+  const linked = (await db
+    .prepare("SELECT employee_id FROM accounts WHERE employee_id IS NOT NULL")
+    .all()) as { employee_id: string }[];
   return employees
-    .map((e) => ({ ...e, assigned_line_ids: assignments.get(e.id) || [] }))
-    .filter(
-      (e) =>
-        !lineId || e.line_id === lineId || e.assigned_line_ids.includes(lineId),
-    );
+    .map((e) => ({
+      ...e,
+      assigned_line_ids: [],
+      department_ids: memberships
+        .filter((d) => d.employee_id === e.id)
+        .map((d) => d.department_id),
+      has_account: linked.some((a) => a.employee_id === e.id),
+    }))
+    .filter((e) => !lineId || e.line_id === lineId);
 }
 
 // ----------------- SẢN LƯỢNG & TÍNH LƯƠNG SẢN PHẨM -----------------

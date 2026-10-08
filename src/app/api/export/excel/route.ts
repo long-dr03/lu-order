@@ -1,3 +1,4 @@
+import { departmentFor, departmentName } from "@/lib/departments";
 import { db } from "@/lib/db";
 import ExcelJS from "exceljs";
 import {
@@ -64,6 +65,7 @@ export async function GET(request: Request) {
         row.height = n === 1 ? 30 : 24;
         row.eachCell((cell, i) => {
           if (
+            !/giờ/i.test(headers[i - 1]) &&
             n > 1 &&
             /ngày|hạn giao/i.test(headers[i - 1]) &&
             typeof cell.value === "string" &&
@@ -80,6 +82,15 @@ export async function GET(request: Request) {
       });
       return ws;
     };
+    const operationMatchesStage = (action: string) =>
+      !f.stage ||
+      ({
+        qc: "QC",
+        reinspect: "QC",
+        rework: "Sửa hàng",
+        pack: "Đóng gói",
+        deliver: "Giao hàng",
+      }[action] || action) === f.stage;
     const exportableOrders = async (
       permission: "orders.view" | "qc.view" | "delivery.view",
     ) =>
@@ -89,6 +100,238 @@ export async function GET(request: Request) {
         ),
         f,
       );
+    // Keep current progress visible; business history and financial data retain department filtering.
+    if (dataset === "orders" || dataset === "delivery" || dataset === "qc") {
+      const permission =
+        dataset === "qc"
+          ? "qc.view"
+          : dataset === "delivery"
+            ? "delivery.view"
+            : "orders.view";
+      requirePermission(ctx, permission);
+      const orders = await exportableOrders(permission);
+      const ids = new Set(orders.map((o) => o.id));
+      const inWindow = (date: string) =>
+        (!f.from || date.slice(0, 10) >= f.from) &&
+        (!f.to || date.slice(0, 10) <= f.to) &&
+        (!f.month || date.slice(0, 7) === f.month);
+      const accounts = (await db
+        .prepare("SELECT id,name FROM accounts")
+        .all()) as { id: string; name: string }[];
+      const actorName = (id: string) =>
+        accounts.find((a) => a.id === id)?.name || "Không có danh tính lịch sử";
+      const assignments = (await db
+        .prepare(
+          "SELECT w.*,e.name worker_name,p.name part_name FROM work_assignments w JOIN employees e ON e.id=w.employee_id LEFT JOIN order_work_items p ON p.id=w.work_item_id ORDER BY w.created_at",
+        )
+        .all()) as {
+        order_id: string;
+        stage: string;
+        part_name: string;
+        worker_name: string;
+        employee_id: string;
+        department_id: string;
+        active: number;
+        actor_id: string;
+        created_at: string;
+      }[];
+      sheet(
+        "Phân công",
+        [
+          "Mã đơn",
+          "Công đoạn",
+          "Phần việc",
+          "Thợ",
+          "Bộ phận khi phân công",
+          "Trạng thái",
+          "Người phân công",
+          "Thời gian",
+        ],
+        assignments
+          .filter(
+            (r) =>
+              ids.has(r.order_id) &&
+              permits(ctx.user, "export.data", {
+                departmentId: r.department_id,
+              }) &&
+              (!f.department_id || f.department_id === r.department_id) &&
+              (!f.employee_id || f.employee_id === r.employee_id) &&
+              (!f.stage || f.stage === r.stage) &&
+              inWindow(r.created_at),
+          )
+          .map((r) => [
+            r.order_id,
+            r.stage,
+            r.part_name || "Toàn công đoạn",
+            r.worker_name,
+            departmentName(r.department_id),
+            r.active ? "Đang giao" : "Đã ngừng",
+            actorName(r.actor_id),
+            r.created_at,
+          ]),
+      );
+      const operations = (await db
+        .prepare(
+          "SELECT r.*,COALESCE(e.name,a.name) worker_name,a.name actor_name FROM operation_records r LEFT JOIN employees e ON e.id=r.worker_id LEFT JOIN accounts a ON a.id=r.actor_id ORDER BY r.operation_date,r.id",
+        )
+        .all()) as {
+        order_id: string;
+        action: string;
+        color: string;
+        size: string;
+        quantity: number;
+        passed: number | null;
+        operation_date: string;
+        operation_time: string;
+        department_id: string;
+        worker_name: string;
+        worker_id: string;
+        actor_name: string;
+        notes: string;
+        reason: string;
+      }[];
+      sheet(
+        "Nhật ký nghiệp vụ",
+        [
+          "Ngày thực tế",
+          "Giờ thực tế",
+          "Mã đơn",
+          "Bộ phận khi thực hiện",
+          "Thao tác",
+          "Màu",
+          "Size",
+          "Số lượng",
+          "Số đạt",
+          "Thợ / người kiểm",
+          "Người ghi nhận",
+          "Nguyên nhân",
+          "Ghi chú",
+        ],
+        operations
+          .filter(
+            (r) =>
+              ids.has(r.order_id) &&
+              inWindow(r.operation_date) &&
+              permits(ctx.user, "export.data", {
+                departmentId: r.department_id || departmentFor(r.action),
+              }) &&
+              (!f.department_id ||
+                f.department_id ===
+                  (r.department_id || departmentFor(r.action))) &&
+              (!f.color || r.color === f.color) &&
+              (!f.size || r.size === f.size) &&
+              (!f.employee_id || r.worker_id === f.employee_id) &&
+              operationMatchesStage(r.action),
+          )
+          .map((r) => [
+            r.operation_date,
+            r.operation_time || "Chưa có giờ lịch sử",
+            r.order_id,
+            departmentName(r.department_id),
+            r.action,
+            r.color,
+            r.size,
+            r.quantity,
+            r.passed ?? "",
+            r.worker_name || "",
+            r.actor_name || "",
+            r.reason || "",
+            r.notes || "",
+          ]),
+      );
+      const deliveries = (await db
+        .prepare(
+          "SELECT s.*,e.name worker_name,a.name actor_name FROM shipments s JOIN employees e ON e.id=s.worker_id JOIN accounts a ON a.id=s.actor_id ORDER BY s.delivered_at",
+        )
+        .all()) as {
+        id: string;
+        code: string;
+        order_id: string;
+        worker_name: string;
+        worker_id: string;
+        actor_name: string;
+        delivered_at: Date;
+        packages: number;
+        reason: string;
+        notes: string;
+      }[];
+      const items = (await db
+        .prepare("SELECT * FROM shipment_items ORDER BY shipment_id,color,size")
+        .all()) as {
+        shipment_id: string;
+        color: string;
+        size: string;
+        quantity: number;
+      }[];
+      const eligible = deliveries.filter(
+        (r) =>
+          ids.has(r.order_id) &&
+          permits(ctx.user, "export.data", { departmentId: "delivery" }) &&
+          (!f.department_id || f.department_id === "delivery") &&
+          (!f.employee_id || r.worker_id === f.employee_id) &&
+          (!f.stage || departmentFor(f.stage) === "delivery") &&
+          items.some(
+            (item) =>
+              item.shipment_id === r.id &&
+              (!f.color || item.color === f.color) &&
+              (!f.size || item.size === f.size),
+          ) &&
+          inWindow(
+            new Intl.DateTimeFormat("en-CA", {
+              timeZone: "Asia/Ho_Chi_Minh",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+            }).format(r.delivered_at),
+          ),
+      );
+      const deliveryTime = (d: Date) =>
+        new Intl.DateTimeFormat("vi-VN", {
+          timeZone: "Asia/Ho_Chi_Minh",
+          dateStyle: "short",
+          timeStyle: "medium",
+        }).format(d);
+      sheet(
+        "Đợt giao",
+        [
+          "Mã đợt",
+          "Mã đơn",
+          "Ngày giờ giao (Việt Nam)",
+          "Người giao",
+          "Người ghi nhận",
+          "Bộ phận",
+          "Số kiện",
+          "Nguyên nhân",
+          "Ghi chú",
+        ],
+        eligible.map((r) => [
+          r.code,
+          r.order_id,
+          deliveryTime(r.delivered_at),
+          r.worker_name,
+          r.actor_name,
+          "Giao hàng",
+          r.packages,
+          r.reason || "",
+          r.notes,
+        ]),
+      );
+      sheet(
+        "Chi tiết đợt giao",
+        ["Mã đợt", "Mã đơn", "Màu", "Size", "Số lượng"],
+        items
+          .filter(
+            (r) =>
+              eligible.some((s) => s.id === r.shipment_id) &&
+              (!f.color || r.color === f.color) &&
+              (!f.size || r.size === f.size),
+          )
+          .map((r) => {
+            const parent = eligible.find((s) => s.id === r.shipment_id)!;
+            return [parent.code, parent.order_id, r.color, r.size, r.quantity];
+          }),
+      );
+    }
     if (dataset === "orders" || dataset === "delivery") {
       const permission = dataset === "orders" ? "orders.view" : "delivery.view";
       requirePermission(ctx, permission);
@@ -99,7 +342,7 @@ export async function GET(request: Request) {
           "Mã đơn",
           "Khách hàng",
           "Sản phẩm",
-          "Chuyền",
+          "Bộ phận",
           "Ngày nhận",
           "Hạn giao",
           "Công đoạn",
@@ -109,7 +352,7 @@ export async function GET(request: Request) {
           o.id,
           o.customer,
           o.product_name,
-          o.line_id,
+          departmentName(departmentFor(o.current_stage)),
           o.order_date,
           o.deadline,
           o.current_stage,
@@ -166,15 +409,28 @@ export async function GET(request: Request) {
           quantity: number;
           packages: number;
           worker_name: string;
+          worker_id: string;
           notes: string;
+          reason: string;
+          operation_time: string;
+          department_id: string;
+          actor_id: string;
         }[]
       ).filter(
         (r) =>
           orders.some((o) => o.id === r.order_id) &&
+          permits(ctx.user, "export.data", {
+            departmentId: r.department_id || departmentFor(r.action),
+          }) &&
+          (!f.department_id ||
+            f.department_id === (r.department_id || departmentFor(r.action))) &&
           (!f.from || r.operation_date >= f.from) &&
           (!f.to || r.operation_date <= f.to) &&
           (!f.color || r.color === f.color) &&
-          (!f.size || r.size === f.size),
+          (!f.size || r.size === f.size) &&
+          (!f.month || r.operation_date.slice(0, 7) === f.month) &&
+          (!f.employee_id || r.worker_id === f.employee_id) &&
+          operationMatchesStage(r.action),
       );
       sheet(
         "Lịch sử đóng và giao",
@@ -188,6 +444,10 @@ export async function GET(request: Request) {
           "Số kiện",
           "Người thực hiện",
           "Ghi chú",
+          "Giờ thực tế",
+          "Bộ phận khi thực hiện",
+          "Nguyên nhân",
+          "Mã người ghi nhận",
         ],
         records
           .filter((r) => ["pack", "deliver"].includes(r.action))
@@ -201,6 +461,10 @@ export async function GET(request: Request) {
             r.packages,
             r.worker_name,
             r.notes,
+            r.operation_time || "Chưa có giờ lịch sử",
+            departmentName(r.department_id),
+            r.reason || "",
+            r.actor_id || "",
           ]),
       );
     } else if (dataset === "qc") {
@@ -256,7 +520,7 @@ export async function GET(request: Request) {
       ).filter((l) =>
         permits(ctx.user, "export.data", {
           employeeId: l.employee_id,
-          lineId: l.line_id,
+          stage: l.stage,
         }),
       );
       sheet(
@@ -265,7 +529,7 @@ export async function GET(request: Request) {
           "Ngày",
           "Mã NV",
           "Nhân viên",
-          "Chuyền",
+          "Bộ phận",
           "Mã đơn",
           "Sản phẩm",
           "Màu",
@@ -276,12 +540,15 @@ export async function GET(request: Request) {
           "Thành tiền",
           "Phần việc",
           "SP hoàn thành công đoạn",
+          "Nguyên nhân",
+          "Mã người ghi nhận",
+          "Chuyền lịch sử",
         ],
         logs.map((l) => [
           l.log_date,
           l.employee_id,
           l.employee_name,
-          l.line_id,
+          departmentName(l.department_id || departmentFor(l.stage)),
           l.order_id,
           l.product_name,
           l.color,
@@ -290,18 +557,21 @@ export async function GET(request: Request) {
           l.quantity,
           permits(ctx.user, "payroll.view", {
             employeeId: l.employee_id,
-            lineId: l.line_id,
+            stage: l.stage,
           })
             ? l.unit_price
             : "",
           permits(ctx.user, "payroll.view", {
             employeeId: l.employee_id,
-            lineId: l.line_id,
+            stage: l.stage,
           })
             ? l.total_pay
             : "",
           l.work_item_name || "Toàn công đoạn",
           l.completed_quantity ?? l.quantity,
+          l.reason || "",
+          l.actor_id || "",
+          l.line_id ?? "",
         ]),
       );
       for (const [title, groupBy] of [
@@ -327,7 +597,7 @@ export async function GET(request: Request) {
               rows.every((r) =>
                 permits(ctx.user, "payroll.view", {
                   employeeId: r.employee_id,
-                  lineId: r.line_id,
+                  stage: r.stage,
                 }),
               )
                 ? rows.reduce((n, r) => n + r.total_pay, 0)
@@ -355,7 +625,7 @@ export async function GET(request: Request) {
               l.id === r.log_id &&
               permits(ctx.user, "payroll.view", {
                 employeeId: l.employee_id,
-                lineId: l.line_id,
+                stage: l.stage,
               }),
           ),
       );
@@ -396,7 +666,7 @@ export async function GET(request: Request) {
           [
             "Mã NV",
             "Nhân viên",
-            "Chuyền",
+            "Bộ phận",
             "Sản lượng",
             "Tiền lương",
             "Trạng thái",
@@ -406,7 +676,7 @@ export async function GET(request: Request) {
             .map((s) => [
               s.employee_id,
               s.employee_name,
-              s.line_id,
+              departmentName(s.department_id),
               s.total_qty,
               s.total_salary,
               p.isLocked ? "Đã chốt" : "Đang tính",

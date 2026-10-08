@@ -84,6 +84,20 @@ async function migrateBase() {
           protected: 0,
         },
         {
+          id: "manager",
+          name: "Trưởng phòng",
+          position: 70,
+          grants: [
+            ...business.filter(
+              (g) =>
+                !g.permission.startsWith("payroll.") &&
+                g.permission !== "rates.manage",
+            ),
+            { permission: "orders.override" as const, scope: "all" as const },
+          ],
+          protected: 0,
+        },
+        {
           id: "assistant",
           name: "Trợ lý sản xuất",
           position: 60,
@@ -103,6 +117,10 @@ async function migrateBase() {
                 "orders.move",
                 "production.view",
                 "production.create",
+                "qc.view",
+                "qc.manage",
+                "delivery.view",
+                "delivery.manage",
                 "export.data",
               ].includes(g.permission),
             )
@@ -119,6 +137,8 @@ async function migrateBase() {
               "orders.move",
               "qc.view",
               "qc.manage",
+              "production.view",
+              "production.create",
               "export.data",
             ].includes(g.permission),
           ),
@@ -363,6 +383,7 @@ export function initializeDatabase() {
           .prepare("INSERT INTO schema_migrations(version) VALUES (10)")
           .run();
       }
+      await (await import("./department-migration")).migrateDepartments();
     })()
     .catch((error) => {
       initialization = undefined;

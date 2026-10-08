@@ -1,4 +1,5 @@
-import { hasPermission } from "@/lib/permissions";
+import { requireDepartment } from "@/lib/server/departments";
+import { hasPermission, permits } from "@/lib/permissions";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import {
@@ -19,6 +20,7 @@ import {
 } from "@/lib/server/business";
 import { body, text } from "@/lib/server/validation";
 import { initializeDatabase } from "@/lib/server/migrate";
+import { copyRates, copyRatesSchema } from "@/lib/server/rates";
 
 export async function GET(request: Request) {
   try {
@@ -41,7 +43,12 @@ export async function GET(request: Request) {
             )
             .all()),
         ] as Rate[]
-      ).filter((r) => orders.some((o) => o.id === r.order_id)),
+      ).filter(
+        (r) =>
+          orders.some((o) => o.id === r.order_id) &&
+          (permits(ctx.user, "rates.manage", { stage: r.stage }) ||
+            permits(ctx.user, "payroll.view", { stage: r.stage })),
+      ),
     );
   } catch (e) {
     return failure(e);
@@ -52,6 +59,13 @@ export async function POST(request: Request) {
     await initializeDatabase();
     const ctx = await authenticate(request);
     guardWrite(request, ctx);
+    const raw = await body(request);
+    if (raw && typeof raw === "object" && "copy_from" in raw) {
+      const copy = copyRatesSchema.parse(raw);
+      return ok(
+        await idempotent(ctx, request, copy, () => copyRates(ctx, copy)),
+      );
+    }
     const input = z
       .object({
         order_id: text,
@@ -82,7 +96,8 @@ export async function POST(request: Request) {
           .optional(),
       })
       .strict()
-      .parse(await body(request));
+      .parse(raw);
+    requireDepartment(ctx, input.stage);
     const order = await orderFor(ctx, input.order_id, "rates.manage");
     return ok(
       await idempotent(ctx, request, input, async () => {
@@ -126,6 +141,15 @@ export async function POST(request: Request) {
             422,
             "Công đoạn đã có sản lượng. Không đổi danh sách phần việc để giữ lịch sử và tiến độ; chỉ sửa đơn giá cho lần sau.",
           );
+          ensure(
+            !(await db
+              .prepare(
+                "SELECT 1 FROM work_assignments WHERE order_id=? AND stage=? LIMIT 1",
+              )
+              .get(order.id, input.stage)),
+            422,
+            "Phần việc đã có phân công; giữ danh sách để bảo toàn lịch sử.",
+          );
           await db
             .prepare(
               "DELETE FROM order_work_items WHERE order_id=? AND stage=?",
@@ -145,6 +169,7 @@ export async function POST(request: Request) {
             "Cấu hình phần việc",
             `${order.id} ${input.stage}: ${JSON.stringify(input.work_items)}`,
             order.line_id,
+            "management",
           );
           return input;
         }
@@ -167,6 +192,7 @@ export async function POST(request: Request) {
             "Đơn giá phần việc",
             `${order.id} ${input.stage} #${input.work_item_id}: ${input.unit_price}`,
             order.line_id,
+            "management",
           );
           return input;
         }
@@ -189,6 +215,7 @@ export async function POST(request: Request) {
           "Cấu hình đơn giá",
           `${input.order_id} ${input.stage}: ${input.unit_price}`,
           order.line_id,
+          "management",
         );
         return input;
       }),

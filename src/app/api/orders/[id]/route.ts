@@ -3,6 +3,8 @@ import {
   orderFor,
   moveSchema,
   moveOrder,
+  prepareSchema,
+  prepareOrder,
   idempotent,
 } from "@/lib/server/business";
 import { body } from "@/lib/server/validation";
@@ -34,7 +36,16 @@ export async function PATCH(
     const { id } = await params;
     const ctx = await authenticate(request);
     guardWrite(request, ctx);
-    const input = moveSchema.parse(await body(request));
+    const raw = await body(request);
+    if (raw && typeof raw === "object" && "prepare" in raw) {
+      const input = prepareSchema.parse(raw);
+      return ok(
+        await idempotent(ctx, request, input, () =>
+          prepareOrder(ctx, id, input.version),
+        ),
+      );
+    }
+    const input = moveSchema.parse(raw);
     return ok(
       await idempotent(
         ctx,

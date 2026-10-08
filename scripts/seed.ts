@@ -6,11 +6,13 @@ async function main() {
   const { db } = await import("../src/lib/db");
   try {
     const { seedSampleData } = await import("./sample-data");
-    await seedSampleData();
+    const created = await seedSampleData();
     const { migrate } = await import("../src/lib/server/migrate");
     await migrate();
     console.log(
-      "Dữ liệu mẫu đã seed vào PostgreSQL; dữ liệu đang có được giữ nguyên.",
+      created
+        ? "Đã seed hồ sơ và đơn mẫu theo 6 bộ phận vào PostgreSQL."
+        : "Database đã có dữ liệu; không thêm hay thay đổi dữ liệu mẫu.",
     );
   } finally {
     await db.close();

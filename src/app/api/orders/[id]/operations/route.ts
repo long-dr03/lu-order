@@ -1,7 +1,7 @@
 import { authenticate, guardWrite, ok, failure } from "@/lib/server/auth";
 import {
-  operationSchema,
-  recordOperation,
+  operationInputSchema,
+  recordOperations,
   idempotent,
 } from "@/lib/server/business";
 import { body } from "@/lib/server/validation";
@@ -16,13 +16,13 @@ export async function POST(
     const { id } = await params;
     const ctx = await authenticate(request);
     guardWrite(request, ctx);
-    const input = operationSchema.parse(await body(request));
+    const input = operationInputSchema.parse(await body(request));
     return ok(
       await idempotent(
         ctx,
         request,
         input,
-        async () => await recordOperation(ctx, id, input),
+        async () => await recordOperations(ctx, id, input),
       ),
     );
   } catch (e) {

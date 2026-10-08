@@ -1,4 +1,5 @@
 "use client";
+import { departmentFor, departmentAccess } from "@/lib/departments";
 import {
   ProductPhoto,
   ProductImagePicker,
@@ -94,7 +95,7 @@ export function OrderWorkspace({
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
-  const [line, setLine] = useState("all");
+  void lines;
   const view = useSyncExternalStore(
     subscribeView,
     readView,
@@ -104,7 +105,7 @@ export function OrderWorkspace({
   const [exceptionEnabled, setExceptionEnabled] = useState(false);
   const [reason, setReason] = useState("");
   const [columnLimits, setColumnLimits] = useState<Record<string, number>>({});
-  const [group, setGroup] = useState<"line" | "stage">("stage");
+
   const [showEmptyColumns, setShowEmptyColumns] = useState(false);
   const [move, setMove] = useState<{
     order: Order;
@@ -115,7 +116,6 @@ export function OrderWorkspace({
   const [busy, setBusy] = useState(false);
   const filtered = orders.filter(
     (o) =>
-      (line === "all" || o.line_id === Number(line)) &&
       (status === "all" ||
         (status === "running"
           ? o.status !== "completed"
@@ -145,17 +145,13 @@ export function OrderWorkspace({
     useSensor(KeyboardSensor),
   );
   function problem(order: Order, target: string, mode: "line" | "stage") {
-    const permission = mode === "line" ? "orders.assign" : "orders.move";
+    if (mode !== "stage")
+      return "Đơn đi qua nhiều bộ phận; không còn phân chuyền.";
     if (
-      !permits(session.user, permission, { lineId: order.line_id }) ||
-      (mode === "line" &&
-        !permits(session.user, permission, { lineId: Number(target) }))
+      departmentFor(target) === "management" &&
+      !departmentAccess(session.user, "management")
     )
-      return "Bạn không có quyền chuyển đơn đến vị trí này.";
-    if (mode === "line")
-      return order.status === "completed"
-        ? "Đơn đã hoàn thành không thể đổi chuyền."
-        : null;
+      return "Khâu chuẩn bị và hoàn thành thuộc Quản lý.";
     const permissionProblem = transitionPermissionProblem(session.user, order);
     if (permissionProblem) return permissionProblem;
     if (exceptionEnabled) {
@@ -180,12 +176,8 @@ export function OrderWorkspace({
     const order = orders.find((o) => o.id === event.active.id);
     if (!order) return;
     const target = String(event.over.id);
-    if (
-      target ===
-      (group === "line" ? String(order.line_id) : order.current_stage)
-    )
-      return;
-    requestMove(order, target, group);
+    if (target === order.current_stage) return;
+    requestMove(order, target, "stage");
   }
   async function confirmMove() {
     if (!move) return;
@@ -196,12 +188,8 @@ export function OrderWorkspace({
         `/api/orders/${move.order.id}`,
         {
           version: move.order.version,
-          ...(move.mode === "line"
-            ? { line_id: Number(move.target) }
-            : {
-                stage: move.target,
-                ...(exceptionEnabled ? { exception: true, reason } : {}),
-              }),
+          stage: move.target,
+          ...(exceptionEnabled ? { exception: true, reason } : {}),
         },
         "PATCH",
       );
@@ -214,10 +202,7 @@ export function OrderWorkspace({
       setBusy(false);
     }
   }
-  const columns =
-    group === "line"
-      ? lines.map((l) => ({ id: String(l.id), label: l.name }))
-      : LUUTA_STAGES.map((s) => ({ id: s.key, label: s.label }));
+  const columns = LUUTA_STAGES.map((s) => ({ id: s.key, label: s.label }));
   const listPage = Math.min(page, Math.max(1, Math.ceil(filtered.length / 25)));
   const visible = filtered.slice((listPage - 1) * 25, listPage * 25);
   const stageChoices = (order: Order) => (
@@ -225,9 +210,7 @@ export function OrderWorkspace({
       className="order-stage-select"
       aria-label={`Chuyển bước ${order.id}`}
       value=""
-      disabled={
-        !permits(session.user, "orders.move", { lineId: order.line_id })
-      }
+      disabled={!!transitionPermissionProblem(session.user, order)}
       onChange={(e) => requestMove(order, e.target.value, "stage")}
     >
       <option value="">Chuyển bước…</option>
@@ -249,7 +232,6 @@ export function OrderWorkspace({
     dataset: "orders",
     search,
     status,
-    ...(line !== "all" ? { line_id: line } : {}),
   });
   return (
     <section className="panel order-workspace">
@@ -309,21 +291,6 @@ export function OrderWorkspace({
             <option value="da_giao_du">Đã giao đủ</option>
             <option value="completed">Hoàn thành</option>
           </select>
-          <select
-            aria-label="Tổ phụ trách"
-            value={line}
-            onChange={(e) => {
-              setLine(e.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="all">Tất cả tổ phụ trách</option>
-            {lines.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
         </div>
         <div className="segmented">
           <button
@@ -342,47 +309,38 @@ export function OrderWorkspace({
           </button>
         </div>
       </div>
-      {(view === "list" || group === "stage") &&
-        orders.some((o) =>
-          permits(session.user, "orders.override", { lineId: o.line_id }),
-        ) && (
-          <div className="padded order-exception-toggle">
-            <label className="check-label">
-              <input
-                type="checkbox"
-                checked={exceptionEnabled}
-                onChange={(e) => setExceptionEnabled(e.target.checked)}
-              />{" "}
-              Cho phép quay lại / nhảy bước (ngoại lệ)
-            </label>
-            {exceptionEnabled && (
-              <p className="muted">
-                Bắt buộc ghi lý do; giữ nguyên số lượng và tiền công. Hoàn thành
-                vẫn cần giao đủ.
-              </p>
-            )}
-          </div>
-        )}
+      {orders.some((o) =>
+        permits(session.user, "orders.override", { lineId: o.line_id }),
+      ) && (
+        <div className="padded order-exception-toggle">
+          <label className="check-label">
+            <input
+              type="checkbox"
+              checked={exceptionEnabled}
+              onChange={(e) => setExceptionEnabled(e.target.checked)}
+            />{" "}
+            Cho phép quay lại / nhảy bước (ngoại lệ)
+          </label>
+          {exceptionEnabled && (
+            <p className="muted">
+              Bắt buộc ghi lý do; giữ nguyên số lượng và tiền công. Hoàn thành
+              vẫn cần giao đủ.
+            </p>
+          )}
+        </div>
+      )}
       <ErrorNotice error={error} />
       {view === "board" ? (
         <>
           <div className="board-heading">
             <span>Kéo tay nắm để chuyển đơn, hoặc dùng “Chuyển đến…”</span>
-            <select
-              aria-label="Nhóm Kanban"
-              value={group}
-              onChange={(e) => setGroup(e.target.value as "line" | "stage")}
-            >
-              <option value="line">Theo tổ phụ trách</option>
-              <option value="stage">Theo bước sản xuất</option>
-            </select>
           </div>
-          {group === "stage" && (
+          {
             <p className="padded muted">
-              QC đạt đủ → Đóng gói. Chỉ chuyển Sửa hàng → QC lại khi có sản phẩm
-              lỗi.
+              QC đạt đến đâu được đóng gói đến đó. Các bộ phận ghi số lượng thực
+              tế song song; Kanban là bước điều phối chính.
             </p>
-          )}
+          }
           <DndContext
             sensors={sensors}
             onDragEnd={drop}
@@ -413,55 +371,34 @@ export function OrderWorkspace({
                   key={c.id}
                   id={c.id}
                   label={c.label}
-                  orders={filtered.filter(
-                    (o) =>
-                      (group === "line"
-                        ? String(o.line_id)
-                        : o.current_stage) === c.id,
-                  )}
-                  problem={(o) => problem(o, c.id, group)}
+                  orders={filtered.filter((o) => o.current_stage === c.id)}
+                  problem={(o) => problem(o, c.id, "stage")}
                 >
                   {filtered
-                    .filter(
-                      (o) =>
-                        (group === "line"
-                          ? String(o.line_id)
-                          : o.current_stage) === c.id,
-                    )
-                    .slice(0, columnLimits[`${group}:${c.id}`] || 10)
+                    .filter((o) => o.current_stage === c.id)
+                    .slice(0, columnLimits[`stage:${c.id}`] || 10)
                     .map((o) => (
                       <DragCard
                         key={o.id}
                         order={o}
                         disabled={
-                          !permits(
-                            session.user,
-                            group === "line" ? "orders.assign" : "orders.move",
-                            { lineId: o.line_id },
-                          )
+                          !!transitionPermissionProblem(session.user, o)
                         }
                         onOpen={() => onOpen(o)}
                         columns={columns}
-                        current={
-                          group === "line" ? String(o.line_id) : o.current_stage
-                        }
-                        onMove={(target) => requestMove(o, target, group)}
-                        problem={(target) => problem(o, target, group)}
+                        current={o.current_stage}
+                        onMove={(target) => requestMove(o, target, "stage")}
+                        problem={(target) => problem(o, target, "stage")}
                       />
                     ))}
-                  {filtered.filter(
-                    (o) =>
-                      (group === "line"
-                        ? String(o.line_id)
-                        : o.current_stage) === c.id,
-                  ).length > (columnLimits[`${group}:${c.id}`] || 10) && (
+                  {filtered.filter((o) => o.current_stage === c.id).length >
+                    (columnLimits[`stage:${c.id}`] || 10) && (
                     <button
                       className="action secondary"
                       onClick={() =>
                         setColumnLimits((old) => ({
                           ...old,
-                          [`${group}:${c.id}`]:
-                            (old[`${group}:${c.id}`] || 10) + 10,
+                          [`stage:${c.id}`]: (old[`stage:${c.id}`] || 10) + 10,
                         }))
                       }
                     >
@@ -481,7 +418,7 @@ export function OrderWorkspace({
                 <tr>
                   <th>Mã đơn</th>
                   <th>Sản phẩm / khách</th>
-                  <th>Tổ phụ trách</th>
+                  <th>Đã giao</th>
                   <th>Số lượng</th>
                   <th>Hạn giao</th>
                   <th>Công đoạn</th>
@@ -503,10 +440,28 @@ export function OrderWorkspace({
                         <div>
                           <strong>{o.product_name}</strong>
                           <span className="table-subtitle">{o.customer}</span>
+                          {o.reason && (
+                            <span
+                              style={{
+                                display: "inline-block",
+                                fontSize: 14,
+                                color: "#92400e",
+                                background: "#fef3c7",
+                                padding: "1px 6px",
+                                borderRadius: 4,
+                                marginTop: 2,
+                              }}
+                            >
+                              Lý do: {o.reason}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </td>
-                    <td>{o.line_id}</td>
+                    <td>
+                      {o.variants?.reduce((n, v) => n + v.delivered_qty, 0)}/
+                      {o.total_quantity}
+                    </td>
                     <td>{o.total_quantity}</td>
                     <td>{o.deadline.split("-").reverse().join("/")}</td>
                     <td>
@@ -553,6 +508,20 @@ export function OrderWorkspace({
                       {o.product_name}
                     </button>
                     <p>{o.customer}</p>
+                    {o.reason && (
+                      <p
+                        style={{
+                          fontSize: 14,
+                          color: "#92400e",
+                          background: "#fef3c7",
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                          margin: "2px 0 0",
+                        }}
+                      >
+                        Lý do: {o.reason}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <p className="mobile-order-stage">
@@ -560,9 +529,7 @@ export function OrderWorkspace({
                   <span> · {Math.round(o.progress)}% hoàn thành</span>
                 </p>
                 <div className="muted">
-                  <span>
-                    Chuyền {o.line_id} · {o.total_quantity} sản phẩm
-                  </span>
+                  <span>{o.total_quantity} sản phẩm</span>
                   <span>Hạn {o.deadline.split("-").reverse().join("/")}</span>
                 </div>
                 <div className="mobile-order-actions">
@@ -598,7 +565,7 @@ export function OrderWorkspace({
         title="Xác nhận chuyển đơn"
         description={
           move
-            ? `${move.order.id} → ${move.mode === "line" ? `Chuyền ${move.target}` : LUUTA_STAGES.find((s) => s.key === move.target)?.label}`
+            ? `${move.order.id} → ${LUUTA_STAGES.find((s) => s.key === move.target)?.label}`
             : undefined
         }
       >
@@ -702,6 +669,24 @@ function DragCard({
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({ id: order.id, data: { order }, disabled });
+  const quantities = (order.variants || []).reduce(
+    (n, v) => ({
+      cut: n.cut + v.cut_qty,
+      sewn: n.sewn + v.sewn_qty,
+      qc: n.qc + v.qc_passed_qty,
+      packed: n.packed + v.packed_qty,
+      delivered: n.delivered + v.delivered_qty,
+    }),
+    { cut: 0, sewn: 0, qc: 0, packed: 0, delivered: 0 },
+  );
+  const concurrent =
+    [
+      order.total_quantity - quantities.cut,
+      quantities.cut - quantities.sewn,
+      quantities.sewn - quantities.qc,
+      quantities.qc - quantities.packed,
+      quantities.packed - quantities.delivered,
+    ].filter((n) => n > 0).length > 1;
   return (
     <article
       ref={setNodeRef}
@@ -728,10 +713,31 @@ function DragCard({
       <ProductPhoto url={order.image_url} name={order.product_name} large />
       <h4>{order.product_name}</h4>
       <p>{order.customer}</p>
+      {order.reason && (
+        <p
+          style={{
+            fontSize: 14,
+            color: "#92400e",
+            background: "#fef3c7",
+            padding: "2px 6px",
+            borderRadius: 4,
+            margin: "2px 0 6px",
+          }}
+        >
+          Lý do: {order.reason}
+        </p>
+      )}
       <Status order={order} />
+      <p className="muted">
+        Cắt {quantities.cut} · May {quantities.sewn} · QC đạt {quantities.qc} ·
+        Đóng {quantities.packed} · Giao {quantities.delivered}
+      </p>
+      {concurrent && (
+        <p className="muted">Đang xử lý song song nhiều bộ phận</p>
+      )}
       {["qc", "qc_lai"].includes(order.current_stage) &&
         transitionProblem(order, "dong_goi") === null && (
-          <p>QC đã đạt đủ · Bước tiếp theo: Đóng gói</p>
+          <p>Có lượng QC đạt · Có thể đóng gói phần này</p>
         )}
       <p className="muted">
         {order.total_quantity} sản phẩm ·{" "}
@@ -756,6 +762,7 @@ function DragCard({
     </article>
   );
 }
+const ORDER_SIZES = ["XS", "S", "M", "L", "XL", "XXL"];
 export function CreateOrderForm({
   api,
   session,
@@ -772,7 +779,7 @@ export function CreateOrderForm({
   onSaved: () => Promise<void>;
 }) {
   const orderCode = nextCode || "";
-  const [selectedLine, setSelectedLine] = useState(lines[0]?.id || 1);
+  void lines;
   const [productCode] = useState(
     () => `SP-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
   );
@@ -795,11 +802,7 @@ export function CreateOrderForm({
     try {
       let url = imageUrl;
       if (imageFile && !url) {
-        url = await uploadProductImage(
-          imageFile,
-          session,
-          Number(form.get("line_id")),
-        );
+        url = await uploadProductImage(imageFile, session);
         setImageUrl(url);
       }
       await api("/api/orders", {
@@ -811,9 +814,10 @@ export function CreateOrderForm({
         product_code: form.get("product_code"),
         order_date: form.get("order_date"),
         deadline: form.get("deadline"),
-        line_id: Number(form.get("line_id")),
+
         priority: form.get("priority"),
         notes: form.get("notes"),
+        reason: String(form.get("reason") || "") || undefined,
         variants,
       });
       await onSaved();
@@ -868,27 +872,17 @@ export function CreateOrderForm({
             defaultValue={productCode}
           />
         </Field>
-        <Field label="Tổ phụ trách">
-          <select
-            name="line_id"
-            value={selectedLine}
-            onChange={(e) => setSelectedLine(Number(e.target.value))}
-          >
-            {lines.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
-        </Field>
         <Field
-          label="Người phụ trách"
-          hint="Đầu mối theo dõi đơn; nhiều nhân viên vẫn có thể cùng ghi nhận công việc."
+          label="Người điều phối đơn"
+          hint="Đầu mối quản lý; thợ được phân công riêng theo công đoạn."
         >
-          <select name="responsible_id" key={selectedLine}>
+          <select name="responsible_id">
             <option value="">Chưa phân công cá nhân</option>
             {employees
-              .filter((e) => e.line_id === selectedLine)
+              .filter(
+                (e) =>
+                  e.active !== 0 && e.department_ids?.includes("management"),
+              )
               .map((e) => (
                 <option value={e.id} key={e.id}>
                   {e.name}
@@ -915,14 +909,40 @@ export function CreateOrderForm({
         <div className="variant-row variant-card" key={i}>
           <div className="variant-card-heading">
             <strong>Biến thể {i + 1}</strong>{" "}
-            <Action
-              type="button"
-              tone="secondary"
-              disabled={variants.length === 1}
-              onClick={() => setVariants(variants.filter((_, n) => n !== i))}
-            >
-              Xóa biến thể
-            </Action>
+            <div className="inline-actions">
+              <Action
+                type="button"
+                tone="secondary"
+                disabled={!v.color.trim()}
+                onClick={() => {
+                  const used = variants
+                    .filter((x) => x.color === v.color)
+                    .map((x) => x.size);
+                  const size =
+                    ORDER_SIZES.slice(ORDER_SIZES.indexOf(v.size) + 1).find(
+                      (s) => !used.includes(s),
+                    ) ||
+                    ORDER_SIZES.find((s) => !used.includes(s)) ||
+                    v.size;
+                  setVariants([
+                    ...variants.slice(0, i + 1),
+                    { ...v, colors: [...v.colors], size },
+                    ...variants.slice(i + 1),
+                  ]);
+                }}
+              >
+                <Plus size={18} />
+                Thêm size cùng màu
+              </Action>
+              <Action
+                type="button"
+                tone="secondary"
+                disabled={variants.length === 1}
+                onClick={() => setVariants(variants.filter((_, n) => n !== i))}
+              >
+                Xóa biến thể
+              </Action>
+            </div>
           </div>
           <div className="field variant-colors">
             <span>Màu / phối màu</span>
@@ -1007,8 +1027,19 @@ export function CreateOrderForm({
       <p className="muted">
         Tổng: {variants.reduce((n, v) => n + v.quantity, 0)} sản phẩm
       </p>
-      <Field label="Ghi chú">
-        <textarea name="notes" maxLength={2000} />
+      <Field label="Ghi chú đơn hàng">
+        <textarea
+          name="notes"
+          maxLength={2000}
+          placeholder="Ghi chú quy cách, phụ liệu..."
+        />
+      </Field>
+      <Field label="Nguyên nhân / Lý do ghi chú (nếu có)">
+        <textarea
+          name="reason"
+          maxLength={2000}
+          placeholder="VD: Khách cần gấp đợt 1, đơn hàng có vải khó may, thiếu phụ liệu..."
+        />
       </Field>
       <div className="mobile-form-footer">
         <Action type="submit" busy={busy} className="mobile-form-submit">

@@ -58,18 +58,12 @@ export async function POST(request: Request) {
     } catch {
       throw new AppError(422, "Dữ liệu tải ảnh không hợp lệ.");
     }
-    const line = Number(form.get("line_id"));
     ensure(
-      Number.isInteger(line) && line >= 1 && line <= 5,
-      422,
-      "Chuyền không hợp lệ.",
-    );
-    ensure(
-      permits(ctx.user, "orders.create", { lineId: line }) ||
-        permits(ctx.user, "orders.edit", { lineId: line }) ||
-        permits(ctx.user, "qc.manage", { lineId: line }),
+      permits(ctx.user, "orders.create", { stage: "nhan_don" }) ||
+        permits(ctx.user, "orders.edit", { stage: "nhan_don" }) ||
+        permits(ctx.user, "qc.manage", { stage: "QC" }),
       403,
-      "Bạn không có quyền thêm ảnh trong chuyền này.",
+      "Bạn không được thêm ảnh cho nghiệp vụ này.",
     );
     const file = form.get("file");
     ensure(
@@ -136,7 +130,7 @@ export async function POST(request: Request) {
       await db
         .prepare("INSERT INTO product_images VALUES (?,?,?,?)")
         .run(id, ctx.user.id, data, Date.now());
-      await audit(ctx, "Tải ảnh sản phẩm", "Ảnh mẫu sản phẩm", line);
+      await audit(ctx, "Tải ảnh sản phẩm", "Ảnh mẫu sản phẩm");
     })();
     return ok({ url }, 201);
   } catch (e) {

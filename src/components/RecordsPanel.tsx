@@ -1,6 +1,7 @@
 "use client";
 import { PendingPackingPanel } from "./PendingPackingPanel";
 import { Pagination } from "./Pagination";
+import { DEPARTMENTS, departmentFor, departmentName } from "@/lib/departments";
 import { availableOperations } from "@/lib/workflow";
 import { ProductPhoto } from "./ProductImage";
 import { useEffect, useState } from "react";
@@ -42,6 +43,7 @@ export function RecordsPanel({
   employees: Employee[];
   lines: Line[];
 }) {
+  void lines;
   const personal =
     !!session.user.employee_id &&
     session.user.roles.length > 0 &&
@@ -77,7 +79,7 @@ export function RecordsPanel({
     ...(from ? { from } : {}),
     ...(to ? { to } : {}),
     ...(employee ? { employee_id: employee } : {}),
-    ...(line ? { line_id: line } : {}),
+    ...(line ? { department_id: line } : {}),
     ...(stage ? { stage } : {}),
   }).toString();
   useEffect(() => {
@@ -122,11 +124,11 @@ export function RecordsPanel({
     }
   }
   const allowedEmployees = employees.filter((e) =>
-    [e.line_id, ...(e.assigned_line_ids || [])].some((lineId) =>
+    (e.department_ids || []).some((departmentId) =>
       permits(
         session.user,
         mode === "payroll" ? "payroll.view" : "production.view",
-        { employeeId: e.id, lineId },
+        { employeeId: e.id, departmentId },
       ),
     ),
   );
@@ -225,7 +227,10 @@ export function RecordsPanel({
               ))}
             </select>
           </Field>
-          <Field label="Sản phẩm / mã đơn / mã hàng" className="filter-product-field">
+          <Field
+            label="Sản phẩm / mã đơn / mã hàng"
+            className="filter-product-field"
+          >
             <input
               value={product}
               onChange={(e) => setProduct(e.target.value)}
@@ -292,10 +297,10 @@ export function RecordsPanel({
               <Field label="Size">
                 <input value={size} onChange={(e) => setSize(e.target.value)} />
               </Field>
-              <Field label="Chuyền">
+              <Field label="Bộ phận">
                 <select value={line} onChange={(e) => setLine(e.target.value)}>
-                  <option value="">Tất cả chuyền được cấp</option>
-                  {lines.map((l) => (
+                  <option value="">Tất cả bộ phận</option>
+                  {DEPARTMENTS.map((l) => (
                     <option key={l.id} value={l.id}>
                       {l.name}
                     </option>
@@ -376,7 +381,7 @@ export function RecordsPanel({
                   <thead>
                     <tr>
                       <th>Nhân viên</th>
-                      <th>Chuyền</th>
+                      <th>Bộ phận thực hiện</th>
                       <th>Lượt công việc</th>
                       <th>Tiền lương</th>
                     </tr>
@@ -385,7 +390,7 @@ export function RecordsPanel({
                     {payroll.summary
                       .slice((summaryPage - 1) * 25, summaryPage * 25)
                       .map((s) => (
-                        <tr key={`${s.employee_id}-${s.line_id}`}>
+                        <tr key={`${s.employee_id}-${s.department_id}`}>
                           <td data-label="Nhân viên">
                             <button
                               className="text-button"
@@ -394,9 +399,8 @@ export function RecordsPanel({
                               {s.employee_name}
                             </button>
                           </td>
-                          <td data-label="Chuyền">
-                            {lines.find((l) => l.id === s.line_id)?.name ||
-                              `Chuyền ${s.line_id}`}
+                          <td data-label="Bộ phận thực hiện">
+                            {departmentName(s.department_id)}
                           </td>
                           <td data-label="Lượt công việc">
                             {s.total_qty.toLocaleString("vi-VN")}
@@ -631,7 +635,7 @@ export function OperationsPanel({
       (mode === "qc"
         ? ["may", "qc", "sua_hang", "qc_lai"].includes(o.current_stage)
         : ["dong_goi", "giao_hang", "hoan_thanh"].includes(o.current_stage)) &&
-      (!line || o.line_id === Number(line)) &&
+      (!line || line === departmentFor(o.current_stage)) &&
       `${o.id} ${o.customer} ${o.product_name}`
         .toLowerCase()
         .includes(search.toLowerCase()),
@@ -653,24 +657,24 @@ export function OperationsPanel({
           }}
         />
         <select
-          aria-label="Lọc chuyền"
+          aria-label="Lọc bộ phận"
           value={line}
           onChange={(e) => {
             setLine(e.target.value);
             setPage(1);
           }}
         >
-          <option value="">Tất cả chuyền</option>
-          {[1, 2, 3, 4, 5].map((id) => (
-            <option key={id} value={id}>
-              Chuyền {id}
+          <option value="">Tất cả bộ phận</option>
+          {DEPARTMENTS.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
             </option>
           ))}
         </select>
         {hasPermission(session.user, "export.data") && (
           <a
             className="action secondary"
-            href={`/api/export/excel?dataset=${mode}&${new URLSearchParams({ search, status: mode === "qc" ? "cho_qc" : "waiting_delivery", ...(line ? { line_id: line } : {}) })}`}
+            href={`/api/export/excel?dataset=${mode}&${new URLSearchParams({ search, ...(line ? { department_id: line } : {}) })}`}
           >
             <Download size={18} />
             Excel
@@ -685,7 +689,9 @@ export function OperationsPanel({
               <div className="operation-card-info">
                 <div className="card-top">
                   <strong>{o.id}</strong>
-                  <span className="muted">Chuyền {o.line_id}</span>
+                  <span className="muted">
+                    {departmentName(departmentFor(o.current_stage))}
+                  </span>
                 </div>
                 <h3>{o.product_name}</h3>
                 <p className="muted">{o.customer}</p>

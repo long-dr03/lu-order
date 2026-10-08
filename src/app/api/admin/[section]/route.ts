@@ -1,5 +1,13 @@
+import { idempotent } from "@/lib/server/business";
+import { DEPARTMENTS, isAdmin } from "@/lib/departments";
+import {
+  departmentStaff,
+  saveStaff,
+  staffSchema,
+  departmentIdSchema,
+} from "@/lib/server/departments";
 import { z } from "zod";
-import { db, getEmployees, getLines } from "@/lib/db";
+import { db, getEmployees } from "@/lib/db";
 import {
   PERMISSIONS,
   scopesForPermission,
@@ -19,7 +27,7 @@ import {
   audit,
   randomUUID,
 } from "@/lib/server/auth";
-import { body, text, line, password } from "@/lib/server/validation";
+import { body, text, password } from "@/lib/server/validation";
 import { initializeDatabase } from "@/lib/server/migrate";
 
 export async function GET(
@@ -30,9 +38,21 @@ export async function GET(
     await initializeDatabase();
     const ctx = await authenticate(request);
     const { section } = await params;
+    ensure(
+      ["roles", "users", "employees"].includes(section),
+      404,
+      "Không tìm thấy.",
+    );
+    if (section === "employees")
+      return ok({
+        departments: DEPARTMENTS,
+        employees: await departmentStaff(ctx),
+        users: [],
+        roles: [],
+      });
     requireAdmin(ctx, section === "roles" ? "roles.manage" : "users.manage");
-    ensure(["roles", "users"].includes(section), 404, "Không tìm thấy.");
     return ok({
+      departments: DEPARTMENTS,
       roles: await getRoles(),
       users:
         section === "users"
@@ -45,7 +65,6 @@ export async function GET(
             )
           : [],
       employees: await getEmployees(),
-      lines: await getLines(),
     });
   } catch (e) {
     return failure(e);
@@ -60,6 +79,17 @@ export async function POST(
     const ctx = await authenticate(request);
     guardWrite(request, ctx);
     const { section } = await params;
+    ensure(
+      ["roles", "users", "employees"].includes(section),
+      404,
+      "Không tìm thấy.",
+    );
+    if (section === "employees") {
+      const input = staffSchema.parse(await body(request));
+      return ok(
+        await idempotent(ctx, request, input, () => saveStaff(ctx, input)),
+      );
+    }
     requireAdmin(ctx, section === "roles" ? "roles.manage" : "users.manage");
     const top = Math.max(...ctx.actor.roles.map((r) => r.position), 0);
     if (section === "roles") {
@@ -77,7 +107,7 @@ export async function POST(
                     ...Grant["permission"][],
                   ],
                 ),
-                scope: z.enum(["self", "lines", "all"]),
+                scope: z.enum(["self", "departments", "all"]),
               }),
             )
             .max(30),
@@ -154,8 +184,7 @@ export async function POST(
         name: text.optional(),
         employeeId: z.string().nullable().optional(),
         createEmployee: z.boolean().optional(),
-        lineIds: z.array(line).max(5).optional(),
-        homeLineId: line.optional(),
+        departmentIds: z.array(departmentIdSchema).min(1).max(6).optional(),
         roleIds: z.array(z.string()).min(1).max(20).optional(),
         temporaryPassword: password.optional(),
       })
@@ -220,6 +249,12 @@ export async function POST(
           .run(hashPassword(input.temporaryPassword), target.id);
       } else if (input.action === "lock" || input.action === "unlock") {
         ensure(
+          input.action !== "unlock" ||
+            target.roles.some((r) => r.id !== "worker"),
+          422,
+          "Thợ không cần tài khoản đăng nhập. Gán vai trò quản lý trước khi mở khóa.",
+        );
+        ensure(
           input.action === "lock" || target.status === "locked",
           422,
           "Tài khoản chưa bị khóa.",
@@ -229,9 +264,9 @@ export async function POST(
           .run(input.action === "lock" ? "locked" : "active", target.id);
       } else {
         ensure(
-          input.roleIds?.length && input.lineIds?.length,
+          input.roleIds?.length && input.departmentIds?.length,
           422,
-          "Chọn vai trò và ít nhất một chuyền.",
+          "Chọn vai trò người quản lý và ít nhất một bộ phận.",
         );
         ensure(
           !target.employee_id ||
@@ -254,77 +289,58 @@ export async function POST(
             .run(
               employeeId,
               input.name || target.name,
-              input.homeLineId || input.lineIds[0],
-              "Nhân viên",
+              null,
+              "Người phụ trách",
               "",
             );
         }
         ensure(
           employeeId &&
             (await db
-              .prepare("SELECT 1 FROM employees WHERE id=?")
+              .prepare("SELECT 1 FROM employees WHERE id=? AND active=1")
               .get(employeeId)),
           422,
-          "Liên kết tài khoản với nhân viên.",
+          "Liên kết tài khoản với hồ sơ đang hoạt động.",
         );
         const used = await db
           .prepare("SELECT id FROM accounts WHERE employee_id=? AND id!=?")
           .get(employeeId, target.id);
         ensure(!used, 422, "Nhân viên đã liên kết tài khoản khác.");
-        const emp = (await db
-          .prepare("SELECT line_id FROM employees WHERE id=?")
-          .get(employeeId)) as { line_id: number };
-        const homeLineId =
-          input.homeLineId ||
-          (input.lineIds.includes(emp.line_id)
-            ? emp.line_id
-            : input.lineIds[0]);
         ensure(
-          input.lineIds.includes(homeLineId),
-          422,
-          "Chuyền làm việc phải nằm trong các chuyền được giao.",
+          isAdmin(ctx.user),
+          403,
+          "Chỉ Admin được cấp hoặc thay đổi bộ phận của tài khoản.",
         );
         ensure(
-          (await db
-            .prepare("SELECT 1 FROM lines WHERE id=?")
-            .get(homeLineId)) &&
-            (
-              await Promise.all(
-                input.lineIds.map(
-                  async (id) =>
-                    await db.prepare("SELECT 1 FROM lines WHERE id=?").get(id),
-                ),
-              )
-            ).every(Boolean),
+          input.roleIds.some((id) => id !== "worker"),
           422,
-          "Chuyền không tồn tại.",
+          "Thợ chỉ có hồ sơ; không cấp tài khoản chỉ có vai trò Nhân viên.",
         );
-        const before = {
-          name: target.name,
-          employeeId: target.employee_id,
-          homeLineId: emp.line_id,
-          lineIds: target.line_ids,
-          roleIds: target.roles.map((r) => r.id),
-        };
         await db
-          .prepare("UPDATE employees SET name=?,line_id=? WHERE id=?")
-          .run(input.name || target.name, homeLineId, employeeId);
+          .prepare("UPDATE employees SET name=? WHERE id=?")
+          .run(input.name || target.name, employeeId);
+        await db
+          .prepare("DELETE FROM employee_departments WHERE employee_id=?")
+          .run(employeeId);
+        for (const d of new Set(input.departmentIds))
+          await db
+            .prepare("INSERT INTO employee_departments VALUES (?,?)")
+            .run(employeeId, d);
+        await db
+          .prepare(
+            "UPDATE work_assignments SET active=0 WHERE employee_id=? AND NOT (department_id=ANY(?::text[]))",
+          )
+          .run(employeeId, input.departmentIds);
         await audit(
           ctx,
-          "Điều chỉnh hồ sơ và chuyền",
-          `${target.username}: Trước ${JSON.stringify(before)}; Sau ${JSON.stringify({ name: input.name || target.name, employeeId, homeLineId, lineIds: input.lineIds, roleIds: input.roleIds })}`,
-          homeLineId,
+          "Cấu hình tài khoản và bộ phận",
+          `${target.username}: ${JSON.stringify(input.departmentIds)}`,
         );
         await db
           .prepare(
-            "UPDATE accounts SET status='active',name=?,employee_id=?,line_ids=? WHERE id=?",
+            "UPDATE accounts SET status='active',name=?,employee_id=?,line_ids='[]' WHERE id=?",
           )
-          .run(
-            input.name || target.name,
-            employeeId,
-            JSON.stringify([...new Set(input.lineIds)]),
-            target.id,
-          );
+          .run(input.name || target.name, employeeId, target.id);
         await db
           .prepare("DELETE FROM account_roles WHERE account_id=?")
           .run(target.id);
