@@ -1,4 +1,6 @@
 "use client";
+import { StaffPanel } from "./DepartmentWorkspace";
+import { DEPARTMENTS, departmentName } from "@/lib/departments";
 import { useEffect, useState } from "react";
 import {
   UserCheck,
@@ -19,7 +21,7 @@ import {
   type Grant,
   type SessionInfo,
 } from "@/lib/permissions";
-import type { Employee, Line } from "@/lib/types";
+import type { Employee } from "@/lib/types";
 import { type Api, message } from "@/lib/client";
 import { Action, Modal, Field, ErrorNotice, Empty } from "./Primitives";
 import { Pagination } from "./Pagination";
@@ -27,7 +29,6 @@ interface AdminData {
   users: Account[];
   roles: Role[];
   employees: Employee[];
-  lines: Line[];
 }
 export function AdminPanel({
   api,
@@ -38,7 +39,7 @@ export function AdminPanel({
   api: Api;
   session: SessionInfo;
   onRepresent: () => Promise<void>;
-  mode: "users" | "roles";
+  mode: "users" | "roles" | "employees";
 }) {
   const [data, setData] = useState<AdminData | null>(null);
   const [error, setError] = useState("");
@@ -150,13 +151,8 @@ export function AdminPanel({
                       ))}
                     </div>
                     <p className="muted">
-                      {u.line_ids
-                        .map(
-                          (id) =>
-                            data?.lines.find((line) => line.id === id)?.name ||
-                            `Chuyền ${id}`,
-                        )
-                        .join(", ") || "Chưa gán chuyền"}
+                      {u.department_ids?.map(departmentName).join(", ") ||
+                        "Chưa phân loại bộ phận"}
                     </p>
                   </div>
                   <div className="inline-actions account-actions">
@@ -188,10 +184,7 @@ export function AdminPanel({
                       )}
                     {editable && u.status !== "pending" && (
                       <>
-                        <Action
-                          tone="secondary"
-                          onClick={() => setReset(u)}
-                        >
+                        <Action tone="secondary" onClick={() => setReset(u)}>
                           <KeyRound size={16} />
                           Đổi mật khẩu
                         </Action>
@@ -200,8 +193,7 @@ export function AdminPanel({
                           onClick={() =>
                             setConfirm({
                               user: u,
-                              action:
-                                u.status === "locked" ? "unlock" : "lock",
+                              action: u.status === "locked" ? "unlock" : "lock",
                             })
                           }
                         >
@@ -222,7 +214,7 @@ export function AdminPanel({
             onChange={setPage}
           />
         </section>
-      ) : (
+      ) : mode === "roles" ? (
         <>
           <div className="inline-actions">
             <Action
@@ -261,7 +253,16 @@ export function AdminPanel({
             ))}
           </div>
         </>
+      ) : (
+        <StaffPanel
+          api={api}
+          session={session}
+          onSaved={async () => {
+            setRevision((r) => r + 1);
+          }}
+        />
       )}
+
       <Modal
         open={!!selected}
         onClose={() => {
@@ -438,86 +439,59 @@ function AccountForm({
   error: string;
   onSubmit: (input: unknown) => Promise<void>;
 }) {
-  const [roles, setRoles] = useState(user.roles.map((r) => r.id));
-  const [lines, setLines] = useState(user.line_ids);
-  const linked = data.employees.find((e) => e.id === user.employee_id);
-  const [homeLine, setHomeLine] = useState(
-    linked?.line_id || user.line_ids[0] || data.lines[0]?.id || 1,
+  const [roles, setRoles] = useState(
+    user.roles.filter((r) => r.id !== "worker").map((r) => r.id),
   );
+  const [departments, setDepartments] = useState(user.department_ids || []);
   const [create, setCreate] = useState(!user.employee_id);
   const [employee, setEmployee] = useState(user.employee_id || "");
   return (
     <form
+      className="stack"
       action={(form) =>
         onSubmit({
           id: user.id,
           action: user.status === "pending" ? "approve" : "update",
           name: form.get("name"),
           roleIds: roles,
-          lineIds: lines,
-          homeLineId: homeLine,
+          departmentIds: departments,
           ...(user.employee_id
             ? {}
             : { createEmployee: create, employeeId: create ? null : employee }),
         })
       }
-      className="stack"
     >
       <ErrorNotice error={error} />
-      <Field label="Họ tên">
-        <input name="name" defaultValue={user.name} required />
+      <Field label="Họ tên người quản lý / người ghi nhận">
+        <input name="name" required defaultValue={user.name} />
       </Field>
-      {user.employee_id ? (
-        <div className="account-personal-profile">
-          <strong>Hồ sơ cá nhân của tài khoản</strong>
-          <p>
-            {user.name} · {user.employee_id}
-          </p>
-          <p className="muted">
-            Hồ sơ này đi cùng tài khoản. Đổi chuyền không đổi người hoặc lịch sử
-            công việc.
-          </p>
-        </div>
-      ) : (
+      <p className="muted">
+        Tài khoản dành cho người quản lý nhập thay thợ. Thợ chỉ cần hồ sơ tại
+        Danh sách thợ.
+      </p>
+      {!user.employee_id && (
         <>
-          <p className="muted">
-            Tạo hồ sơ của chính người đăng ký, hoặc liên kết một lần với hồ sơ
-            của họ đã có trong xưởng.
-          </p>
           <label className="check-label">
             <input
               type="checkbox"
               checked={create}
               onChange={(e) => setCreate(e.target.checked)}
             />
-            Tạo hồ sơ nhân viên mới
+            Tạo hồ sơ người quản lý mới
           </label>
           {!create && (
-            <Field label="Hồ sơ của người đăng ký (liên kết một lần)">
+            <Field label="Liên kết hồ sơ của chính người đăng ký">
               <select
                 value={employee}
-                onChange={(e) => {
-                  setEmployee(e.target.value);
-                  const emp = data.employees.find(
-                    (x) => x.id === e.target.value,
-                  );
-                  if (emp) setHomeLine(emp.line_id);
-                  if (emp && !lines.includes(emp.line_id))
-                    setLines([...lines, emp.line_id]);
-                }}
                 required
+                onChange={(e) => setEmployee(e.target.value)}
               >
-                <option value="">Chọn nhân viên</option>
+                <option value="">Chọn hồ sơ</option>
                 {data.employees
-                  .filter(
-                    (e) =>
-                      !data.users.some(
-                        (u) => u.employee_id === e.id && u.id !== user.id,
-                      ),
-                  )
+                  .filter((e) => !e.has_account)
                   .map((e) => (
                     <option key={e.id} value={e.id}>
-                      {e.name} · Chuyền {e.line_id}
+                      {e.name}
                     </option>
                   ))}
               </select>
@@ -525,28 +499,10 @@ function AccountForm({
           )}
         </>
       )}
-      <Field label="Chuyền làm việc của người này">
-        <select
-          value={homeLine}
-          onChange={(event) => {
-            const next = Number(event.target.value);
-            setHomeLine(next);
-            if (lines.length === 1 && lines.includes(homeLine))
-              setLines([next]);
-            else if (!lines.includes(next)) setLines([...lines, next]);
-          }}
-        >
-          {data.lines.map((line) => (
-            <option key={line.id} value={line.id}>
-              {line.name}
-            </option>
-          ))}
-        </select>
-      </Field>
       <fieldset>
         <legend>Vai trò</legend>
         {data.roles
-          .filter((r) => !r.protected && r.position < top)
+          .filter((r) => r.id !== "worker" && !r.protected && r.position < top)
           .map((r) => (
             <label className="check-label" key={r.id}>
               <input
@@ -556,7 +512,7 @@ function AccountForm({
                   setRoles(
                     e.target.checked
                       ? [...roles, r.id]
-                      : roles.filter((x) => x !== r.id),
+                      : roles.filter((id) => id !== r.id),
                   )
                 }
               />
@@ -565,65 +521,39 @@ function AccountForm({
           ))}
       </fieldset>
       <fieldset>
-        <legend>Chuyền được giao / phụ trách</legend>
-        {data.lines.map((l) => (
-          <label className="check-label" key={l.id}>
+        <legend>Bộ phận được phụ trách (có thể kiêm nhiệm)</legend>
+        {DEPARTMENTS.map((d) => (
+          <label className="check-label" key={d.id}>
             <input
               type="checkbox"
-              checked={lines.includes(l.id)}
+              checked={departments.includes(d.id)}
               onChange={(e) =>
-                setLines(
+                setDepartments(
                   e.target.checked
-                    ? [...lines, l.id]
-                    : lines.filter((x) => x !== l.id),
+                    ? [...departments, d.id]
+                    : departments.filter((id) => id !== d.id),
                 )
               }
             />
-            {l.name}
+            {d.name}
           </label>
         ))}
       </fieldset>
       <p className="muted">
-        Vai trò quyết định thao tác; các chuyền được giao quyết định phạm vi.
-        Nhân viên được ghi nhận việc tại các chuyền được giao; chuyền làm việc
-        là chuyền chính. Khi điều chuyển, chọn chuyền làm việc mới và bỏ chuyền
-        cũ nếu không còn phụ trách.
+        Vai trò quyết định thao tác; bộ phận giới hạn công đoạn. Quản lý ghi
+        nghiệp vụ toàn quy trình, quyền xem lương và quản trị được cấp riêng.
       </p>
-      <div className="account-line-roster">
-        {data.lines
-          .filter((line) => lines.includes(line.id))
-          .map((line) => {
-            const members = data.employees.filter(
-              (person) =>
-                person.line_id === line.id && person.id !== user.employee_id,
-            );
-            return (
-              <section key={line.id}>
-                <h3>
-                  {line.name} · {members.length} nhân viên khác hiện có
-                </h3>
-                <ul>
-                  {members.map((person) => (
-                    <li key={person.id}>{person.name}</li>
-                  ))}
-                </ul>
-                {!members.length && (
-                  <p className="muted">Chưa có nhân viên khác trong chuyền.</p>
-                )}
-              </section>
-            );
-          })}
-      </div>
       <Action
         type="submit"
         busy={busy}
-        disabled={!roles.length || !lines.length || !lines.includes(homeLine)}
+        disabled={!roles.length || !departments.length}
       >
         Lưu và cấp quyền
       </Action>
     </form>
   );
 }
+
 function RoleForm({
   role,
   top,
@@ -675,7 +605,10 @@ function RoleForm({
         <fieldset key={group.prefix}>
           <legend>{group.label}</legend>
           {(Object.entries(PERMISSIONS) as [Grant["permission"], string][])
-            .filter(([key]) => key.startsWith(group.prefix))
+            .filter(
+              ([key]) =>
+                key !== "delivery.record" && key.startsWith(group.prefix),
+            )
             .map(([key, label]) => {
               const grant = grants.find((g) => g.permission === key);
               return (

@@ -4,8 +4,10 @@ import { randomUUID } from "node:crypto";
 import { db } from "./database";
 
 export const TABLES = [
+  "departments",
   "lines",
   "employees",
+  "employee_departments",
   "orders",
   "order_variants",
   "order_stages",
@@ -27,7 +29,13 @@ export const TABLES = [
   "production_adjustments",
   "stage_events",
   "order_work_items",
+  "work_assignments",
+  "shipments",
+  "shipment_items",
   "pending_packing_pay",
+  "order_materials",
+  "material_movements",
+  "defect_attributions",
   "local_setup",
   "schema_migrations",
 ] as const;
@@ -79,7 +87,17 @@ export async function readSnapshot(file: string): Promise<Snapshot> {
 // Restore only into an empty application database. Never merge or overwrite live data.
 export async function restoreSnapshot(snapshot: Snapshot) {
   await db.transaction(async () => {
-    for (const table of ["accounts", "orders", "production_logs"]) {
+    for (const table of [
+      "accounts",
+      "orders",
+      "employees",
+      "production_logs",
+      "product_images",
+      "operation_records",
+      "work_assignments",
+      "shipments",
+      "pending_packing_pay",
+    ]) {
       if (await db.prepare(`SELECT 1 FROM "${table}" LIMIT 1`).get())
         throw new Error("Restore requires an empty database");
     }
@@ -121,6 +139,10 @@ export async function restoreSnapshot(snapshot: Snapshot) {
           .run(...values);
       }
     }
+    // Resolve deferred FK events before migration DDL touches restored tables.
+    await db.exec("SET CONSTRAINTS ALL IMMEDIATE");
+    await (await import("./department-migration")).migrateDepartments();
+    await (await import("./workshop-migration")).migrateWorkshopExtras();
     for (const table of TABLES) {
       const seq = (await db
         .prepare(

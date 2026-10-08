@@ -7,11 +7,11 @@ import type { SessionInfo } from "@/lib/permissions";
 export async function uploadProductImage(
   file: File,
   session: SessionInfo,
-  lineId: number,
+  lineId?: number,
 ): Promise<string> {
   const form = new FormData();
   form.set("file", file);
-  form.set("line_id", String(lineId));
+  void lineId; // Old callers may still supply the deprecated argument.
   const response = await fetch("/api/product-images", {
     method: "POST",
     headers: { "x-csrf-token": session.csrf },

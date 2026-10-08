@@ -1,3 +1,5 @@
+import { departmentFor } from "../departments";
+import { requireDepartment } from "./departments";
 import { completedWork, refreshWorkCompletion } from "./work-items";
 import { transitionPermissionProblem } from "../workflow";
 import { z } from "zod";
@@ -5,6 +7,8 @@ import { db, getOrderById } from "../db";
 import { LUUTA_STAGES, type ProductionLog } from "../types";
 import { type Context, requirePermission, ensure, audit } from "./auth";
 import { text } from "./validation";
+import { cutLimit, sewLimit } from "../workflow";
+import { getPolicy } from "./policy";
 export const stageInfoSchema = z
   .object({
     version: z.number().int().positive(),
@@ -30,6 +34,7 @@ export async function updateStageInfo(
 ) {
   const o = await getOrderById(id);
   ensure(o, 404, "Không tìm thấy đơn.");
+  requireDepartment(ctx, input.stage);
   const permissionProblem = transitionPermissionProblem(ctx.user, o);
   ensure(!permissionProblem, 403, permissionProblem || "");
   ensure(o.version === input.version, 409, "Đơn đã thay đổi. Tải lại dữ liệu.");
@@ -38,9 +43,12 @@ export async function updateStageInfo(
   if (["dong_goi", "giao_hang"].includes(input.stage))
     requirePermission(ctx, "delivery.manage", { lineId: o.line_id });
   const employee = (await db
-    .prepare("SELECT * FROM employees WHERE id=? AND line_id=?")
-    .get(input.employee_id, o.line_id)) as { name: string } | undefined;
-  ensure(employee, 422, "Người phụ trách phải thuộc chuyền của đơn.");
+    .prepare(
+      "SELECT e.* FROM employees e JOIN employee_departments d ON d.employee_id=e.id WHERE e.id=? AND e.active=1 AND d.department_id=?",
+    )
+    .get(input.employee_id, departmentFor(input.stage))) as
+    { name: string } | undefined;
+  ensure(employee, 422, "Người phụ trách phải thuộc bộ phận của công đoạn.");
   const before = (await db
     .prepare("SELECT * FROM order_stages WHERE order_id=? AND stage_key=?")
     .get(id, input.stage)) as { status: string } | undefined;
@@ -132,6 +140,7 @@ export async function updateStageInfo(
     "Cập nhật hồ sơ công đoạn",
     `${id} ${input.stage}: ${JSON.stringify(before)} → ${JSON.stringify(after)}`,
     o.line_id,
+    departmentFor(input.stage),
   );
   return await getOrderById(id);
 }
@@ -152,7 +161,10 @@ export async function adjustProduction(
     .prepare("SELECT * FROM production_logs WHERE id=?")
     .get(input.log_id)) as ProductionLog | undefined;
   ensure(old, 404, "Không tìm thấy sản lượng.");
-  requirePermission(ctx, "payroll.adjust", { lineId: old.line_id });
+  requirePermission(ctx, "payroll.adjust", {
+    departmentId: old.department_id,
+    stage: old.stage,
+  });
   ensure(
     old.version === input.version,
     409,
@@ -165,6 +177,7 @@ export async function adjustProduction(
   );
   ensure(v, 422, "Không tìm thấy biến thể.");
   const delta = input.quantity - old.quantity;
+  const overcut = (await getPolicy()).overcut_percent;
   const column =
     old.stage === "Cắt" ? "cut_qty" : old.stage === "May" ? "sewn_qty" : null;
   if (column) {
@@ -183,7 +196,8 @@ export async function adjustProduction(
           .get(old.work_item_id, old.color, old.size)) as { n: number }
       ).n;
       ensure(
-        paid + delta <= (column === "cut_qty" ? v.quantity : v.cut_qty),
+        paid + delta <=
+          (column === "cut_qty" ? cutLimit(v.quantity, overcut) : sewLimit(v)),
         422,
         "Phần việc vượt số lượng đầu vào.",
       );
@@ -194,7 +208,8 @@ export async function adjustProduction(
         : Number(
             (v as unknown as { qc_inspected_qty: number }).qc_inspected_qty,
           );
-    const max = column === "cut_qty" ? v.quantity : v.cut_qty;
+    const max =
+      column === "cut_qty" ? cutLimit(v.quantity, overcut) : sewLimit(v);
     ensure(
       next >= min && next <= max,
       422,
@@ -285,6 +300,7 @@ export async function adjustProduction(
     "Điều chỉnh sản lượng/tiền công",
     `${old.id}: ${JSON.stringify(old)} → ${JSON.stringify(after)}; Lý do: ${input.reason}; ${old.is_locked ? "Tháng đã chốt" : "Chưa chốt"}`,
     old.line_id,
+    old.department_id || departmentFor(old.stage),
   );
   return after;
 }

@@ -1,1109 +1,14 @@
 "use client";
-import {
-  ProductPhoto,
-  ProductImagePicker,
-  uploadProductImage,
-} from "./ProductImage";
-import { StageEditor } from "./RequirementPanels";
 import { MoneyInput, parseMoney } from "./SmartInputs";
-import { useState } from "react";
-import { Check, Save, Plus, X } from "lucide-react";
-import {
-  LUUTA_STAGES,
-  type Order,
-  type Employee,
-  type Line,
-} from "@/lib/types";
-import type { SessionInfo } from "@/lib/permissions";
-import { permits, hasPermission, canRecordProduction } from "@/lib/permissions";
-import { type Api, type ViewLog, money, message, day } from "@/lib/client";
-import { type Variant, type Rate } from "@/lib/server/business";
-import {
-  transitionProblem,
-  transitionPermissionProblem,
-  availableOperations,
-  remainingOperation,
-} from "@/lib/workflow";
+import { useEffect, useState } from "react";
+import { Plus, X } from "lucide-react";
+import type { Order } from "@/lib/types";
+import { type Api, type ViewLog, money, message } from "@/lib/client";
+import type { Rate } from "@/lib/server/business";
 import { Action, Field, ErrorNotice, Empty } from "./Primitives";
-import { Status } from "./OrderWorkspace";
-export function ProductionForm({
-  initialOrderId,
-  api,
-  orders,
-  employees,
-  rates,
-  session,
-  onSaved,
-}: {
-  api: Api;
-  initialOrderId?: string;
-  orders: Order[];
-  employees: Employee[];
-  rates: Rate[];
-  session: SessionInfo;
-  onSaved: (notice?: string) => Promise<void>;
-}) {
-  const firstOrder =
-    orders.find((o) => o.id === initialOrderId) ||
-    orders.find(
-      (o) =>
-        o.status !== "completed" &&
-        employees.some((e) => canRecordProduction(session.user, e, o)),
-    );
-  const stageFor = (order?: Order) =>
-    ({
-      nhan_don: "Cắt",
-      kiem_npl: "Cắt",
-      kiem_rap: "Cắt",
-      hoan_thanh: "Đóng gói",
-      cat: "Cắt",
-      may: "May",
-      qc: "QC",
-      qc_lai: "QC",
-      sua_hang: "Sửa hàng",
-      dong_goi: "Đóng gói",
-      giao_hang: "Đóng gói",
-    })[order?.current_stage || "may"] || "May";
-  const [id, setId] = useState(firstOrder?.id || "");
-  const [workId, setWorkId] = useState(0);
-  const [variantIndex, setVariantIndex] = useState(0);
-  const [stage, setStage] = useState(stageFor(firstOrder));
-  const [emp, setEmp] = useState(
-    session.user.employee_id || employees[0]?.id || "",
-  );
-  const [qty, setQty] = useState(1);
-  const [packingWagesOnly, setPackingWagesOnly] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const order = orders.find((o) => o.id === id);
-  const variants = order?.variants || [];
-  const variant = variants[variantIndex];
-  const packingBlocked =
-    stage === "Đóng gói" &&
-    !!variant &&
-    (packingWagesOnly
-      ? qty > variant.packed_qty
-      : order?.current_stage !== "dong_goi" ||
-        qty > variant.qc_passed_qty - variant.packed_qty);
-  const workItems = (order?.work_items || []).filter((p) => p.stage === stage);
-  const selectedWork = workItems.find((p) => p.id === workId) || workItems[0];
-  const rate = rates.find(
-    (r) =>
-      r.order_id === id &&
-      r.stage === stage &&
-      (selectedWork ? r.work_item_id === selectedWork.id : !r.work_item_id),
-  );
-  const allowedEmployees = employees.filter(
-    (e) => !!order && canRecordProduction(session.user, e, order),
-  );
-  const selectedEmp = allowedEmployees.some((e) => e.id === emp)
-    ? emp
-    : allowedEmployees[0]?.id || "";
-  const canSeeRates =
-    hasPermission(session.user, "payroll.view") ||
-    hasPermission(session.user, "rates.manage");
-  const entryProblem = !selectedEmp
-    ? "Chưa có nhân viên hợp lệ trong chuyền của đơn. Nhờ quản lý kiểm tra chuyền được giao."
-    : !variant
-      ? "Chọn màu và size cần ghi nhận."
-      : order?.status === "completed"
-        ? "Đơn đã hoàn thành, không thể ghi nhận thêm."
-        : ["Cắt", "May"].includes(stage) &&
-            order?.current_stage !== (stage === "Cắt" ? "cat" : "may")
-          ? `Đơn chưa ở bước ${stage}. Quản lý cần chuyển đơn đến đúng bước trước.`
-          : canSeeRates && !rate
-            ? "Chưa có đơn giá cho công đoạn này. Nhờ quản lý mở Đơn giá, chọn đơn và công đoạn để cấu hình."
-            : !Number.isInteger(qty) || qty <= 0
-              ? "Nhập số lượng nguyên lớn hơn 0."
-              : packingBlocked
-                ? !packingWagesOnly && order?.current_stage !== "dong_goi"
-                  ? "Quản lý cần chuyển đơn đến Đóng gói trước."
-                  : "Số đóng gói vượt số lượng có thể ghi nhận."
-                : null;
-  async function submit(form: FormData) {
-    if (!order || !variant || !selectedEmp || entryProblem || busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      const result = await api<{ pay_status?: string; message?: string }>(
-        "/api/production/log",
-        {
-          log_date: form.get("date"),
-          employee_id: selectedEmp,
-          order_id: id,
-          color: variant.color,
-          size: variant.size,
-          stage,
-          ...(stage === "Đóng gói"
-            ? { record_packing: !packingWagesOnly }
-            : {}),
-          ...(selectedWork ? { work_item_id: selectedWork.id } : {}),
-          quantity: qty,
-          version: order.version,
-        },
-      );
-      await onSaved(
-        result.pay_status === "pending" ? result.message : undefined,
-      );
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  if (!orders.length || !employees.length)
-    return (
-      <Empty>
-        Chưa có đơn hàng hoặc nhân viên trong phạm vi nhập sản lượng.
-      </Empty>
-    );
-  return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        void submit(new FormData(event.currentTarget));
-      }}
-      className="stack production-form"
-    >
-      <ErrorNotice error={error} />
-      {!selectedEmp && (
-        <ErrorNotice
-          error={`Không thể ghi nhận đơn thuộc Chuyền ${order?.line_id}: chưa có quyền ghi nhận cho nhân viên tại chuyền này. Chọn đơn thuộc các chuyền được giao hoặc liên hệ quản lý kiểm tra quyền.`}
-        />
-      )}
-      <div className="form-grid">
-        <Field label="Ngày làm việc">
-          <input
-            type="date"
-            name="date"
-            defaultValue={day()}
-            max={day()}
-            required
-          />
-        </Field>
-        <Field label="Đơn hàng">
-          <select
-            value={id}
-            onChange={(e) => {
-              setId(e.target.value);
-              setPackingWagesOnly(false);
-              setStage(stageFor(orders.find((o) => o.id === e.target.value)));
-              setWorkId(0);
-              setVariantIndex(0);
-            }}
-          >
-            {orders
-              .filter((o) => o.status !== "completed")
-              .map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.id} · {o.product_name}
-                </option>
-              ))}
-          </select>
-        </Field>
-        {allowedEmployees.length === 1 ? (
-          <div className="field field-readonly">
-            <span>Người ghi nhận</span>
-            <strong>{allowedEmployees[0].name}</strong>
-          </div>
-        ) : (
-          <Field label="Nhân viên">
-            <select
-              value={selectedEmp}
-              onChange={(e) => setEmp(e.target.value)}
-              required
-            >
-              {!allowedEmployees.length && (
-                <option value="">Không có nhân viên phù hợp</option>
-              )}
-              {allowedEmployees.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-        )}
-        <Field label="Công đoạn">
-          <select
-            value={stage}
-            onChange={(e) => {
-              setStage(e.target.value);
-              setPackingWagesOnly(false);
-            }}
-          >
-            {["Cắt", "May", "QC", "Sửa hàng", "Đóng gói"].map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-        </Field>
-        {!!workItems.length && (
-          <Field label="Phần việc tôi đã làm">
-            <select
-              value={selectedWork?.id || ""}
-              onChange={(e) => setWorkId(Number(e.target.value))}
-            >
-              {workItems.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-        )}
-        <Field label="Màu / size">
-          <select
-            value={variantIndex}
-            onChange={(e) => {
-              setVariantIndex(Number(e.target.value));
-              setPackingWagesOnly(false);
-            }}
-          >
-            {variants.map((v, i) => (
-              <option key={v.id} value={i}>
-                {v.color} / {v.size}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Số lượng">
-          <input
-            type="number"
-            inputMode="numeric"
-            min={1}
-            max={1000000}
-            required
-            value={qty}
-            onChange={(e) => setQty(Number(e.target.value))}
-          />
-        </Field>
-      </div>
-      {hasPermission(session.user, "payroll.view") && (
-        <div className="amount-preview">
-          <span>Đơn giá {rate ? money(rate.unit_price) : "chưa cấu hình"}</span>
-          <strong>
-            {rate ? money(qty * rate.unit_price) : "Liên hệ quản lý"}
-          </strong>
-        </div>
-      )}
-      {stage === "Đóng gói" && variant && (
-        <div role="status" className="padded">
-          <strong>
-            QC đạt: {variant.qc_passed_qty} · Đã đóng gói: {variant.packed_qty}{" "}
-            · Còn có thể đóng gói:{" "}
-            {Math.max(0, variant.qc_passed_qty - variant.packed_qty)}
-          </strong>
-          <p>
-            Một lần lưu xác nhận số bạn đã đóng gói và ghi tiền công cho bạn.
-            Quản lý chuyển bước khi đã đủ số lượng. Nếu tháng lương đã khóa, số
-            đóng gói vẫn được lưu; công chuyển sang chờ quản lý đối chiếu, chưa
-            cộng vào lương.
-          </p>
-          {variant.packed_qty > 0 && (
-            <label className="checkbox-field">
-              <input
-                type="checkbox"
-                checked={packingWagesOnly}
-                onChange={(e) => setPackingWagesOnly(e.target.checked)}
-              />{" "}
-              Chỉ bổ sung tiền công cho số đã được xác nhận đóng gói trước đó
-            </label>
-          )}
-          {packingBlocked && (
-            <p className="error-text">
-              {!packingWagesOnly && order?.current_stage !== "dong_goi"
-                ? "Quản lý cần chuyển đơn đến Đóng gói trước."
-                : "Số lượng nhập vượt số có thể ghi nhận."}
-            </p>
-          )}
-        </div>
-      )}
-      <p className="muted">
-        {workItems.length > 0 &&
-          "Mỗi người ghi phần việc mình làm; sản phẩm chỉ hoàn thành công đoạn khi đủ tất cả phần việc. "}
-        Đơn giá do quản lý cấu hình. QC và sửa hàng cần được ghi nhận xử lý
-        trước khi tính công.
-      </p>
-      <div className="mobile-form-footer">
-        {entryProblem && (
-          <p role="status" className="error-text">
-            {entryProblem}
-          </p>
-        )}
-        <Action
-          type="submit"
-          className="mobile-form-submit"
-          busy={busy}
-          disabled={!!entryProblem}
-        >
-          <Check size={18} />
-          {stage === "Đóng gói" && !packingWagesOnly
-            ? "Xác nhận đóng gói và ghi công"
-            : "Ghi nhận sản lượng"}
-        </Action>
-      </div>
-    </form>
-  );
-}
-export function OrderDetail({
-  order,
-  session,
-  api,
-  lines,
-  employees,
-  onChanged,
-}: {
-  order: Order;
-  session: SessionInfo;
-  api: Api;
-  lines: Line[];
-  employees: Employee[];
-  onChanged: () => Promise<void>;
-}) {
-  const [defectFile, setDefectFile] = useState<File | null>(null);
-  const [defectUrl, setDefectUrl] = useState<string | null>(null);
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imageUrl, setImageUrl] = useState<string | null>(order.image_url);
-  async function saveDetails(form: FormData) {
-    setBusy(true);
-    setError("");
-    try {
-      let url = imageUrl;
-      if (imageFile && !url) {
-        url = await uploadProductImage(imageFile, session, order.line_id);
-        setImageUrl(url);
-      }
-      await save(
-        `/api/orders/${order.id}`,
-        {
-          version: order.version,
-          ...(permits(session.user, "orders.edit", { lineId: order.line_id })
-            ? {
-                responsible_id:
-                  String(form.get("responsible_id") || "") || null,
-                product_code: form.get("product_code"),
-                customer: form.get("customer"),
-                deadline: form.get("deadline"),
-                notes: form.get("notes"),
-                image_url: url,
-              }
-            : {}),
-          ...(permits(session.user, "orders.assign", { lineId: order.line_id })
-            ? { line_id: Number(form.get("line_id")) }
-            : {}),
-        },
-        "PATCH",
-      );
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  const available = availableOperations(session.user, order);
-  const [tab, setTab] = useState<
-    "variants" | "workflow" | "edit" | "operation"
-  >(available.length ? "operation" : "variants");
-  const [notice, setNotice] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [action, setAction] = useState("qc");
-  const [variantIndex, setVariantIndex] = useState(() =>
-    Math.max(
-      0,
-      (order.variants || []).findIndex(
-        (v) => remainingOperation(v, available[0]?.key) > 0,
-      ),
-    ),
-  );
-  const [qty, setQty] = useState(1);
-  const [passed, setPassed] = useState(1);
-  const variants = order.variants as Variant[];
-  async function save(path: string, input: unknown, method = "POST") {
-    setBusy(true);
-    setError("");
-    setNotice("");
-    try {
-      await api(path, input, method);
-      await onChanged();
-      setNotice("Đã lưu kết quả xử lý.");
-    } catch (e) {
-      setError(message(e));
-      await onChanged();
-    } finally {
-      setBusy(false);
-    }
-  }
-  const chosen = available.some((a) => a.key === action)
-    ? action
-    : available[0]?.key;
-  const variant = variants[variantIndex];
-  const remaining = remainingOperation(variant, chosen);
-  const selfDelivery =
-    chosen === "deliver" &&
-    !permits(session.user, "delivery.manage", { lineId: order.line_id });
-  return (
-    <div className="stack">
-      <div className="detail-product">
-        <ProductPhoto url={order.image_url} name={order.product_name} large />
-        <div className="detail-summary">
-          <div>
-            <strong>{order.customer}</strong>
-            <p>
-              {order.product_name} · {order.product_code}
-            </p>
-            <p className="muted">
-              Ngày nhận: {order.order_date} · Phụ trách: {order.assigned_to}
-            </p>
-            <p className="muted">
-              {LUUTA_STAGES.find((s) => s.key === order.current_stage)?.label} ·
-              Tổ {order.line_id} · {order.total_quantity} sản phẩm ·{" "}
-              <span className="nowrap">Hạn {order.deadline}</span>
-            </p>
-          </div>
-          <Status order={order} />
-          {order.delivered_complete && (
-            <span className="status on_track">Đã giao đủ</span>
-          )}
-        </div>
-      </div>
-      {!!order.work_items?.length && (
-        <details className="record-disclosure">
-          <summary>Tiến độ phần việc của nhiều người</summary>
-          <ul className="work-progress-list padded">
-            {order.work_items.map((p) => (
-              <li key={p.id}>
-                <span>
-                  {p.stage} · {p.name}
-                </span>
-                <strong>
-                  {p.recorded_quantity || 0}/{order.total_quantity}
-                </strong>
-              </li>
-            ))}
-          </ul>
-          <p className="muted padded">
-            Mỗi phần việc có số lượng riêng; sản phẩm hoàn thành khi đủ mọi phần
-            của công đoạn.
-          </p>
-        </details>
-      )}
-      <div
-        className="segmented detail-tabs"
-        role="group"
-        aria-label="Thông tin đơn hàng"
-      >
-        {!!available.length && (
-          <button
-            aria-pressed={tab === "operation"}
-            onClick={() => setTab("operation")}
-          >
-            {available[0].label}
-          </button>
-        )}
-        <button
-          aria-pressed={tab === "variants"}
-          onClick={() => setTab("variants")}
-        >
-          Màu và size
-        </button>
-        <button
-          aria-pressed={tab === "workflow"}
-          onClick={() => setTab("workflow")}
-        >
-          Công đoạn
-        </button>
-        {(hasPermission(session.user, "orders.edit") ||
-          hasPermission(session.user, "orders.assign")) && (
-          <button aria-pressed={tab === "edit"} onClick={() => setTab("edit")}>
-            Chỉnh sửa
-          </button>
-        )}
-      </div>
-      <ErrorNotice error={error} />
-      {notice && (
-        <p role="status" className="rate-save-notice">
-          {notice}
-        </p>
-      )}
-      {tab === "operation" && available.length > 0 && (
-        <form
-          className="stack operation-form"
-          onSubmit={async (event) => {
-            event.preventDefault();
-            const form = new FormData(event.currentTarget);
-            if (!variant || busy || remaining <= 0 || qty > remaining) return;
-            setBusy(true);
-            try {
-              let url = defectUrl;
-              if (defectFile && !url && ["qc", "reinspect"].includes(chosen)) {
-                url = await uploadProductImage(
-                  defectFile,
-                  session,
-                  order.line_id,
-                );
-                setDefectUrl(url);
-              }
-              await save(`/api/orders/${order.id}/operations`, {
-                version: order.version,
-                color: variant.color,
-                size: variant.size,
-                action: chosen,
-                quantity: qty,
-                image_url: ["qc", "reinspect"].includes(chosen)
-                  ? url
-                  : undefined,
-                operation_date: form.get("operation_date"),
-                ...(!["qc", "reinspect"].includes(chosen) && !selfDelivery
-                  ? {
-                      worker_id:
-                        String(form.get("worker_id") || "") || undefined,
-                    }
-                  : {}),
-                packages: Number(form.get("packages") || 0),
-                notes: String(form.get("operation_notes") || ""),
-                ...(["qc", "reinspect"].includes(chosen)
-                  ? {
-                      passed,
-                      defect_type: String(form.get("defect_type") || ""),
-                    }
-                  : {}),
-              });
-            } catch (e) {
-              setError(message(e));
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          <div className="qc-totals-strip">
-            <div>
-              <span className="muted" style={{ display: "block", fontSize: 11, fontWeight: 600 }}>CÔNG ĐOẠN</span>
-              <strong style={{ fontSize: 15 }}>{available.find((a) => a.key === chosen)?.label}</strong>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <span className="muted" style={{ display: "block", fontSize: 11, fontWeight: 600 }}>CÒN CHỜ XỬ LÝ</span>
-              <strong style={{ fontSize: 16, color: remaining > 0 ? "var(--foreground)" : "#16a34a" }}>
-                {remaining} SP
-              </strong>
-            </div>
-          </div>
-          {remaining === 0 && (
-            <p role="status" className="muted" style={{ padding: "8px 12px", background: "#f4f4f5", borderRadius: 6, fontSize: 13 }}>
-              Màu–size này đã xử lý đủ hoặc chưa có đầu vào. Chọn màu–size khác;
-              khi đã xong, mở Công đoạn để chuyển bước phù hợp.
-            </p>
-          )}
+import { DEFAULT_POLICY, type Policy } from "@/lib/policy";
+export { ProductionForm, OrderDetail } from "./DepartmentWorkspace";
 
-          {/* 1. Ưu tiên hàng đầu: Chọn Màu & Size */}
-          <Field label="Màu / size">
-            <select
-              value={variantIndex}
-              onChange={(e) => {
-                const idx = Number(e.target.value);
-                setVariantIndex(idx);
-                const rem = remainingOperation(variants[idx], chosen);
-                const newQty = Math.max(1, Math.min(qty, rem || 1));
-                setQty(newQty);
-                setPassed(newQty);
-                setNotice("");
-              }}
-            >
-              {variants.map((v, i) => {
-                const rem = remainingOperation(v, chosen);
-                return (
-                  <option key={v.id} value={i}>
-                    {v.color} / {v.size} — Còn chờ: {rem} SP (tổng {v.quantity})
-                  </option>
-                );
-              })}
-            </select>
-          </Field>
-
-          {/* 2. Số lượng & Số đạt xếp cạnh nhau */}
-          <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label="Số lượng kiểm">
-              <input
-                type="number"
-                inputMode="numeric"
-                min={1}
-                max={Math.max(1, remaining)}
-                value={qty}
-                required
-                onChange={(e) => {
-                  const q = Number(e.target.value);
-                  setQty(q);
-                  setPassed(Math.min(passed, q));
-                }}
-              />
-            </Field>
-            {["qc", "reinspect"].includes(chosen) ? (
-              <Field label="Số đạt">
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  max={qty}
-                  value={passed}
-                  required
-                  onChange={(e) => setPassed(Number(e.target.value))}
-                />
-              </Field>
-            ) : chosen === "pack" ? (
-              <Field label="Số kiện">
-                <input
-                  name="packages"
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  max={1000000}
-                  defaultValue={1}
-                  required
-                />
-              </Field>
-            ) : null}
-          </div>
-
-          {/* Nút tiện ích: Đạt tất cả & Trạng thái lỗi */}
-          {["qc", "reinspect"].includes(chosen) && (
-            <div className="qc-quick-row">
-              <button
-                type="button"
-                className={`qc-pass-all-btn ${passed === qty ? "active" : ""}`}
-                onClick={() => setPassed(qty)}
-              >
-                ✓ Đạt tất cả ({qty})
-              </button>
-              <span style={{ fontSize: 13, fontWeight: 600, color: qty - passed > 0 ? "#dc2626" : "#16a34a" }}>
-                {qty - passed > 0 ? `⚠️ Có ${qty - passed} sản phẩm lỗi` : "✓ 100% đạt chuẩn"}
-              </span>
-            </div>
-          )}
-
-          {/* Khối thông tin lỗi (chỉ mở rõ khi phát hiện có lỗi) */}
-          {["qc", "reinspect"].includes(chosen) && qty - passed > 0 && (
-            <div className="qc-defect-box">
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, color: "#991b1b", fontWeight: 600, fontSize: 13 }}>
-                <span>Phát hiện {qty - passed} sản phẩm lỗi</span>
-              </div>
-              <Field label="Mô tả loại lỗi (lỗi may, lỗi vải, rập...)">
-                <input
-                  name="defect_type"
-                  placeholder="Ví dụ: Rách đường chỉ sườn, xước vải..."
-                  maxLength={500}
-                  required
-                />
-              </Field>
-              <div style={{ marginTop: 10 }}>
-                <ProductImagePicker
-                  label="Ảnh lỗi QC"
-                  prompt="Thêm ảnh chụp để mô tả lỗi"
-                  existing={defectUrl}
-                  file={defectFile}
-                  onFile={(f) => {
-                    setDefectFile(f);
-                    setDefectUrl(null);
-                  }}
-                  onRemove={() => {
-                    setDefectFile(null);
-                    setDefectUrl(null);
-                  }}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Dropdown Thao tác (chỉ hiện khi có nhiều hơn 1 thao tác khả dụng) */}
-          {available.length > 1 && (
-            <Field label="Thao tác">
-              <select
-                value={chosen}
-                onChange={(e) => setAction(e.target.value)}
-              >
-                {available.map((a) => (
-                  <option key={a.key} value={a.key}>
-                    {a.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          )}
-
-          {/* Thông tin phụ: Ngày & Người kiểm (xếp gọn gàng) */}
-          <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label="Ngày xử lý">
-              <input
-                name="operation_date"
-                type="date"
-                defaultValue={day()}
-                min={order.order_date}
-                max={day()}
-                required
-              />
-            </Field>
-            {["qc", "reinspect"].includes(chosen) || selfDelivery ? (
-              <div className="field">
-                <span>{selfDelivery ? "Người giao" : "Người kiểm QC"}</span>
-                <strong style={{ fontSize: 14 }}>{session.user.name}</strong>
-                <span className="muted" style={{ fontSize: 11 }}>Tự ghi nhận</span>
-              </div>
-            ) : (
-              <Field label="Người thực hiện">
-                <select name="worker_id">
-                  <option value="">Tài khoản thao tác</option>
-                  {employees
-                    .filter((e) => e.line_id === order.line_id)
-                    .map((e) => (
-                      <option key={e.id} value={e.id}>
-                        {e.name}
-                      </option>
-                    ))}
-                </select>
-              </Field>
-            )}
-          </div>
-
-          <Field label="Ghi chú xử lý (tùy chọn)">
-            <textarea
-              name="operation_notes"
-              rows={2}
-              maxLength={2000}
-              placeholder="Ghi chú thêm nếu có..."
-            />
-          </Field>
-
-          <div className="mobile-form-footer">
-            <Action
-              type="submit"
-              className="mobile-form-submit"
-              busy={busy}
-              disabled={!variant || remaining <= 0 || qty > remaining}
-            >
-              {["qc", "reinspect"].includes(chosen)
-                ? qty - passed > 0
-                  ? `Lưu kết quả QC (${passed} đạt · ${qty - passed} lỗi)`
-                  : `Lưu kết quả QC (${passed} SP đạt)`
-                : "Lưu xử lý"}
-            </Action>
-          </div>
-        </form>
-      )}
-
-      {tab === "operation" && !available.length && (
-        <Empty>Đơn đã chuyển bước. Mở Công đoạn để xem tiến độ.</Empty>
-      )}
-      {tab === "variants" && (
-        <>
-          <div
-            className="table-scroll"
-            tabIndex={0}
-            role="region"
-            aria-label="Số lượng theo màu và size"
-          >
-            <div className="table-scroll-hint mobile-only">
-              <span>← Vuốt ngang xem đủ 9 cột công đoạn →</span>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th className="sticky-col">Màu</th>
-                  <th>Size</th>
-                  <th className="num-col">Yêu cầu</th>
-                  <th className="num-col">Cắt</th>
-                  <th className="num-col">May</th>
-                  <th className="num-col">QC đạt</th>
-                  <th className="num-col">Đóng gói</th>
-                  <th className="num-col">Đã giao</th>
-                  <th className="num-col">Thiếu</th>
-                </tr>
-              </thead>
-              <tbody>
-                {variants.map((v) => (
-                  <tr key={v.id}>
-                    <td className="sticky-col">
-                      {(v.colors?.length
-                        ? v.colors
-                        : v.color_hex
-                          ? [{ name: v.color, hex: v.color_hex }]
-                          : []
-                      ).map((c, i) => (
-                        <span
-                          key={i}
-                          className="color-dot"
-                          title={c.name}
-                          style={{
-                            backgroundColor: c.hex,
-                            opacity: c.alpha === undefined ? 1 : c.alpha / 100,
-                          }}
-                        />
-                      ))}{" "}
-                      {v.color}
-                    </td>
-                    <td>{v.size}</td>
-                    <td className="num-col">{v.quantity}</td>
-                    <td className="num-col">{v.cut_qty}</td>
-                    <td className="num-col">{v.sewn_qty}</td>
-                    <td className="num-col">{v.qc_passed_qty}</td>
-                    <td className="num-col">{v.packed_qty}</td>
-                    <td className="num-col">{v.delivered_qty}</td>
-                    <td className="num-col">{v.quantity - v.delivered_qty}</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="table-total-row">
-                  <th className="sticky-col">Tổng cộng</th>
-                  <th>-</th>
-                  <th className="num-col">
-                    {variants.reduce((n, v) => n + v.quantity, 0)}
-                  </th>
-                  <th className="num-col">
-                    {variants.reduce((n, v) => n + v.cut_qty, 0)}
-                  </th>
-                  <th className="num-col">
-                    {variants.reduce((n, v) => n + v.sewn_qty, 0)}
-                  </th>
-                  <th className="num-col">
-                    {variants.reduce((n, v) => n + v.qc_passed_qty, 0)}
-                  </th>
-                  <th className="num-col">
-                    {variants.reduce((n, v) => n + v.packed_qty, 0)}
-                  </th>
-                  <th className="num-col">
-                    {variants.reduce((n, v) => n + v.delivered_qty, 0)}
-                  </th>
-                  <th className="num-col">
-                    {variants.reduce((n, v) => n + Math.max(0, v.quantity - v.delivered_qty), 0)}
-                  </th>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-          {order.notes && <p className="muted">{order.notes}</p>}
-          <p className="muted">{order.risk_reason}</p>
-          <h3>Lịch sử xử lý / đóng gói / giao hàng</h3>
-          <div
-            className="table-scroll"
-            tabIndex={0}
-            role="region"
-            aria-label="Lịch sử xử lý đơn hàng"
-          >
-            <table className="mobile-stack-table">
-              <thead>
-                <tr>
-                  <th>Ngày</th>
-                  <th>Thao tác</th>
-                  <th>Màu / size</th>
-                  <th>Số lượng</th>
-                  <th>Số kiện</th>
-                  <th>Người thực hiện</th>
-                  <th>Ghi chú</th>
-                </tr>
-              </thead>
-              <tbody>
-                {order.operations?.map((r) => (
-                  <tr key={r.id}>
-                    <td data-label="Ngày">{r.operation_date}</td>
-                    <td data-label="Thao tác">
-                      {{
-                        qc: "QC",
-                        rework: "Sửa hàng",
-                        reinspect: "QC lại",
-                        pack: "Đóng gói",
-                        deliver: "Giao hàng",
-                      }[r.action] || r.action}
-                    </td>
-                    <td data-label="Màu / size">
-                      {r.color}/{r.size}
-                    </td>
-                    <td data-label="Số lượng">
-                      {r.quantity.toLocaleString("vi-VN")}
-                    </td>
-                    <td data-label="Số kiện">{r.packages || "—"}</td>
-                    <td data-label="Người thực hiện">{r.worker_name}</td>
-                    <td data-label="Ghi chú">
-                      <div className="mobile-cell-value">
-                        {r.notes || "—"}
-                        {r.image_url && (
-                          <ProductPhoto url={r.image_url} name="Ảnh lỗi QC" />
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-      {tab === "workflow" && (
-        <>
-          <ol className="timeline">
-            {LUUTA_STAGES.map((s) => {
-              const current = order.current_stage === s.key;
-              const info = order.stages?.find((x) => x.stage_key === s.key);
-              const done = info?.status === "completed";
-              const reason = transitionProblem(order, s.key);
-              const allowed =
-                !reason && !transitionPermissionProblem(session.user, order);
-              return (
-                <li
-                  key={s.key}
-                  className={current ? "current" : done ? "done" : ""}
-                >
-                  <span>{done ? <Check size={16} /> : s.step}</span>
-                  <div>
-                    <strong>{s.label}</strong>
-                    <small>
-                      {
-                        {
-                          pending: "Chưa bắt đầu",
-                          in_progress: "Đang thực hiện",
-                          completed: "Hoàn thành",
-                          has_issue: "Có vấn đề",
-                        }[info?.status || "pending"]
-                      }
-                    </small>
-                    {info && (
-                      <small>
-                        {info.assignee || "Chưa nhận việc"} · Nhận{" "}
-                        {info.received_qty} · Hoàn thành {info.completed_qty} ·
-                        Còn {info.remaining_qty}
-                      </small>
-                    )}
-                    {info?.received_at && (
-                      <small>Nhận lúc: {info.received_at}</small>
-                    )}
-                    {info?.started_at && (
-                      <small>Bắt đầu: {info.started_at}</small>
-                    )}
-                    {info?.completed_at && (
-                      <small>Hoàn thành: {info.completed_at}</small>
-                    )}
-                    {info?.notes && <small>{info.notes}</small>}
-                  </div>
-                  {allowed && (
-                    <Action
-                      tone="secondary"
-                      busy={busy}
-                      onClick={() =>
-                        save(
-                          `/api/orders/${order.id}`,
-                          { version: order.version, stage: s.key },
-                          "PATCH",
-                        )
-                      }
-                    >
-                      Chuyển đến
-                    </Action>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
-          {!transitionPermissionProblem(session.user, order) && (
-            <StageEditor
-              order={order}
-              employees={employees}
-              api={api}
-              onChanged={onChanged}
-            />
-          )}
-          <p className="muted">
-            Chỉ chuyển công đoạn khi đã đủ điều kiện. QC đạt và giao đủ được
-            kiểm tra theo từng màu–size.
-          </p>
-        </>
-      )}
-      {tab === "edit" && (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void saveDetails(new FormData(event.currentTarget));
-          }}
-          className="stack"
-        >
-          {permits(session.user, "orders.edit", { lineId: order.line_id }) && (
-            <>
-              <ProductImagePicker
-                existing={imageUrl}
-                file={imageFile}
-                onFile={(file) => {
-                  setImageFile(file);
-                  setImageUrl(null);
-                }}
-                onRemove={() => {
-                  setImageFile(null);
-                  setImageUrl(null);
-                }}
-              />
-              <Field label="Mã sản phẩm">
-                <input
-                  name="product_code"
-                  defaultValue={order.product_code}
-                  required
-                  maxLength={160}
-                />
-              </Field>
-              <Field label="Người phụ trách">
-                <select
-                  name="responsible_id"
-                  defaultValue={order.responsible_id || ""}
-                >
-                  <option value="">Chưa phân công cá nhân</option>
-                  {employees
-                    .filter((e) => e.line_id === order.line_id)
-                    .map((e) => (
-                      <option value={e.id} key={e.id}>
-                        {e.name}
-                      </option>
-                    ))}
-                </select>
-              </Field>
-              <Field label="Khách hàng">
-                <input name="customer" defaultValue={order.customer} required />
-              </Field>
-              <Field label="Hạn giao">
-                <input
-                  name="deadline"
-                  type="date"
-                  defaultValue={order.deadline}
-                  required
-                />
-              </Field>
-              <Field label="Ghi chú">
-                <textarea name="notes" defaultValue={order.notes || ""} />
-              </Field>
-            </>
-          )}
-          {permits(session.user, "orders.assign", {
-            lineId: order.line_id,
-          }) && (
-            <Field label="Tổ phụ trách">
-              <select name="line_id" defaultValue={order.line_id}>
-                {lines
-                  .filter((l) =>
-                    permits(session.user, "orders.assign", { lineId: l.id }),
-                  )
-                  .map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name}
-                    </option>
-                  ))}
-              </select>
-            </Field>
-          )}
-          <div className="mobile-form-footer">
-            <Action type="submit" className="mobile-form-submit" busy={busy}>
-              <Save size={18} />
-              Lưu thay đổi
-            </Action>
-          </div>
-        </form>
-      )}
-    </div>
-  );
-}
 export function RatesPanel({
   orders,
   rates,
@@ -1133,6 +38,46 @@ export function RatesPanel({
       r.stage === stage &&
       (chosenPart ? r.work_item_id === chosenPart.id : !r.work_item_id),
   );
+  // Earlier orders that already carry prices; the same product is suggested first.
+  const sources = orders
+    .filter((o) => o.id !== id && rates.some((r) => r.order_id === o.id))
+    .sort(
+      (a, b) =>
+        Number(
+          !!selectedOrder &&
+            (b.product_code === selectedOrder.product_code ||
+              b.product_name === selectedOrder.product_name),
+        ) -
+          Number(
+            !!selectedOrder &&
+              (a.product_code === selectedOrder.product_code ||
+                a.product_name === selectedOrder.product_name),
+          ) || (b.order_date || "").localeCompare(a.order_date || ""),
+    );
+  const [sourceValue, setSource] = useState("");
+  const source = sources.some((o) => o.id === sourceValue)
+    ? sourceValue
+    : sources[0]?.id || "";
+  async function copyFrom() {
+    if (!selectedOrder || !source) return;
+    setBusy(true);
+    setError("");
+    setSaved("");
+    try {
+      const result = await api<{ copied: string[]; skipped: string[] }>(
+        "/api/rates",
+        { order_id: id, copy_from: source, version: selectedOrder.version },
+      );
+      await onSaved();
+      setSaved(
+        `Đã sao chép đơn giá từ ${source} sang ${id}: ${result.copied.join(", ")}.${result.skipped.length ? ` Bỏ qua: ${result.skipped.join("; ")}.` : ""}`,
+      );
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
   const visibleRates = rates.flatMap((rate) => {
     const order = orders.find((o) => o.id === rate.order_id);
     return order &&
@@ -1187,6 +132,34 @@ export function RatesPanel({
                 ))}
               </select>
             </Field>
+            {!!sources.length && (
+              <Field
+                label="Sao chép từ đơn trước"
+                hint="Chép giá mọi công đoạn và phần việc Cắt/May; công đoạn đã có phân công hoặc sản lượng được giữ nguyên."
+              >
+                <div className="inline-actions">
+                  <select
+                    value={source}
+                    onChange={(e) => setSource(e.target.value)}
+                  >
+                    {sources.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.id} · {o.product_name}
+                      </option>
+                    ))}
+                  </select>
+                  <Action
+                    type="button"
+                    tone="secondary"
+                    busy={busy}
+                    disabled={!id}
+                    onClick={() => void copyFrom()}
+                  >
+                    Sao chép
+                  </Action>
+                </div>
+              </Field>
+            )}
             <Field label="Công đoạn">
               <select value={stage} onChange={(e) => setStage(e.target.value)}>
                 {stages.map((s) => (
@@ -1297,6 +270,7 @@ export function RatesPanel({
           </div>
         )}
       </section>
+      <PolicyCard api={api} />
       <section className="panel">
         <div className="panel-toolbar">
           <h2>Đơn giá đã lưu</h2>
@@ -1470,7 +444,7 @@ function WorkPlanForm({
       });
       await onSaved();
       setNotice(
-        "Đã lưu phần việc. Nhân viên có thể chọn phần việc khi ghi nhận.",
+        "Đã lưu phần việc. Người quản lý có thể phân công thợ và ghi nhận từng phần việc.",
       );
     } catch (e) {
       setError(message(e));
@@ -1555,5 +529,107 @@ function WorkPlanForm({
         </Action>
       </form>
     </details>
+  );
+}
+
+function PolicyCard({ api }: { api: Api }) {
+  const [policy, setPolicy] = useState<Policy>(DEFAULT_POLICY);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void api<Policy>("/api/settings/policy")
+      .then((p) => live && setPolicy(p))
+      .catch((e) => live && setError(message(e)));
+    return () => {
+      live = false;
+    };
+  }, [api]);
+  return (
+    <section className="panel padded">
+      <h2>Quy định xưởng</h2>
+      <p className="muted">
+        Áp dụng cho các lần ghi nhận tiếp theo; sản lượng và tiền công đã lưu
+        giữ nguyên.
+      </p>
+      <form
+        className="stack"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setBusy(true);
+          setError("");
+          setSaved("");
+          try {
+            setPolicy(await api<Policy>("/api/settings/policy", policy, "PUT"));
+            setSaved("Đã lưu quy định xưởng.");
+          } catch (e) {
+            setError(message(e));
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <ErrorNotice error={error} />
+        <div className="form-grid">
+          <Field
+            label="Cắt dư tối đa so với đơn (%)"
+            hint="Ví dụ 10: đơn 100 được nhập cắt tới 110."
+          >
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={1}
+              inputMode="numeric"
+              value={policy.overcut_percent}
+              onChange={(e) =>
+                setPolicy({
+                  ...policy,
+                  overcut_percent: Number(e.target.value),
+                })
+              }
+            />
+          </Field>
+          <Field
+            label="Gợi ý trừ công khi sản phẩm lỗi (%)"
+            hint="0 là chỉ theo dõi lỗi theo thợ; hệ thống không tự trừ lương."
+          >
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={1}
+              inputMode="numeric"
+              value={policy.defect_penalty_percent}
+              onChange={(e) =>
+                setPolicy({
+                  ...policy,
+                  defect_penalty_percent: Number(e.target.value),
+                })
+              }
+            />
+          </Field>
+        </div>
+        <label className="check-label">
+          <input
+            type="checkbox"
+            checked={policy.overcut_paid}
+            onChange={(e) =>
+              setPolicy({ ...policy, overcut_paid: e.target.checked })
+            }
+          />
+          Trả công phần cắt dư (bỏ chọn nếu chỉ trả công theo số lượng đặt)
+        </label>
+        {saved && (
+          <p role="status" className="rate-save-notice">
+            {saved}
+          </p>
+        )}
+        <Action type="submit" busy={busy}>
+          Lưu quy định
+        </Action>
+      </form>
+    </section>
   );
 }

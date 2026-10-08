@@ -1,6 +1,6 @@
 import type { Order, Line } from "./types";
 export interface Throughput {
-  line_id: number;
+  line_id: number | null;
   daily: number;
 }
 export function assessOrders(
@@ -9,6 +9,7 @@ export function assessOrders(
   rates: Throughput[],
   now = new Date(),
 ) {
+  void lines;
   const today = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Ho_Chi_Minh",
     year: "numeric",
@@ -27,7 +28,7 @@ export function assessOrders(
           (variants.reduce(
             (n, v) =>
               n +
-              v.cut_qty +
+              Math.min(v.quantity, v.cut_qty) +
               v.sewn_qty +
               v.qc_passed_qty +
               v.packed_qty +
@@ -42,9 +43,8 @@ export function assessOrders(
       o.risk_reason = "Đơn đã hoàn thành";
       continue;
     }
-    const measured = rates.find((r) => r.line_id === o.line_id)?.daily;
-    const capacity =
-      measured || lines.find((l) => l.id === o.line_id)?.capacity_per_day || 0;
+    const measured = rates.reduce((n, r) => n + r.daily, 0);
+    const capacity = measured;
     const remaining = variants.reduce(
       (n, v) => n + Math.max(0, v.quantity - v.delivered_qty),
       0,
@@ -53,12 +53,7 @@ export function assessOrders(
       (Date.parse(o.deadline) - Date.parse(today)) / 86400000,
     );
     const backlog = orders
-      .filter(
-        (x) =>
-          x.line_id === o.line_id &&
-          x.status !== "completed" &&
-          x.deadline <= o.deadline,
-      )
+      .filter((x) => x.status !== "completed" && x.deadline <= o.deadline)
       .reduce(
         (n, x) =>
           n +
@@ -73,15 +68,15 @@ export function assessOrders(
       o.risk_reason = `Quá hạn ${-days} ngày; còn ${remaining} sản phẩm chưa giao`;
     } else if (
       remaining > 0 &&
-      (!capacity || backlog / capacity > Math.max(0, days))
+      (capacity > 0 ? backlog / capacity > Math.max(0, days) : days <= 1)
     ) {
       o.status = "at_risk";
-      o.risk_reason = `Còn ${remaining} sản phẩm; tải chuyền đến hạn ${backlog}; ${measured ? "năng suất may thực tế 14 ngày" : "năng suất kế hoạch"} ${Math.round(capacity)} SP/ngày; còn ${days} ngày`;
+      o.risk_reason = `Còn ${remaining} sản phẩm; tải xưởng đến hạn ${backlog}; ${measured ? "năng suất may thực tế 14 ngày" : "chưa đủ dữ liệu năng suất"} ${Math.round(capacity)} SP/ngày; còn ${days} ngày`;
     } else {
       o.status = "on_track";
       o.risk_reason = o.delivered_complete
         ? "Đã giao đủ, chờ hoàn thành"
-        : `Đủ thời gian; ${measured ? "năng suất may thực tế 14 ngày" : "năng suất kế hoạch"} ${Math.round(capacity)} SP/ngày; tải đến hạn ${backlog} SP; còn ${days} ngày`;
+        : `Đủ thời gian; ${measured ? "năng suất may thực tế 14 ngày" : "chưa đủ dữ liệu năng suất"} ${Math.round(capacity)} SP/ngày; tải đến hạn ${backlog} SP; còn ${days} ngày`;
     }
   }
   return orders.sort(

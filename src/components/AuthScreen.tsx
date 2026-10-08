@@ -51,17 +51,17 @@ export function AuthScreen({
             đến thành phẩm.
           </h1>
           <p>
-            Một không gian để điều phối chuyền may, kiểm soát chất lượng và theo
+            Một không gian để điều phối các bộ phận, kiểm soát chất lượng và theo
             dõi tiền công.
           </p>
           <div className="auth-pills">
-            <span>5 chuyền may</span>
+            <span>6 bộ phận</span>
             <span>11 công đoạn</span>
             <span>Quyền theo vai trò</span>
           </div>
         </div>
         <p className="muted">
-          <ShieldCheck size={18} /> Truy cập dữ liệu theo vai trò và chuyền được
+          <ShieldCheck size={18} /> Truy cập dữ liệu theo vai trò và bộ phận được
           giao.
         </p>
       </section>
@@ -71,7 +71,7 @@ export function AuthScreen({
           <h2>{register ? "Tạo tài khoản" : "Chào mừng trở lại"}</h2>
           <p className="muted">
             {register
-              ? "Đăng ký và chờ admin gán vai trò, chuyền làm việc."
+              ? "Đăng ký và chờ admin gán vai trò, bộ phận làm việc."
               : "Đăng nhập để tiếp tục công việc của bạn."}
           </p>
           <form

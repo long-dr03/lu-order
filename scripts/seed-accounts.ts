@@ -16,9 +16,49 @@ async function main() {
     ".env.seed-accounts.local",
   );
   const definitions = [
-    { role: "director", username: "giamdoc", name: "Giám đốc mẫu" },
-    { role: "assistant", username: "troly", name: "Trợ lý sản xuất mẫu" },
-    { role: "qc", username: "qc", name: "QC mẫu" },
+    {
+      role: "director",
+      username: "giamdoc",
+      name: "Giám đốc mẫu",
+      department: "management",
+    },
+    {
+      role: "manager",
+      username: "truongphong",
+      name: "Trưởng phòng mẫu",
+      department: "management",
+    },
+    {
+      role: "assistant",
+      username: "troly",
+      name: "Trợ lý mẫu",
+      department: "management",
+    },
+    {
+      role: "leader",
+      username: "phutrachcat",
+      name: "Phụ trách Cắt",
+      department: "cutting",
+    },
+    {
+      role: "leader",
+      username: "phutrachmay",
+      name: "Phụ trách May",
+      department: "sewing",
+    },
+    { role: "qc", username: "qc", name: "Phụ trách QC", department: "quality" },
+    {
+      role: "leader",
+      username: "phutrachdonggoi",
+      name: "Phụ trách Đóng gói",
+      department: "packing",
+    },
+    {
+      role: "leader",
+      username: "phutrachgiaohang",
+      name: "Phụ trách Giao hàng",
+      department: "delivery",
+    },
   ];
   let localConfig = "";
   try {
@@ -43,8 +83,8 @@ async function main() {
           item,
           keep: await (async (definition) =>
             !(await db
-              .prepare("SELECT 1 FROM account_roles WHERE role_id=?")
-              .get(definition.role)))(item),
+              .prepare("SELECT 1 FROM accounts WHERE username=?")
+              .get(definition.username)))(item),
         })),
       )
     )
@@ -52,10 +92,10 @@ async function main() {
       .map((row) => row.item);
     // Save credentials before inserting accounts, so they are recoverable locally.
     for (const definition of planned) {
-      const key = `SEED_${definition.role.toUpperCase()}_PASSWORD`;
+      const key = `SEED_${definition.username.toUpperCase()}_PASSWORD`;
       if (!values[key]) {
         values[key] = randomBytes(18).toString("base64url") + "@1";
-        localConfig += `\nSEED_${definition.role.toUpperCase()}_USERNAME=${definition.username}\n${key}=${values[key]}\n`;
+        localConfig += `\nSEED_${definition.username.toUpperCase()}_USERNAME=${definition.username}\n${key}=${values[key]}\n`;
       }
     }
     if (planned.length) {
@@ -66,8 +106,8 @@ async function main() {
       for (const definition of planned) {
         if (
           await db
-            .prepare("SELECT 1 FROM account_roles WHERE role_id=?")
-            .get(definition.role)
+            .prepare("SELECT 1 FROM accounts WHERE username=?")
+            .get(definition.username)
         )
           continue;
         if (
@@ -85,17 +125,12 @@ async function main() {
             "Tên đăng nhập đã được sử dụng; không ghi đè tài khoản.",
           );
         const password =
-          values[`SEED_${definition.role.toUpperCase()}_PASSWORD`];
+          values[`SEED_${definition.username.toUpperCase()}_PASSWORD`];
         const hash = hashPassword(password);
         if (!verifyPassword(password, hash))
           throw new Error("Không thể xác minh mật khẩu seed.");
         const id = randomUUID();
-        const employeeId = `NV-SAMPLE-${definition.role.toUpperCase()}`;
-        const line = (await db
-          .prepare("SELECT id FROM lines ORDER BY id LIMIT 1")
-          .get()) as { id: number } | undefined;
-        if (!line)
-          throw new Error("Cần có chuyền để liên kết hồ sơ nhân viên mẫu.");
+        const employeeId = `NV-SAMPLE-${definition.username.toUpperCase()}`;
         const role = (await db
           .prepare("SELECT name FROM roles WHERE id=?")
           .get(definition.role)) as { name: string };
@@ -103,7 +138,10 @@ async function main() {
           .prepare(
             "INSERT INTO employees(id,name,line_id,role) VALUES (?,?,?,?)",
           )
-          .run(employeeId, definition.name, line.id, role.name);
+          .run(employeeId, definition.name, null, role.name);
+        await db
+          .prepare("INSERT INTO employee_departments VALUES (?,?)")
+          .run(employeeId, definition.department);
         await db
           .prepare(
             "INSERT INTO accounts(id,username,name,password_hash,status,employee_id,line_ids,must_change_password) VALUES (?,?,?,?,'active',?,?,0)",
@@ -114,7 +152,7 @@ async function main() {
             definition.name,
             hash,
             employeeId,
-            JSON.stringify([line.id]),
+            "[]",
           );
         await db
           .prepare("INSERT INTO account_roles(account_id,role_id) VALUES (?,?)")

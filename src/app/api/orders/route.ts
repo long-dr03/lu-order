@@ -1,3 +1,4 @@
+import { DEPARTMENTS } from "@/lib/departments";
 import {
   authenticate,
   guardWrite,
@@ -9,7 +10,6 @@ import {
   visibleOrders,
   filterOrders,
   queryFilters,
-  linesFor,
   employeesFor,
   dashboard,
   createOrderSchema,
@@ -28,7 +28,7 @@ export async function GET(request: Request) {
     return ok({
       orders: filterOrders(await visibleOrders(ctx), queryFilters(request)),
       stats: await dashboard(ctx),
-      lines: await linesFor(ctx),
+      departments: DEPARTMENTS,
       employees: await employeesFor(ctx, "orders.view"),
       nextCode: await generateNextOrderCode(),
     });

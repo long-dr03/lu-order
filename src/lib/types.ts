@@ -1,3 +1,4 @@
+import type { DepartmentId } from "./departments";
 export const LUUTA_STAGES = [
   { key: "nhan_don", label: "Nhận đơn", step: 1 },
   { key: "kiem_npl", label: "Kiểm NPL/Vải", step: 2 },
@@ -64,7 +65,7 @@ export interface Order {
   product_name: string;
   image_url: string | null;
   total_quantity: number;
-  line_id: number; // 1 to 5
+  line_id: number | null; // 1 to 5
   order_date: string;
   deadline: string;
   priority: "normal" | "high" | "urgent";
@@ -74,6 +75,7 @@ export interface Order {
   progress: number; // 0 - 100
   status: "on_track" | "at_risk" | "delayed" | "completed";
   notes: string | null;
+  reason?: string | null;
   created_at: string;
   variants?: OrderVariant[];
   stages?: OrderStage[];
@@ -85,9 +87,12 @@ export interface Order {
     quantity: number;
     packages: number;
     operation_date: string;
+    operation_time?: string | null;
     image_url?: string | null;
     worker_name: string;
     notes: string;
+    reason?: string | null;
+    created_at?: string;
   }[];
 }
 
@@ -104,15 +109,21 @@ export interface Line {
 }
 
 export interface Employee {
+  department_ids?: DepartmentId[];
+  active?: number;
+  has_account?: boolean;
   assigned_line_ids?: number[];
   id: string;
   name: string;
-  line_id: number;
+  line_id: number | null;
   role: string;
   phone: string;
 }
 
 export interface ProductionLog {
+  department_id?: DepartmentId | null;
+  reason?: string | null;
+  actor_id?: string | null;
   work_item_id?: number | null;
   work_item_name?: string | null;
   completed_quantity?: number | null;
@@ -121,7 +132,7 @@ export interface ProductionLog {
   log_date: string; // YYYY-MM-DD
   employee_id: string;
   employee_name: string;
-  line_id: number;
+  line_id: number | null;
   order_id: string;
   product_name: string;
   color: string;

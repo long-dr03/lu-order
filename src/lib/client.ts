@@ -2,7 +2,8 @@ import type { SessionInfo } from "./permissions";
 import type { Order, Line, Employee, ProductionLog } from "./types";
 export interface DashboardData {
   orders: Order[];
-  lines: Line[];
+  lines?: Line[];
+  departments: { id: string; name: string }[];
   employees: Employee[];
   nextCode: string;
   stats: {
@@ -31,10 +32,20 @@ export interface PayrollData {
   lockedBy?: string;
   lockedAt?: string;
   logs: ProductionLog[];
+  defects?: {
+    employee_id: string;
+    employee_name: string;
+    stage: string;
+    quantity: number;
+    value: number;
+    penalty: number;
+  }[];
+  defect_penalty_percent?: number;
   summary: {
     employee_id: string;
     employee_name: string;
-    line_id: number;
+    line_id: number | null;
+    department_id?: string | null;
     total_qty: number;
     total_salary: number;
     total_entries: number;

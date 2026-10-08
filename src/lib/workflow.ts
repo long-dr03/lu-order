@@ -1,3 +1,4 @@
+import { departmentAccess, departmentFor } from "./departments";
 import { permits, type Account } from "./permissions";
 import type { Order, OrderVariant } from "./types";
 interface Variant extends OrderVariant {
@@ -27,31 +28,26 @@ export function transitionProblem(
   if (!nextStages[order.current_stage].includes(target))
     return "Chỉ được chuyển sang công đoạn kế tiếp trong quy trình.";
   const variants = order.variants as Variant[];
-  if (target === "may" && variants.some((v) => v.cut_qty < v.quantity))
-    return "Cần cắt đủ từng màu–size trước khi chuyển may.";
-  if (target === "qc" && variants.some((v) => v.sewn_qty < v.quantity))
-    return "Cần may đủ từng màu–size trước khi chuyển QC.";
+  if (target === "may" && !variants.some((v) => v.cut_qty > 0))
+    return "Cần có số lượng đã cắt trước khi chuyển may.";
+  if (target === "qc" && !variants.some((v) => v.sewn_qty > 0))
+    return "Cần có số lượng đã may trước khi chuyển QC.";
   if (
     target === "sua_hang" &&
-    !variants.some((v) => v.qc_inspected_qty - v.qc_passed_qty > 0)
+    !variants.some((v) => remainingOperation(v, "rework") > 0)
   )
     return variants.every((v) => v.qc_passed_qty >= v.quantity)
       ? "QC đã đạt đủ, không có sản phẩm lỗi cần sửa. Hãy chuyển thẳng sang Đóng gói."
       : "Không có sản phẩm lỗi cần sửa. Hãy kiểm QC đủ số lượng trước khi chuyển sang Đóng gói.";
   if (
     target === "qc_lai" &&
-    variants.some(
-      (v) => v.reworked_qty < v.defect_qty + v.reinspected_qty - v.repassed_qty,
-    )
+    !variants.some((v) => remainingOperation(v, "reinspect") > 0)
   )
-    return "Cần sửa hết sản phẩm lỗi trước khi QC lại.";
-  if (
-    target === "dong_goi" &&
-    variants.some((v) => v.qc_passed_qty < v.quantity)
-  )
-    return "QC chưa đạt đủ từng màu–size.";
-  if (target === "giao_hang" && variants.some((v) => v.packed_qty < v.quantity))
-    return "Cần đóng gói đủ trước khi giao hàng.";
+    return "Chưa có sản phẩm sửa xong chờ kiểm lại.";
+  if (target === "dong_goi" && !variants.some((v) => v.qc_passed_qty > 0))
+    return "Chưa có sản phẩm QC đạt để đóng gói.";
+  if (target === "giao_hang" && !variants.some((v) => v.packed_qty > 0))
+    return "Chưa có sản phẩm đóng gói để giao.";
   if (
     target === "hoan_thanh" &&
     variants.some((v) => v.delivered_qty < v.quantity)
@@ -67,14 +63,14 @@ export function exceptionalTransitionProblem(
   if (target === order.current_stage) return "Đơn đã ở bước này.";
   if (
     target === "dong_goi" &&
-    (order.variants || []).some((v) => v.qc_passed_qty < v.quantity)
+    !(order.variants || []).some((v) => v.qc_passed_qty > 0)
   )
-    return "QC chưa đạt đủ từng màu–size; không thể chuyển đóng gói.";
+    return "Chưa có sản phẩm QC đạt để đóng gói.";
   if (
     target === "giao_hang" &&
-    (order.variants || []).some((v) => v.packed_qty < v.quantity)
+    !(order.variants || []).some((v) => v.packed_qty > 0)
   )
-    return "Cần đóng gói đủ trước khi giao hàng.";
+    return "Chưa có sản phẩm đóng gói để giao.";
   if (
     target === "hoan_thanh" &&
     (order.variants || []).some((v) => v.delivered_qty < v.quantity)
@@ -87,21 +83,12 @@ export function transitionPermissionProblem(
   user: Account,
   order: Order,
 ): string | null {
-  const scope = { lineId: order.line_id };
+  const scope = { stage: order.current_stage };
   if (!permits(user, "orders.move", scope))
     return "Bạn không có quyền chuyển công đoạn.";
-  if (["qc", "sua_hang", "qc_lai"].includes(order.current_stage))
-    return permits(user, "qc.manage", scope)
-      ? null
-      : "Cần quyền QC để chuyển công đoạn này.";
-  if (["dong_goi", "giao_hang"].includes(order.current_stage))
-    return permits(user, "delivery.manage", scope)
-      ? null
-      : "Cần quyền giao hàng để chuyển công đoạn này.";
-  return permits(user, "production.create", scope) ||
-    permits(user, "orders.edit", scope)
+  return departmentAccess(user, departmentFor(order.current_stage))
     ? null
-    : "Cần quyền quản lý sản xuất để chuyển công đoạn này.";
+    : "Chỉ người phụ trách bộ phận của bước hiện tại được chuyển bước.";
 }
 
 export const OPERATION_ACTIONS = [
@@ -110,7 +97,7 @@ export const OPERATION_ACTIONS = [
     key: "rework",
     label: "Sửa hàng",
     stage: "sua_hang",
-    permission: "qc.manage",
+    permission: "production.create",
   },
   {
     key: "reinspect",
@@ -122,7 +109,7 @@ export const OPERATION_ACTIONS = [
     key: "pack",
     label: "Đóng gói",
     stage: "dong_goi",
-    permission: "delivery.manage",
+    permission: "production.create",
   },
   {
     key: "deliver",
@@ -134,14 +121,19 @@ export const OPERATION_ACTIONS = [
 export function availableOperations(user: Account, order: Order) {
   return OPERATION_ACTIONS.filter(
     (a) =>
-      a.stage === order.current_stage &&
-      (permits(user, a.permission, { lineId: order.line_id }) ||
-        (a.key === "deliver" &&
-          !!user.employee_id &&
-          user.line_ids.includes(order.line_id) &&
-          permits(user, "delivery.record", { lineId: order.line_id }))),
+      !["nhan_don", "kiem_npl", "kiem_rap", "hoan_thanh"].includes(
+        order.current_stage,
+      ) &&
+      (order.variants || []).some((v) => remainingOperation(v, a.key) > 0) &&
+      permits(user, a.permission, { stage: a.key }),
   );
 }
+/** Cutters often cut more than ordered; allow it up to the workshop's overcut percent. */
+export const cutLimit = (quantity: number, percent = 10) =>
+  Math.floor((quantity * (100 + percent)) / 100);
+/** Sewing never exceeds what was ordered, even when more was cut. */
+export const sewLimit = (v: { quantity: number; cut_qty: number }) =>
+  Math.min(v.quantity, v.cut_qty);
 export function remainingOperation(
   v: OrderVariant | undefined,
   action: string | undefined,

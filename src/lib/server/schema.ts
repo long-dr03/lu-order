@@ -31,6 +31,7 @@ export const baseSchema = `
     progress BIGINT NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'on_track',
     notes TEXT,
+    reason TEXT,
     created_at TEXT DEFAULT (to_char(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD HH24:MI:SS'))
   );
 

@@ -1,3 +1,4 @@
+import { isOperator } from "../departments";
 import {
   randomBytes,
   randomUUID,
@@ -72,7 +73,18 @@ export async function account(id: string): Promise<Account | null> {
     .all(id)) as { role_id: string }[];
   return {
     ...row,
-    line_ids: JSON.parse(row.line_ids),
+    line_ids: undefined,
+    department_ids: row.employee_id
+      ? (
+          (await db
+            .prepare(
+              "SELECT department_id FROM employee_departments WHERE employee_id=? ORDER BY department_id",
+            )
+            .all(row.employee_id)) as {
+            department_id: import("../departments").DepartmentId;
+          }[]
+        ).map((d) => d.department_id)
+      : [],
     roles: (await getRoles()).filter((r) =>
       ids.some((i) => i.role_id === r.id),
     ),
@@ -133,13 +145,38 @@ export async function authenticate(
     403,
     "Nhân viên cần đổi mật khẩu trước khi được đại diện.",
   );
+  ensure(
+    user.roles.some((r) => r.id !== "worker"),
+    403,
+    "Thợ chỉ có hồ sơ; người quản lý ghi nhận công việc thay thợ.",
+  );
+  if (user.employee_id)
+    ensure(
+      (
+        (await db
+          .prepare("SELECT active FROM employees WHERE id=?")
+          .get(user.employee_id)) as { active: number } | undefined
+      )?.active === 1,
+      403,
+      "Hồ sơ đã ngừng hoạt động.",
+    );
   return { actor, user, tokenHash, csrf: session.csrf, representing };
 }
 export function requirePermission(
   ctx: Context,
   permission: Permission,
-  resource?: { employeeId?: string | null; lineId?: number },
+  resource?: {
+    employeeId?: string | null;
+    lineId?: number | null;
+    departmentId?: string | null;
+    stage?: string;
+  },
 ) {
+  ensure(
+    isOperator(ctx.user),
+    403,
+    "Tài khoản chưa được Admin phân loại bộ phận. Vui lòng liên hệ Admin.",
+  );
   ensure(
     resource
       ? permits(ctx.user, permission, resource)
@@ -162,16 +199,14 @@ export function guardWrite(
   options = { contentType: "application/json", maxBytes: 100_000 },
 ) {
   const origin = request.headers.get("origin");
-  const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
-  const proto = request.headers.get("x-forwarded-proto") || (request.url.startsWith("https") ? "https" : "http");
+  const host =
+    request.headers.get("x-forwarded-host") || request.headers.get("host");
+  const proto =
+    request.headers.get("x-forwarded-proto") ||
+    (request.url.startsWith("https") ? "https" : "http");
   const hostOrigin = host ? `${proto}://${host}` : new URL(request.url).origin;
   const expected = process.env.APP_ORIGIN || hostOrigin;
-  const isAllowedOrigin =
-    origin === expected ||
-    (origin && host && new URL(origin).host === host) ||
-    (!process.env.APP_ORIGIN &&
-      origin &&
-      (origin.includes("localhost") || origin.includes("127.0.0.1") || origin.includes("192.168.")));
+  const isAllowedOrigin = origin === expected;
   ensure(isAllowedOrigin, 403, "Nguồn yêu cầu không hợp lệ.");
   ensure(
     request.headers.get("content-type")?.startsWith(options.contentType),
@@ -194,11 +229,12 @@ export async function audit(
   ctx: Context,
   action: string,
   details: string,
-  lineId?: number,
+  lineId?: number | null,
+  departmentId?: string,
 ) {
   await db
     .prepare(
-      "INSERT INTO audit_logs(user_name,action,details,actor_id,represented_id,line_id) VALUES (?,?,?,?,?,?)",
+      "INSERT INTO audit_logs(user_name,action,details,actor_id,represented_id,line_id,department_id) VALUES (?,?,?,?,?,?,?)",
     )
     .run(
       ctx.actor.name,
@@ -207,6 +243,10 @@ export async function audit(
       ctx.actor.id,
       ctx.representing ? ctx.user.id : null,
       lineId ?? null,
+      departmentId ||
+        (ctx.user.department_ids?.length === 1
+          ? ctx.user.department_ids[0]
+          : null),
     );
 }
 export function actorLabel(ctx: Context) {

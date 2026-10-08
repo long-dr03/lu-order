@@ -101,7 +101,23 @@ export async function POST(
       await db
         .prepare("DELETE FROM auth_attempts WHERE key=?")
         .run(`login:${input.username.toLowerCase()}`);
-      const response = ok({ user: await account(row.id) });
+      const loggedIn = (await account(row.id))!;
+      ensure(
+        loggedIn.roles.some((r) => r.id !== "worker"),
+        403,
+        "Thợ chỉ có hồ sơ, không sử dụng tài khoản đăng nhập.",
+      );
+      if (loggedIn.employee_id)
+        ensure(
+          (
+            (await db
+              .prepare("SELECT active FROM employees WHERE id=?")
+              .get(loggedIn.employee_id)) as { active: number } | undefined
+          )?.active === 1,
+          403,
+          "Hồ sơ đã ngừng hoạt động.",
+        );
+      const response = ok({ user: loggedIn });
       await createSession(row.id, response);
       return response;
     }

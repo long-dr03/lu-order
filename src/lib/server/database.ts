@@ -81,6 +81,9 @@ const identityTables = new Set([
   "stage_events",
   "order_work_items",
   "pending_packing_pay",
+  "order_materials",
+  "material_movements",
+  "defect_attributions",
 ]);
 export const db = {
   prepare(sql: string) {

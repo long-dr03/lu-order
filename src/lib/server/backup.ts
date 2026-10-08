@@ -158,6 +158,13 @@ export async function runBackup(now = Date.now()) {
       variants: related("order_variants"),
       stages: related("order_stages"),
       rates: related("order_rates"),
+      departments: rows("departments"),
+      employeeDepartments: rows("employee_departments"),
+      assignments: related("work_assignments"),
+      shipments: related("shipments"),
+      shipmentItems: rows("shipment_items").filter((r) =>
+        related("shipments").some((s) => s.id === r.shipment_id),
+      ),
       workItems: related("order_work_items"),
       pendingPackingPay: related("pending_packing_pay"),
       production,

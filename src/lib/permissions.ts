@@ -1,10 +1,18 @@
+import {
+  departmentAccess,
+  departmentFor,
+  isOperator,
+  type DepartmentId,
+} from "./departments";
 export const PERMISSIONS = {
   "orders.view": "Xem đơn hàng",
   "orders.create": "Tạo đơn hàng",
   "orders.edit": "Sửa đơn hàng",
   "orders.override": "Chuyển bước ngoại lệ (quay lại / nhảy bước)",
   "orders.move": "Chuyển công đoạn",
-  "orders.assign": "Phân chuyền",
+  "orders.assign": "Điều phối đơn",
+  "employees.manage": "Quản lý hồ sơ thợ",
+  "production.assign": "Phân công thợ",
   "production.view": "Xem sản lượng",
   "production.create": "Nhập sản lượng",
   "rates.manage": "Cấu hình đơn giá",
@@ -23,10 +31,11 @@ export const PERMISSIONS = {
   "users.represent": "Thao tác thay nhân viên",
 } as const;
 export type Permission = keyof typeof PERMISSIONS;
-export type Scope = "self" | "lines" | "all";
+export type Scope = "self" | "lines" | "departments" | "all";
 export const SCOPE_LABELS: Record<Scope, string> = {
   self: "Cá nhân",
-  lines: "Chuyền được giao",
+  lines: "Phạm vi cũ (cần chuyển đổi)",
+  departments: "Bộ phận được giao",
   all: "Toàn xưởng",
 };
 export function scopesForPermission(permission: Permission): Scope[] {
@@ -43,8 +52,8 @@ export function scopesForPermission(permission: Permission): Scope[] {
     permission === "rates.manage" ||
     permission === "payroll.adjust"
   )
-    return ["lines", "all"];
-  return ["self", "lines", "all"];
+    return ["departments", "all"];
+  return ["self", "departments", "all"];
 }
 export interface Grant {
   permission: Permission;
@@ -63,7 +72,8 @@ export interface Account {
   name: string;
   status: "pending" | "active" | "locked";
   employee_id: string | null;
-  line_ids: number[];
+  line_ids?: number[]; // Deprecated; omitted from account/session responses.
+  department_ids?: DepartmentId[];
   must_change_password: number;
   roles: Role[];
 }
@@ -83,8 +93,18 @@ export function hasPermission(user: Account, permission: Permission) {
 export function permits(
   user: Account,
   permission: Permission,
-  resource: { employeeId?: string | null; lineId?: number } = {},
+  resource: {
+    employeeId?: string | null;
+    lineId?: number | null;
+    departmentId?: string | null;
+    stage?: string;
+  } = {},
 ) {
+  if (!isOperator(user)) return false;
+  const department =
+    resource.departmentId ||
+    (resource.stage ? departmentFor(resource.stage) : undefined);
+  if (department && !departmentAccess(user, department)) return false;
   return grantsFor(user).some(
     (g) =>
       g.permission === permission &&
@@ -92,14 +112,13 @@ export function permits(
         (g.scope === "self" &&
           !!user.employee_id &&
           resource.employeeId === user.employee_id) ||
-        (g.scope === "lines" &&
-          resource.lineId !== undefined &&
-          user.line_ids.includes(resource.lineId))),
+        (g.scope === "departments" && !!user.department_ids?.length)),
   );
 }
 export const permissionGroups = [
   { label: "Đơn hàng", prefix: "orders." },
   { label: "Sản xuất", prefix: "production." },
+  { label: "Hồ sơ thợ", prefix: "employees." },
   { label: "Đơn giá", prefix: "rates." },
   { label: "Chất lượng", prefix: "qc." },
   { label: "Giao hàng", prefix: "delivery." },
@@ -112,21 +131,24 @@ export const permissionGroups = [
 
 export function canRecordProduction(
   user: Account,
-  employee: { id: string; line_id: number; assigned_line_ids?: number[] },
-  order: { line_id: number },
+  employee: {
+    id: string;
+    line_id?: number | null;
+    assigned_line_ids?: number[];
+    department_ids?: DepartmentId[];
+    active?: number;
+  },
+  order: { line_id?: number | null },
+  stage?: string,
 ) {
+  void order;
   return (
-    (employee.line_id === order.line_id ||
-      employee.assigned_line_ids?.includes(order.line_id) ||
-      (employee.id === user.employee_id &&
-        user.line_ids.includes(order.line_id))) &&
+    employee.active !== 0 &&
+    !!employee.department_ids?.length &&
+    (stage ? employee.department_ids.includes(departmentFor(stage)) : true) &&
     permits(user, "production.create", {
       employeeId: employee.id,
-      lineId: order.line_id,
-    }) &&
-    (grantsFor(user).some(
-      (g) => g.permission === "production.create" && g.scope === "all",
-    ) ||
-      user.line_ids.includes(order.line_id))
+      ...(stage ? { stage } : {}),
+    })
   );
 }
