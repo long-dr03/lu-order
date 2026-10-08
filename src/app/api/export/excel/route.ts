@@ -239,6 +239,54 @@ export async function GET(request: Request) {
             r.notes || "",
           ]),
       );
+      if (dataset === "orders") {
+        const kinds: Record<string, string> = {
+          receive: "Nhận về",
+          defect: "Lỗi",
+          use: "Đã dùng",
+          return: "Trả lại",
+        };
+        sheet(
+          "NPL-Vải",
+          [
+            "Mã đơn",
+            "NPL / vải",
+            "Đơn vị",
+            "Cần cho đơn",
+            "Nội dung",
+            "Số lượng",
+            "Ngày",
+            "Ghi chú",
+          ],
+          (
+            (await db
+              .prepare(
+                "SELECT m.order_id,m.name,m.unit,m.required_qty,v.kind,v.quantity,v.movement_date,v.notes FROM order_materials m LEFT JOIN material_movements v ON v.material_id=m.id ORDER BY m.order_id,m.id,v.id",
+              )
+              .all()) as {
+              order_id: string;
+              name: string;
+              unit: string;
+              required_qty: number;
+              kind: string | null;
+              quantity: number | null;
+              movement_date: string | null;
+              notes: string | null;
+            }[]
+          )
+            .filter((r) => ids.has(r.order_id))
+            .map((r) => [
+              r.order_id,
+              r.name,
+              r.unit,
+              r.required_qty,
+              r.kind ? kinds[r.kind] : "Chưa ghi nhận",
+              r.quantity ?? "",
+              r.movement_date || "",
+              r.notes || "",
+            ]),
+        );
+      }
       const deliveries = (await db
         .prepare(
           "SELECT s.*,e.name worker_name,a.name actor_name FROM shipments s JOIN employees e ON e.id=s.worker_id JOIN accounts a ON a.id=s.actor_id ORDER BY s.delivered_at",
@@ -506,6 +554,50 @@ export async function GET(request: Request) {
             q.reinspected_qty,
             q.repassed_qty,
             q.inspector,
+          ]),
+      );
+      sheet(
+        "Lỗi theo thợ",
+        [
+          "Mã đơn",
+          "Màu",
+          "Size",
+          "Thợ gây lỗi",
+          "Công đoạn",
+          "Số sản phẩm lỗi",
+          "Ngày",
+        ],
+        (
+          (await db
+            .prepare(
+              "SELECT d.order_id,d.color,d.size,e.name worker_name,d.stage,d.quantity,d.created_at FROM defect_attributions d JOIN employees e ON e.id=d.employee_id ORDER BY d.id",
+            )
+            .all()) as {
+            order_id: string;
+            color: string;
+            size: string;
+            worker_name: string;
+            stage: string;
+            quantity: number;
+            created_at: string;
+          }[]
+        )
+          .filter(
+            (d) =>
+              orders.some((o) => o.id === d.order_id) &&
+              (!f.from || d.created_at.slice(0, 10) >= f.from) &&
+              (!f.to || d.created_at.slice(0, 10) <= f.to) &&
+              (!f.color || d.color === f.color) &&
+              (!f.size || d.size === f.size),
+          )
+          .map((d) => [
+            d.order_id,
+            d.color,
+            d.size,
+            d.worker_name,
+            d.stage,
+            d.quantity,
+            d.created_at.slice(0, 10),
           ]),
       );
     } else {

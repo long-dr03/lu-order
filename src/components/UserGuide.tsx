@@ -28,8 +28,8 @@ const sections = [
       "Quản lý mở Đơn hàng → Tạo đơn. Nhập khách, tên sản phẩm, ngày nhận, hạn giao; kiểm tra mã tự sinh, thêm ảnh và các biến thể màu–size. Thêm size cùng màu tạo dòng mới giữ nguyên màu, không phải gõ lại. Không chọn chuyền hoặc gán đơn cố định cho một bộ phận.",
       "Người phụ trách đơn là đầu mối điều phối, không phải người làm mọi công đoạn. Một áo phối nhiều màu vẫn tính số lượng một lần.",
       "Người có quyền Đơn giá cấu hình giá từng công đoạn, hoặc dùng Sao chép từ đơn trước để chép giá và phần việc Cắt/May của một đơn cùng sản phẩm. Nếu nhiều người làm thân, tay và ráp riêng, cấu hình các phần việc trước khi phân công. Thay giá không sửa tiền công lịch sử.",
-      "Mở chi tiết đơn → Phân công → chọn công đoạn và phần việc → chọn nhiều thợ (hoặc Chọn tất cả) → Lưu phân công. Phân công nhanh cả bộ phận giao mọi thợ đang làm cho các công đoạn/phần việc chưa có người; phần đã phân công giữ nguyên. Chọn May chỉ hiện thợ thuộc May; sửa hàng chỉ hiện thợ thuộc QC. Phân công không tự tạo tiền công.",
-      "Ở tab Tiến độ, Quản lý nhấn Hoàn tất chuẩn bị → Cắt để qua Nhận đơn, Kiểm NPL/Vải, Kiểm rập trong một lần (lịch sử từng bước vẫn lưu) rồi bắt đầu sản xuất. Các bước sau chuyển bằng nút Chuyển sang… Khi một thợ ngừng làm, ngừng hoạt động hồ sơ hoặc bỏ phân công; lịch sử vẫn giữ nguyên.",
+      "Mở chi tiết đơn → Phân công → chọn công đoạn và phần việc → chọn nhiều thợ (hoặc Chọn tất cả) → Lưu phân công. Phân công nhanh cả bộ phận giao mọi thợ đang làm cho các công đoạn/phần việc chưa có người; phần đã phân công giữ nguyên. Chọn May chỉ hiện thợ thuộc May; sửa hàng cũng do thợ May thực hiện (QC chỉ kiểm và kiểm lại). Phân công không tự tạo tiền công.",
+      "Nếu đơn cần kiểm vải, mở tab NPL/Vải để khai báo vải/phụ liệu cần dùng rồi ghi số nhận về, số lỗi, số đã dùng (bộ phận Cắt cũng ghi được số dùng và số lỗi). Ở tab Tiến độ, Quản lý nhấn Hoàn tất chuẩn bị → Cắt để qua Nhận đơn, Kiểm NPL/Vải, Kiểm rập trong một lần (lịch sử từng bước vẫn lưu) rồi bắt đầu sản xuất. Các bước sau chuyển bằng nút Chuyển sang… Khi một thợ ngừng làm, ngừng hoạt động hồ sơ hoặc bỏ phân công; lịch sử vẫn giữ nguyên.",
     ],
   },
   {
@@ -38,7 +38,7 @@ const sections = [
       "Mở Bộ phận hoặc Nhập sản lượng, chọn đơn và công đoạn thuộc bộ phận mình. Quản lý có thể chọn toàn quy trình theo quyền được cấp.",
       "Chọn phần việc nếu có, rồi bấm tên thợ đã được phân công. Nhiều thợ cùng làm: bấm thợ thứ nhất, nhập số; bấm thợ tiếp theo, nhập số của người đó — một lần lưu ghi cho tất cả, mỗi thợ nhận công riêng. Nếu chưa có thợ, dùng Mở đơn để phân công; không nhập vào hồ sơ của người khác để thay thế.",
       "Nhập lượng vừa làm thêm cho các màu–size trong cùng bảng. Ví dụ hôm qua 5, hôm nay thêm 2 thì ghi 2. Điền tối đa còn lại chỉ dùng khi đã thực sự làm xong số hiển thị.",
-      "Công đoạn Cắt được nhập dư so với đơn (tối đa +50%) vì thực tế thường cắt nhiều hơn. Phần dư vẫn tính công cắt, nhưng May và các bước sau chỉ tính tối đa theo số lượng đặt.",
+      "Công đoạn Cắt được nhập dư so với đơn vì thực tế thường cắt nhiều hơn. Mức dư tối đa (mặc định 10%) và việc có trả công phần dư hay không do người có quyền Đơn giá chỉnh ở mục Quy định xưởng của tab Đơn giá. May và các bước sau luôn chỉ tính tối đa theo số lượng đặt.",
       "Nhấn Ghi nhận một lần. Cả bảng được lưu trong cùng giao dịch; một dòng sai khiến toàn bộ lần nhập bị từ chối. Nếu dữ liệu đã thay đổi, tải lại số lượng trước khi nhập tiếp.",
     ],
     paragraphs: [
@@ -60,7 +60,8 @@ const sections = [
     steps: [
       "Người phụ trách QC mở Kiểm soát chất lượng hoặc chi tiết đơn → Kiểm QC. Người kiểm được lấy từ tài khoản, không chọn người khác.",
       "Chọn kiểm lần đầu hoặc kiểm lại; nhập ngày giờ, số kiểm và số đạt cho nhiều màu–size. Kiểm 5 đạt 3 thì còn 2 lỗi. Ghi mô tả lỗi và giải trình khi cần.",
-      "Để sửa: phân công thợ thuộc QC ở công đoạn Sửa hàng, rồi mở Ghi sản lượng → Sửa hàng. Hệ thống lưu người sửa riêng với người ghi nhận.",
+      "Để sửa: phân công thợ May ở công đoạn Sửa hàng, rồi người phụ trách May mở Ghi sản lượng → Sửa hàng. Hệ thống lưu người sửa riêng với người ghi nhận. QC không sửa hàng.",
+      "Khi QC lần đầu có sản phẩm lỗi, chọn Thợ gây lỗi (May hoặc Cắt) và số sản phẩm lỗi của từng người; không bắt buộc. Số lỗi quy cho thợ không vượt số lỗi QC và không vượt sản lượng thợ đó đã ghi. Tab Lương sản phẩm có bảng Lỗi quy cho từng thợ kèm gợi ý trừ công theo mức đặt ở Quy định xưởng; hệ thống không tự trừ lương, muốn trừ thì dùng Điều chỉnh có lý do.",
       "Sau sửa, QC ghi kiểm lại. Chỉ lượng QC đạt được đóng gói; lượng lỗi tiếp tục sửa và kiểm lại. Không phải chờ cả đơn đủ mới xử lý phần đạt.",
     ],
   },

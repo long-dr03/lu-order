@@ -146,10 +146,9 @@ export function canRecordProduction(
     employee.active !== 0 &&
     !!employee.department_ids?.length &&
     (stage ? employee.department_ids.includes(departmentFor(stage)) : true) &&
-    (permits(user, "production.create", {
+    permits(user, "production.create", {
       employeeId: employee.id,
       ...(stage ? { stage } : {}),
-    }) ||
-      (stage === "Sửa hàng" && permits(user, "qc.manage", { stage })))
+    })
   );
 }

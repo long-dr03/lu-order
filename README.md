@@ -31,14 +31,20 @@ Với database cũ, thực hiện [hướng dẫn migration bộ phận](docs/de
 2. Admin vào **Tài khoản** để duyệt tài khoản người ghi nhận, liên kết hồ sơ của chính người đó và gán vai trò. Danh sách thợ thuộc bộ phận tự có sẵn, không liên kết tài khoản tổ trưởng với hồ sơ một thợ khác. Tài khoản chỉ có vai trò Nhân viên bị khóa sau chuyển đổi.
 3. Kiểm tra **Vai trò và quyền**. Vai trò cho phép thao tác; bộ phận giới hạn công đoạn. Quản lý được thao tác toàn quy trình theo quyền được cấp, không tự có quyền quản trị tài khoản, sửa đơn giá hay xem/chốt lương. Admin toàn quyền. Cấu hình đã chỉnh không tự được cấp lại khi khởi động.
 4. Quản lý mở **Đơn hàng → Tạo đơn**, nhập khách/sản phẩm/ngày/hạn giao và bảng màu–size. Mã tự sinh được chỉnh sửa; size mặc định có lựa chọn nhập riêng. Một biến thể có nhiều màu phối vẫn chỉ tính số lượng một lần. Không chọn chuyền khi tạo đơn; người phụ trách là đầu mối điều phối.
-5. Mở đơn → **Phân công**, chọn công đoạn/phần việc và nhiều thợ. Chọn May chỉ thấy thợ May; sửa hàng chỉ thấy thợ QC. Phân công không tạo sản lượng hoặc tiền công. Thay đổi phần việc bị chặn khi đã phân công/ghi công để bảo toàn dữ liệu.
+5. Mở đơn → **Phân công**, chọn công đoạn/phần việc và nhiều thợ. Chọn May chỉ thấy thợ May; sửa hàng cũng do thợ May thực hiện (QC chỉ kiểm và kiểm lại). Phân công không tạo sản lượng hoặc tiền công. Thay đổi phần việc bị chặn khi đã phân công/ghi công để bảo toàn dữ liệu.
 6. Trong **Bộ phận**, chọn đơn → **Ghi nhận công việc**. Chọn một thợ đã được phân công, một công đoạn/phần việc; nhập nhiều dòng màu–size một lần. Mỗi dòng hiện lượng còn lại; **Điền tối đa** dùng đúng phần việc. Đơn giá từ server, lưu giá lịch sử theo từng lần ghi. Nếu thiếu phân công, form chỉ rõ và dẫn tới tab Phân công.
-7. Sau chuẩn bị, số đã cắt được may ngay; số đã may được QC ngay. QC tự nhận danh tính người kiểm từ tài khoản. Sản phẩm lỗi được QC ghi sửa bằng thợ QC đã phân công, rồi kiểm lại. Không cần cả đơn hoàn thành một bước mới xử lý lượng đủ đầu vào.
+7. Sau chuẩn bị, số đã cắt được may ngay; số đã may được QC ngay. QC tự nhận danh tính người kiểm từ tài khoản. Sản phẩm lỗi được người phụ trách May ghi sửa bằng thợ May đã phân công, rồi QC kiểm lại. Khi QC lần đầu có lỗi, QC có thể quy lỗi cho thợ May/Cắt đã làm; bảng Lương sản phẩm tổng hợp lỗi theo thợ kèm gợi ý trừ công (không tự trừ lương). Không cần cả đơn hoàn thành một bước mới xử lý lượng đủ đầu vào.
 8. Đóng gói nhập lượng QC đã đạt; giao hàng chọn thợ được phân công, ngày giờ thực tế, số kiện và bảng nhiều màu–size. Có thể giao nhiều đợt, ví dụ 20 rồi 80 sản phẩm. Nguyên nhân bắt buộc khi giao trễ hoặc đánh dấu sự cố; giao từng phần đúng hạn không bị coi là thiếu hàng.
 9. Danh sách đơn có **Chuyển bước…**, Kanban có kéo thả và cách chuyển tương đương bằng bàn phím/điện thoại. Chuyển thẻ chỉ điều phối, không tự sinh số lượng. Quản lý xác nhận hoàn thành sau khi giao đủ từng màu–size.
 10. **Sản lượng / Lương sản phẩm** lọc theo bộ phận, người thực hiện, công đoạn và ngày/tháng. Bản ghi mới lưu riêng bộ phận khi thực hiện, thợ, người ghi nhận và nguyên nhân. Quyền tiền công cấp riêng. Xuất Excel theo quyền/bộ lọc; phân trang giao diện không cắt dữ liệu xuất.
 
 Hướng dẫn thao tác cũng có trong **Xem hướng dẫn** trên sidebar. Tài khoản nghiệp vụ ưu tiên **Công việc bộ phận tôi**, quản lý lọc toàn xưởng. Danh sách thợ/phân công/lịch sử có tìm kiếm hoặc phân trang; bảng màu–size cuộn trong vùng riêng.
+
+## Quy định xưởng, NPL/vải và giải trình thiếu
+
+- **Quy định xưởng** (tab Đơn giá, cần quyền Đơn giá): mức cắt dư tối đa so với đơn (mặc định 10%), có trả công phần cắt dư hay không (phần không trả được lưu thành bản ghi riêng đơn giá 0), và mức % gợi ý trừ công khi sản phẩm lỗi (mặc định 0 = chỉ theo dõi). May và các bước sau luôn bị giới hạn bởi số lượng đặt.
+- **NPL/Vải** (tab trong chi tiết đơn, cho Quản lý và bộ phận Cắt): khai báo vải/phụ liệu cần cho đơn, ghi nhận nhận về, lỗi, đã dùng, trả lại; hệ thống tính số còn trong kho và số còn thiếu so với định mức. Không bắt buộc đối với mọi đơn.
+- **Giải trình số thiếu**: bấm số ở cột Thiếu của bảng màu–size để xem sản phẩm đang ở công đoạn nào và mọi nguyên nhân đã ghi, rồi ghi thêm nguyên nhân (không đổi số lượng sản xuất).
 
 ## Lương và dữ liệu lịch sử
 
@@ -80,7 +86,7 @@ npm run lint
 npm run build
 ```
 
-`TEST_DATABASE_URL` phải là server riêng có quyền tạo/xóa database thử nghiệm. Bộ test dùng database ngẫu nhiên rồi xóa; không ghi dữ liệu thử vào database ứng dụng. Xem [QA, QC và ca nghiệm thu bộ phận](docs/department-qa.md). Baseline bộ phận hiện tại: 49/49 test tự động đạt; TypeScript, lint và build đạt. Nghiệm thu trình duyệt/mobile còn chờ vì quyền truy cập local bị chặn. Các bộ test/ảnh cũ là lịch sử, không chứng minh giao diện phiên bản mới đã được nghiệm thu. Test theo mô hình chuyền cũ được lưu tại `tests/legacy/`, không chạy trong `npm test` mới.
+`TEST_DATABASE_URL` phải là server riêng có quyền tạo/xóa database thử nghiệm. Bộ test dùng database ngẫu nhiên rồi xóa; không ghi dữ liệu thử vào database ứng dụng. Xem [QA, QC và ca nghiệm thu bộ phận](docs/department-qa.md). Baseline hiện tại: 58/58 test tự động đạt; TypeScript, lint và build đạt. Nghiệm thu trình duyệt/mobile còn chờ vì quyền truy cập local bị chặn. Các bộ test/ảnh cũ là lịch sử, không chứng minh giao diện phiên bản mới đã được nghiệm thu. Test theo mô hình chuyền cũ được lưu tại `tests/legacy/`, không chạy trong `npm test` mới.
 
 ## Bảo mật và triển khai
 

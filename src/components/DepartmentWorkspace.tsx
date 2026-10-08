@@ -28,6 +28,7 @@ import {
   sewLimit,
 } from "@/lib/workflow";
 import { SHORTAGE_CAUSES, shortageBreakdown } from "@/lib/shortage";
+import type { Policy } from "@/lib/policy";
 import { Action, Field, ErrorNotice, Empty, Modal } from "./Primitives";
 import { Pagination } from "./Pagination";
 import {
@@ -63,10 +64,45 @@ type Shipment = {
   notes: string;
   items: { color: string; size: string; quantity: number }[];
 };
+type Material = {
+  id: number;
+  name: string;
+  unit: string;
+  required: number;
+  notes: string;
+  received: number;
+  defect: number;
+  used: number;
+  returned: number;
+};
+type MaterialMovement = {
+  id: number;
+  material_id: number;
+  material_name: string;
+  unit: string;
+  kind: "receive" | "defect" | "use" | "return";
+  quantity: number;
+  movement_date: string;
+  notes: string;
+  actor_name: string;
+};
 type Detail = Order & {
   assignments?: Assignment[];
   shipments?: Shipment[];
   work_totals?: Total[];
+  policy?: Policy;
+  materials?: {
+    items: Material[];
+    movements: MaterialMovement[];
+  };
+  defects?: {
+    id: number;
+    color: string;
+    size: string;
+    stage: string;
+    quantity: number;
+    employee_name: string;
+  }[];
   production_reasons?: {
     id: number;
     log_date: string;
@@ -105,7 +141,9 @@ function recordable(
   if (stage === "Cắt")
     return Math.max(
       0,
-      (ceiling ? cutLimit(v.quantity) : v.quantity) - (part ? paid : v.cut_qty),
+      (ceiling
+        ? cutLimit(v.quantity, detail.policy?.overcut_percent)
+        : v.quantity) - (part ? paid : v.cut_qty),
     );
   if (stage === "May")
     return Math.max(0, sewLimit(v) - (part ? paid : v.sewn_qty));
@@ -163,9 +201,7 @@ export function ProductionForm({
   const detail = loaded.data;
   const stages = workStages.filter(
     (s) =>
-      (permits(session.user, "production.create", { stage: s }) ||
-        (s === "Sửa hàng" &&
-          permits(session.user, "qc.manage", { stage: s }))) &&
+      permits(session.user, "production.create", { stage: s }) &&
       departmentAccess(session.user, departmentFor(s)),
   );
   const [stageValue, setStage] = useState("");
@@ -424,7 +460,12 @@ export function ProductionForm({
       )}
       {stage === "Cắt" && (
         <p className="muted">
-          Được nhập cắt dư so với đơn (tối đa +50%); phần dư được ghi nhận nhưng
+          Được nhập cắt dư so với đơn (tối đa +
+          {detail?.policy?.overcut_percent ?? 10}
+          %).{" "}
+          {detail?.policy?.overcut_paid === false
+            ? "Phần dư không tính công cắt. "
+            : "Phần dư vẫn tính công cắt. "}
           May và các bước sau vẫn chỉ tính theo số lượng đặt.
         </p>
       )}
@@ -579,6 +620,10 @@ export function OrderDetail({
   const tabs = [
     { id: "progress", label: "Tiến độ" },
     { id: "assignments", label: "Phân công" },
+    ...(permits(session.user, "orders.edit", { stage: "nhan_don" }) ||
+    permits(session.user, "production.create", { stage: "Cắt" })
+      ? [{ id: "materials", label: "NPL/Vải" }]
+      : []),
     { id: "work", label: "Ghi sản lượng" },
     { id: "qc", label: "Kiểm QC" },
     { id: "shipments", label: "Đợt giao" },
@@ -590,11 +635,8 @@ export function OrderDetail({
     .filter(
       (t) =>
         t.id !== "work" ||
-        workStages.some(
-          (s) =>
-            permits(session.user, "production.create", { stage: s }) ||
-            (s === "Sửa hàng" &&
-              permits(session.user, "qc.manage", { stage: s })),
+        workStages.some((s) =>
+          permits(session.user, "production.create", { stage: s }),
         ),
     )
     .filter(
@@ -730,7 +772,27 @@ export function OrderDetail({
         />
       )}
       {tab === "qc" && (
-        <QualityForm
+        <>
+          <QualityForm
+            order={order}
+            session={session}
+            api={api}
+            onChanged={onChanged}
+          />
+          <h3>Lỗi đã quy cho thợ ({order.defects?.length || 0})</h3>
+          {order.defects?.slice(0, 20).map((d) => (
+            <p key={d.id}>
+              <strong>{d.employee_name}</strong> ({d.stage}) · {d.color} /{" "}
+              {d.size}: {d.quantity} sản phẩm lỗi
+            </p>
+          ))}
+          {!order.defects?.length && (
+            <Empty>Chưa quy lỗi nào cho thợ trong đơn này.</Empty>
+          )}
+        </>
+      )}
+      {tab === "materials" && (
+        <MaterialsPanel
           order={order}
           session={session}
           api={api}
@@ -944,6 +1006,12 @@ function StageMover({
               : "Chuyển bước chỉ điều phối, không tạo số lượng."
             : "Chưa đủ điều kiện chuyển sang bước tiếp theo.")}
       </small>
+      {preparing && !order.materials?.items.length && (
+        <small>
+          Chưa khai báo NPL/vải cho đơn này. Nếu đơn cần kiểm vải, khai báo ở
+          tab NPL/Vải trước khi hoàn tất chuẩn bị.
+        </small>
+      )}
     </div>
   );
 }
@@ -1146,6 +1214,246 @@ function StageTimeline({ order }: { order: Detail }) {
     </div>
   );
 }
+const MATERIAL_UNITS = ["m", "kg", "cuộn", "cái", "bộ", "hộp"];
+const MOVEMENT_LABELS: Record<string, string> = {
+  receive: "Nhận về",
+  defect: "Lỗi",
+  use: "Đã dùng",
+  return: "Trả lại",
+};
+const round2 = (n: number) => Math.round(n * 100) / 100;
+function MaterialsPanel({
+  order,
+  session,
+  api,
+  onChanged,
+}: {
+  order: Detail;
+  session: SessionInfo;
+  api: Api;
+  onChanged: () => Promise<void>;
+}) {
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const items = order.materials?.items || [];
+  const canDefine = permits(session.user, "orders.edit", {
+    stage: "nhan_don",
+  });
+  async function send(body: Record<string, unknown>) {
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/api/orders/${encodeURIComponent(order.id)}/materials`, body);
+      await onChanged();
+      return true;
+    } catch (err) {
+      setError(message(err));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="stack">
+      <p>
+        Kiểm NPL/Vải: khai báo vải và phụ liệu cần cho đơn, rồi ghi số nhận về,
+        số lỗi, số đã dùng để biết thiếu vải hay lỗi vải khi đơn bị thiếu hàng.
+      </p>
+      <ErrorNotice error={error} />
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              {[
+                "NPL / Vải",
+                "Cần",
+                "Nhận về",
+                "Lỗi",
+                "Đã dùng",
+                "Trả lại",
+                "Còn trong kho",
+                "Còn thiếu so với cần",
+              ].map((h) => (
+                <th key={h}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((m) => {
+              const good = m.received - m.returned - m.defect;
+              return (
+                <tr key={m.id}>
+                  <td>
+                    {m.name} ({m.unit})
+                  </td>
+                  <td>{m.required}</td>
+                  <td>{m.received}</td>
+                  <td>{m.defect}</td>
+                  <td>{m.used}</td>
+                  <td>{m.returned}</td>
+                  <td>{round2(good - m.used)}</td>
+                  <td>
+                    {m.required > good ? (
+                      <strong>{round2(m.required - good)}</strong>
+                    ) : (
+                      0
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {!items.length && (
+        <Empty>
+          Chưa khai báo NPL/vải cho đơn này.
+          {canDefine
+            ? " Thêm bên dưới nếu đơn cần theo dõi."
+            : " Báo bộ phận Quản lý khai báo."}
+        </Empty>
+      )}
+      {canDefine && (
+        <form
+          className="stack"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const form = e.currentTarget;
+            const f = new FormData(form);
+            if (
+              await send({
+                action: "add",
+                name: String(f.get("name") || "").trim(),
+                unit: f.get("unit"),
+                required_qty: Number(f.get("required") || 0),
+                notes: String(f.get("notes") || "").trim(),
+              })
+            )
+              form.reset();
+          }}
+        >
+          <h3>Khai báo NPL/vải</h3>
+          <div className="form-grid">
+            <Field label="Tên NPL / vải">
+              <input name="name" required maxLength={80} />
+            </Field>
+            <Field label="Đơn vị">
+              <select name="unit">
+                {MATERIAL_UNITS.map((u) => (
+                  <option key={u}>{u}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Số lượng cần cho đơn">
+              <input
+                name="required"
+                type="number"
+                min={0}
+                step="0.01"
+                inputMode="decimal"
+                defaultValue={0}
+              />
+            </Field>
+          </div>
+          <Field label="Ghi chú">
+            <textarea name="notes" maxLength={500} />
+          </Field>
+          <Action type="submit" busy={busy}>
+            <Plus size={18} />
+            Thêm NPL/vải
+          </Action>
+        </form>
+      )}
+      {!!items.length && (
+        <form
+          className="stack"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const form = e.currentTarget;
+            const f = new FormData(form);
+            if (
+              await send({
+                action: "move",
+                material_id: Number(f.get("material")),
+                kind: f.get("kind"),
+                quantity: Number(f.get("quantity")),
+                movement_date: f.get("date"),
+                ...(String(f.get("notes") || "").trim()
+                  ? { notes: String(f.get("notes")).trim() }
+                  : {}),
+              })
+            )
+              form.reset();
+          }}
+        >
+          <h3>Ghi nhận nhận về / lỗi / đã dùng</h3>
+          <div className="form-grid">
+            <Field label="NPL / vải">
+              <select name="material" required>
+                {items.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} ({m.unit})
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Nội dung">
+              <select name="kind">
+                {Object.entries(MOVEMENT_LABELS).map(([k, label]) => (
+                  <option key={k} value={k}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Số lượng">
+              <input
+                name="quantity"
+                type="number"
+                min={0.01}
+                step="0.01"
+                inputMode="decimal"
+                required
+              />
+            </Field>
+            <Field label="Ngày">
+              <input
+                name="date"
+                type="date"
+                required
+                max={day()}
+                min={order.order_date}
+                defaultValue={day()}
+              />
+            </Field>
+          </div>
+          <Field label="Ghi chú" hint="Ví dụ: cuộn vải số 3 bị loang màu.">
+            <textarea name="notes" maxLength={500} />
+          </Field>
+          <Action type="submit" busy={busy}>
+            <Check size={18} />
+            Lưu ghi nhận
+          </Action>
+        </form>
+      )}
+      {!!order.materials?.movements.length && (
+        <>
+          <h3>Lịch sử NPL/vải</h3>
+          {order.materials.movements.slice(0, 20).map((v) => (
+            <p key={v.id}>
+              <span className="muted">{v.movement_date}</span> ·{" "}
+              {v.material_name} · {MOVEMENT_LABELS[v.kind]}{" "}
+              <strong>
+                {v.quantity} {v.unit}
+              </strong>
+              {v.notes ? ` — ${v.notes}` : ""} · {v.actor_name}
+            </p>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
 function ShortagePanel({
   order,
   variant: v,
@@ -1232,6 +1540,15 @@ function ShortagePanel({
             {r.label}: <strong>{r.quantity}</strong>
           </p>
         ))}
+        {order.materials?.items.some((m) => m.defect > 0) && (
+          <p>
+            NPL/vải lỗi đã ghi cho đơn:{" "}
+            {order.materials.items
+              .filter((m) => m.defect > 0)
+              .map((m) => `${m.name} ${m.defect} ${m.unit}`)
+              .join("; ")}
+          </p>
+        )}
         <h4>Nguyên nhân đã ghi</h4>
         {entries.slice(0, 20).map((r) => (
           <p key={r.key}>
@@ -1597,8 +1914,22 @@ function QualityForm({
   const [action, setAction] = useState<"qc" | "reinspect">("qc");
   const [qty, setQty] = useState<Record<string, number>>({});
   const [passed, setPassed] = useState<Record<string, number>>({});
+  // Defects can be attributed to the sewers/cutters who made the pieces.
+  const [blame, setBlame] = useState<
+    Record<string, { who: string; quantity: number }[]>
+  >({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const culprits = ["May", "Cắt"].flatMap((stage) => {
+    const seen = new Set<string>();
+    return (order.assignments || [])
+      .filter((a) => a.active === 1 && a.stage === stage)
+      .filter((a) => !seen.has(a.employee_id) && seen.add(a.employee_id))
+      .map((a) => ({
+        key: `${stage}|${a.employee_id}`,
+        label: `${a.employee_name} (${stage})`,
+      }));
+  });
   const rows = (order.variants || [])
     .map((v) => ({ ...v, remaining: remainingOperation(v, action) }))
     .filter((v) => v.remaining > 0);
@@ -1609,6 +1940,17 @@ function QualityForm({
       size: v.size,
       quantity: qty[keyFor(v)],
       passed: passed[keyFor(v)] ?? qty[keyFor(v)],
+      ...(action === "qc" && (blame[keyFor(v)] || []).some((b) => b.who)
+        ? {
+            blame: (blame[keyFor(v)] || [])
+              .filter((b) => b.who && b.quantity > 0)
+              .map((b) => ({
+                employee_id: b.who.split("|")[1],
+                stage: b.who.split("|")[0],
+                quantity: b.quantity,
+              })),
+          }
+        : {}),
     }));
   return (
     <form
@@ -1634,6 +1976,7 @@ function QualityForm({
           });
           setQty({});
           setPassed({});
+          setBlame({});
           setImageFile(null);
           await onChanged();
         } catch (err) {
@@ -1644,8 +1987,9 @@ function QualityForm({
       }}
     >
       <p>
-        Người kiểm: <strong>{session.user.name}</strong>. Sửa hàng được ghi tại
-        “Ghi sản lượng” bởi người phụ trách QC cho thợ đã phân công.
+        Người kiểm: <strong>{session.user.name}</strong>. Sửa hàng do thợ may
+        thực hiện và được ghi tại “Ghi sản lượng” bởi người phụ trách May; QC
+        kiểm lại sau khi sửa.
       </p>
       <ErrorNotice error={error} />
       <div className="form-grid">
@@ -1715,6 +2059,106 @@ function QualityForm({
               }
             />
           </Field>
+          {action === "qc" &&
+            (qty[keyFor(v)] || 0) - (passed[keyFor(v)] ?? qty[keyFor(v)] ?? 0) >
+              0 && (
+              <div className="stack">
+                <span className="muted">
+                  {(qty[keyFor(v)] || 0) -
+                    (passed[keyFor(v)] ?? qty[keyFor(v)] ?? 0)}{" "}
+                  sản phẩm lỗi. Thợ nào gây lỗi? (không bắt buộc)
+                </span>
+                {(blame[keyFor(v)] || []).map((b, i) => (
+                  <div className="inline-actions" key={i}>
+                    <select
+                      aria-label="Thợ gây lỗi"
+                      value={b.who}
+                      onChange={(e) =>
+                        setBlame({
+                          ...blame,
+                          [keyFor(v)]: blame[keyFor(v)].map((x, n) =>
+                            n === i ? { ...x, who: e.target.value } : x,
+                          ),
+                        })
+                      }
+                    >
+                      <option value="">Chọn thợ</option>
+                      {culprits.map((c) => (
+                        <option key={c.key} value={c.key}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      aria-label="Số sản phẩm lỗi của thợ này"
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      value={b.quantity || ""}
+                      onChange={(e) =>
+                        setBlame({
+                          ...blame,
+                          [keyFor(v)]: blame[keyFor(v)].map((x, n) =>
+                            n === i
+                              ? { ...x, quantity: Number(e.target.value) }
+                              : x,
+                          ),
+                        })
+                      }
+                    />
+                    <Action
+                      type="button"
+                      tone="secondary"
+                      onClick={() =>
+                        setBlame({
+                          ...blame,
+                          [keyFor(v)]: blame[keyFor(v)].filter(
+                            (_, n) => n !== i,
+                          ),
+                        })
+                      }
+                    >
+                      Bỏ
+                    </Action>
+                  </div>
+                ))}
+                <Action
+                  type="button"
+                  tone="secondary"
+                  disabled={!culprits.length}
+                  onClick={() =>
+                    setBlame({
+                      ...blame,
+                      [keyFor(v)]: [
+                        ...(blame[keyFor(v)] || []),
+                        {
+                          who: "",
+                          quantity: Math.max(
+                            1,
+                            (qty[keyFor(v)] || 0) -
+                              (passed[keyFor(v)] ?? qty[keyFor(v)] ?? 0) -
+                              (blame[keyFor(v)] || []).reduce(
+                                (n, x) => n + (x.quantity || 0),
+                                0,
+                              ),
+                          ),
+                        },
+                      ],
+                    })
+                  }
+                >
+                  <Plus size={18} />
+                  {(blame[keyFor(v)] || []).length
+                    ? "Thêm thợ khác"
+                    : "Chọn thợ gây lỗi"}
+                </Action>
+                {!culprits.length && (
+                  <span className="muted">
+                    Chưa phân công thợ May/Cắt nên chưa quy lỗi được.
+                  </span>
+                )}
+              </div>
+            )}
         </div>
       ))}
       {!rows.length && (

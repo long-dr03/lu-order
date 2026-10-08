@@ -33,6 +33,9 @@ export const TABLES = [
   "shipments",
   "shipment_items",
   "pending_packing_pay",
+  "order_materials",
+  "material_movements",
+  "defect_attributions",
   "local_setup",
   "schema_migrations",
 ] as const;
@@ -139,6 +142,7 @@ export async function restoreSnapshot(snapshot: Snapshot) {
     // Resolve deferred FK events before migration DDL touches restored tables.
     await db.exec("SET CONSTRAINTS ALL IMMEDIATE");
     await (await import("./department-migration")).migrateDepartments();
+    await (await import("./workshop-migration")).migrateWorkshopExtras();
     for (const table of TABLES) {
       const seq = (await db
         .prepare(

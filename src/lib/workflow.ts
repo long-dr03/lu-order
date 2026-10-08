@@ -97,7 +97,7 @@ export const OPERATION_ACTIONS = [
     key: "rework",
     label: "Sửa hàng",
     stage: "sua_hang",
-    permission: "qc.manage",
+    permission: "production.create",
   },
   {
     key: "reinspect",
@@ -128,10 +128,9 @@ export function availableOperations(user: Account, order: Order) {
       permits(user, a.permission, { stage: a.key }),
   );
 }
-/** Cutters often cut more than ordered; allow it up to this share above the order. */
-export const OVERCUT_RATIO = 1.5;
-export const cutLimit = (quantity: number) =>
-  Math.floor(quantity * OVERCUT_RATIO);
+/** Cutters often cut more than ordered; allow it up to the workshop's overcut percent. */
+export const cutLimit = (quantity: number, percent = 10) =>
+  Math.floor((quantity * (100 + percent)) / 100);
 /** Sewing never exceeds what was ordered, even when more was cut. */
 export const sewLimit = (v: { quantity: number; cut_qty: number }) =>
   Math.min(v.quantity, v.cut_qty);

@@ -384,6 +384,7 @@ export function initializeDatabase() {
           .run();
       }
       await (await import("./department-migration")).migrateDepartments();
+      await (await import("./workshop-migration")).migrateWorkshopExtras();
     })()
     .catch((error) => {
       initialization = undefined;

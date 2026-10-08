@@ -276,7 +276,7 @@ test("Six stable departments; startup is repeatable and does not reinstate remov
         .prepare("SELECT MAX(version) n FROM schema_migrations")
         .get()) as { n: number }
     ).n,
-    11,
+    12,
   );
 });
 test("Passwords use distinct salts and verify without plaintext", () => {
@@ -737,7 +737,7 @@ test("Removing assignment or worker department blocks new entries but retains hi
     "cutting",
   );
 });
-test("QC identity comes from session, and repair belongs to QC rather than Sewing", async () => {
+test("QC identity comes from session, and repair belongs to Sewing rather than QC", async () => {
   const id = await order([{ color: "Đen", size: "M", quantity: 5 }]);
   await db
     .prepare("UPDATE order_variants SET cut_qty=5,sewn_qty=5 WHERE order_id=?")
@@ -767,24 +767,24 @@ test("QC identity comes from session, and repair belongs to QC rather than Sewin
     .get(id)) as { worker_id: string; actor_id: string; department_id: string };
   assert.equal(inspection.worker_id, "EMP-quality");
   assert.equal(inspection.actor_id, people.quality.id);
-  await assign(id, "Sửa hàng", workers.quality);
+  await assign(id, "Sửa hàng", workers.sewing);
   assert.equal(
     (
-      await record(id, "Sửa hàng", workers.quality[0], 2, "sewing", {
+      await record(id, "Sửa hàng", workers.sewing[0], 2, "quality", {
         record_rework: true,
       })
     ).status,
     403,
   );
   await result(
-    await record(id, "Sửa hàng", workers.quality[0], 2, "quality", {
+    await record(id, "Sửa hàng", workers.sewing[0], 2, "sewing", {
       record_rework: true,
     }),
     201,
   );
   await result(await qc(id, 2, 1, "reinspect"));
   await result(
-    await record(id, "Sửa hàng", workers.quality[1], 1, "quality", {
+    await record(id, "Sửa hàng", workers.sewing[1], 1, "sewing", {
       record_rework: true,
     }),
     201,
@@ -793,7 +793,7 @@ test("QC identity comes from session, and repair belongs to QC rather than Sewin
   assert.equal((await current(id)).variants?.[0].qc_passed_qty, 5);
   assert.equal(
     (
-      await record(id, "Sửa hàng", workers.quality[0], 1, "quality", {
+      await record(id, "Sửa hàng", workers.sewing[0], 1, "sewing", {
         record_rework: true,
       })
     ).status,
@@ -1566,33 +1566,48 @@ test("Multi-department operator can use both stages; withdrawing one removes tha
     403,
   );
 });
-test("QC repair remains usable with explicit QC permission when production.create was removed by Admin", async () => {
+test("Repair is recorded by the sewing department; QC keeps inspection and re-inspection only", async () => {
+  const id = await order();
   await db
     .prepare(
-      "DELETE FROM role_grants WHERE role_id='qc' AND permission='production.create'",
+      "UPDATE order_variants SET cut_qty=1,sewn_qty=1,qc_inspected_qty=1,defect_qty=1 WHERE order_id=?",
     )
-    .run();
-  try {
-    const id = await order();
-    await db
-      .prepare(
-        "UPDATE order_variants SET cut_qty=1,sewn_qty=1,qc_inspected_qty=1,defect_qty=1 WHERE order_id=?",
+    .run(id);
+  // Sewers are eligible repairers; QC workers are not.
+  await assign(id, "Sửa hàng", workers.sewing);
+  assert.equal(
+    (
+      await assignmentApi.POST(
+        req(`/api/orders/${id}/assignments`, "admin", {
+          version: (await current(id)).version,
+          stage: "Sửa hàng",
+          employee_ids: workers.quality,
+        }),
+        params("id", id),
       )
-      .run(id);
-    await assign(id, "Sửa hàng", workers.quality);
-    await result(
-      await record(id, "Sửa hàng", workers.quality[0], 1, "quality", {
+    ).status,
+    422,
+  );
+  assert.equal(
+    (
+      await record(id, "Sửa hàng", workers.sewing[0], 1, "quality", {
         record_rework: true,
-      }),
-      201,
-    );
-  } finally {
-    await db
-      .prepare(
-        "INSERT INTO role_grants VALUES ('qc','production.create','all')",
-      )
-      .run();
-  }
+      })
+    ).status,
+    403,
+  );
+  await result(
+    await record(id, "Sửa hàng", workers.sewing[0], 1, "sewing", {
+      record_rework: true,
+    }),
+    201,
+  );
+  const op = (await db
+    .prepare(
+      "SELECT department_id FROM operation_records WHERE order_id=? AND action='rework'",
+    )
+    .get(id)) as { department_id: string };
+  assert.equal(op.department_id, "sewing");
 });
 test("A worker cannot be credited for someone else's repair or QC inspection", async () => {
   const id = await order();
@@ -1601,26 +1616,26 @@ test("A worker cannot be credited for someone else's repair or QC inspection", a
       "UPDATE order_variants SET cut_qty=5,sewn_qty=5,qc_inspected_qty=5,defect_qty=5 WHERE order_id=?",
     )
     .run(id);
-  await assign(id, "Sửa hàng", workers.quality);
+  await assign(id, "Sửa hàng", workers.sewing);
   await result(
     await operationApi.POST(
-      req(`/api/orders/${id}/operations`, "quality", {
+      req(`/api/orders/${id}/operations`, "sewing", {
         version: (await current(id)).version,
         action: "rework",
         color: "Đen",
         size: "M",
         quantity: 2,
-        worker_id: workers.quality[0],
+        worker_id: workers.sewing[0],
       }),
       params("id", id),
     ),
   );
   assert.equal(
-    (await record(id, "Sửa hàng", workers.quality[1], 2, "quality")).status,
+    (await record(id, "Sửa hàng", workers.sewing[1], 2, "sewing")).status,
     422,
   );
   await result(
-    await record(id, "Sửa hàng", workers.quality[0], 2, "quality"),
+    await record(id, "Sửa hàng", workers.sewing[0], 2, "sewing"),
     201,
   );
 });
@@ -2020,7 +2035,7 @@ test("Quick assignment fills only unassigned tasks with each department's active
             {
               Cắt: "cutting",
               May: "sewing",
-              "Sửa hàng": "quality",
+              "Sửa hàng": "sewing",
               "Đóng gói": "packing",
               "Giao hàng": "delivery",
             }[r.stage],
@@ -2117,39 +2132,246 @@ test("Rates copy from an earlier order without touching locked stages", async ()
   );
   assert.equal((await copy(source)).status, 422);
 });
-test("Cutting may exceed the order up to the limit, while sewing never exceeds the order", async () => {
+const policyApi = await import("../src/app/api/settings/policy/route");
+const materialsApi = await import("../src/app/api/orders/[id]/materials/route");
+const setPolicy = async (
+  who: string,
+  input: {
+    overcut_percent: number;
+    overcut_paid: boolean;
+    defect_penalty_percent: number;
+  },
+) => policyApi.PUT(req("/api/settings/policy", who, input, { method: "PUT" }));
+test("Overcut limit and payment follow the workshop policy; sewing never exceeds the order", async () => {
   const id = await order([{ color: "Đen", size: "M", quantity: 10 }]);
   await assign(id, "Cắt", workers.cutting);
   await assign(id, "May", workers.sewing);
-  await result(await record(id, "Cắt", workers.cutting[0], 12, "cutting"), 201);
-  assert.equal((await current(id)).variants?.[0].cut_qty, 12);
-  // 12 + 4 > floor(10 * 1.5) = 15 is rejected; 12 + 3 reaches the limit.
-  const rejected = await record(id, "Cắt", workers.cutting[1], 4, "cutting");
+  // Default policy: +10%, so 10 ordered allows 11 and rejects 12.
+  const rejected = await record(id, "Cắt", workers.cutting[0], 12, "cutting");
   assert.equal(rejected.status, 422);
-  assert.match(JSON.stringify(await rejected.json()), /tối đa 15/);
+  assert.match(JSON.stringify(await rejected.json()), /tối đa 11/);
+  // Only an account with the rate permission changes the policy.
+  const wide = {
+    overcut_percent: 50,
+    overcut_paid: true,
+    defect_penalty_percent: 0,
+  };
+  assert.equal((await setPolicy("management", wide)).status, 403);
+  await result(await setPolicy("admin", wide));
+  await result(await record(id, "Cắt", workers.cutting[0], 12, "cutting"), 201);
+  assert.equal(
+    (await record(id, "Cắt", workers.cutting[1], 4, "cutting")).status,
+    422,
+  );
   await result(await record(id, "Cắt", workers.cutting[1], 3, "cutting"), 201);
   assert.equal((await current(id)).variants?.[0].cut_qty, 15);
-  // Surplus pieces are paid as cut, but sewing stops at the ordered quantity.
+  // Surplus pieces are paid as cut, yet sewing stops at the ordered quantity.
   await result(await record(id, "May", workers.sewing[0], 10, "sewing"), 201);
   assert.equal(
     (await record(id, "May", workers.sewing[1], 1, "sewing")).status,
     422,
   );
-  assert.equal((await current(id)).variants?.[0].sewn_qty, 10);
-  assert.equal(
-    (
-      (await db
-        .prepare(
-          "SELECT SUM(total_pay) n FROM production_logs WHERE order_id=? AND stage='Cắt'",
-        )
-        .get(id)) as { n: number }
-    ).n,
-    15000,
-  );
-  // A department leader still cannot record another department's stage.
+  const cutPay = async (target: string) =>
+    Number(
+      (
+        (await db
+          .prepare(
+            "SELECT COALESCE(SUM(total_pay),0) n FROM production_logs WHERE order_id=? AND stage='Cắt'",
+          )
+          .get(target)) as { n: number }
+      ).n,
+    );
+  assert.equal(await cutPay(id), 15000);
   assert.equal(
     (await record(id, "May", workers.sewing[0], 1, "cutting")).status,
     403,
+  );
+  // Unpaid surplus: the part above the order is saved at zero rate.
+  await result(await setPolicy("admin", { ...wide, overcut_paid: false }));
+  const unpaid = await order([{ color: "Đen", size: "M", quantity: 10 }]);
+  await assign(unpaid, "Cắt", workers.cutting);
+  await result(
+    await record(unpaid, "Cắt", workers.cutting[0], 13, "cutting"),
+    201,
+  );
+  assert.equal((await current(unpaid)).variants?.[0].cut_qty, 13);
+  assert.equal(await cutPay(unpaid), 10000);
+  const rows = (await db
+    .prepare(
+      "SELECT quantity,unit_price,total_pay,reason FROM production_logs WHERE order_id=? ORDER BY id",
+    )
+    .all(unpaid)) as {
+    quantity: number;
+    unit_price: number;
+    total_pay: number;
+    reason: string;
+  }[];
+  assert.deepEqual(
+    rows.map((r) => [
+      Number(r.quantity),
+      Number(r.unit_price),
+      Number(r.total_pay),
+    ]),
+    [
+      [10, 1000, 10000],
+      [3, 0, 0],
+    ],
+  );
+  assert.match(rows[1].reason, /không tính công/);
+  await result(
+    await setPolicy("admin", {
+      overcut_percent: 10,
+      overcut_paid: true,
+      defect_penalty_percent: 0,
+    }),
+  );
+  assert.equal(
+    (
+      await setPolicy("admin", {
+        overcut_percent: 101,
+        overcut_paid: true,
+        defect_penalty_percent: 0,
+      })
+    ).status,
+    422,
+  );
+});
+test("QC attributes defects to the sewers who made them and the payroll view totals them", async () => {
+  const id = await order([{ color: "Đen", size: "M", quantity: 10 }]);
+  await db
+    .prepare("UPDATE order_variants SET cut_qty=10 WHERE order_id=?")
+    .run(id);
+  await assign(id, "May", workers.sewing);
+  await result(await record(id, "May", workers.sewing[0], 6, "sewing"), 201);
+  await result(await record(id, "May", workers.sewing[1], 4, "sewing"), 201);
+  const inspect = async (blame: unknown, passed = 7) =>
+    operationApi.POST(
+      req(`/api/orders/${id}/operations`, "quality", {
+        version: (await current(id)).version,
+        action: "qc",
+        operation_date: today(),
+        entries: [{ color: "Đen", size: "M", quantity: 10, passed, blame }],
+      }),
+      params("id", id),
+    );
+  const [a, b] = workers.sewing;
+  // More blamed than defective, or more than the worker produced, is rejected.
+  assert.equal((await inspect([{ employee_id: a, quantity: 4 }])).status, 422);
+  assert.equal(
+    (await inspect([{ employee_id: workers.cutting[0], quantity: 1 }])).status,
+    422,
+  );
+  assert.equal(
+    (await inspect([{ employee_id: b, quantity: 5 }], 4)).status,
+    422,
+  );
+  assert.equal((await current(id)).variants?.[0].qc_passed_qty, 0);
+  await result(
+    await inspect([
+      { employee_id: a, quantity: 2 },
+      { employee_id: b, quantity: 1 },
+    ]),
+  );
+  const totals = (await db
+    .prepare(
+      "SELECT employee_id,SUM(quantity) q FROM defect_attributions WHERE order_id=? GROUP BY employee_id",
+    )
+    .all(id)) as { employee_id: string; q: number }[];
+  assert.deepEqual(
+    Object.fromEntries(totals.map((t) => [t.employee_id, Number(t.q)])),
+    { [a]: 2, [b]: 1 },
+  );
+  await result(
+    await setPolicy("admin", {
+      overcut_percent: 10,
+      overcut_paid: true,
+      defect_penalty_percent: 50,
+    }),
+  );
+  const payroll = await result<{
+    defects: {
+      employee_id: string;
+      quantity: number;
+      value: number;
+      penalty: number;
+    }[];
+  }>(await payrollApi.GET(req("/api/payroll", "admin")));
+  const mine = payroll.defects.find((d) => d.employee_id === a)!;
+  assert.equal(Number(mine.quantity) >= 2, true);
+  assert.equal(mine.penalty, Math.round(mine.value / 2));
+  await result(
+    await setPolicy("admin", {
+      overcut_percent: 10,
+      overcut_paid: true,
+      defect_penalty_percent: 0,
+    }),
+  );
+  // Management has no payroll permission, so no wage figures leak.
+  assert.equal(
+    (await payrollApi.GET(req("/api/payroll", "management"))).status,
+    403,
+  );
+});
+test("Materials track needed, received, defective and used amounts per order", async () => {
+  const id = await order([{ color: "Đen", size: "M", quantity: 10 }]);
+  const send = async (who: string, input: Record<string, unknown>) =>
+    materialsApi.POST(
+      req(`/api/orders/${id}/materials`, who, input),
+      params("id", id),
+    );
+  assert.equal(
+    (
+      await send("cutting", {
+        action: "add",
+        name: "Vải chính",
+        unit: "m",
+        required_qty: 20,
+      })
+    ).status,
+    403,
+  );
+  const added = await result<{ items: { id: number }[] }>(
+    await send("management", {
+      action: "add",
+      name: "Vải chính",
+      unit: "m",
+      required_qty: 20,
+    }),
+    201,
+  );
+  assert.equal(
+    (await send("management", { action: "add", name: "vải chính", unit: "m" }))
+      .status,
+    409,
+  );
+  const material = added.items[0].id;
+  const move = (who: string, kind: string, quantity: number) =>
+    send(who, { action: "move", material_id: material, kind, quantity });
+  await result(await move("management", "receive", 18.5), 201);
+  await result(await move("management", "defect", 1.5), 201);
+  // The cutting department records usage but cannot exceed what is on hand.
+  assert.equal((await move("cutting", "use", 20)).status, 422);
+  await result(await move("cutting", "use", 12.25), 201);
+  assert.equal((await move("worker", "use", 1)).status, 403);
+  const detail = await result<{
+    materials: {
+      items: {
+        received: number;
+        defect: number;
+        used: number;
+        required: number;
+      }[];
+    };
+  }>(
+    await detailApi.GET(
+      req(`/api/orders/${id}`, "management"),
+      params("id", id),
+    ),
+  );
+  const item = detail.materials.items[0];
+  assert.deepEqual(
+    [item.required, item.received, item.defect, item.used],
+    [20, 18.5, 1.5, 12.25],
   );
 });
 test("Shortage explanations are limited to the remaining shortage and never move quantities", async () => {
@@ -2325,7 +2547,7 @@ test("Workshop simulation: seven operators complete a 100-piece, two-shipment or
   for (const [stage, dep] of [
     ["Cắt", "cutting"],
     ["May", "sewing"],
-    ["Sửa hàng", "quality"],
+    ["Sửa hàng", "sewing"],
     ["Đóng gói", "packing"],
     ["Giao hàng", "delivery"],
   ] as const)
@@ -2437,7 +2659,7 @@ test("Workshop simulation: seven operators complete a 100-piece, two-shipment or
   await move("qc");
   await inspection("qc", 12, 8, 2);
   await move("sua_hang");
-  await batch("quality", "Sửa hàng", workers.quality[0], 2, 0);
+  await batch("sewing", "Sửa hàng", workers.sewing[0], 2, 0);
   await move("qc_lai");
   await inspection("reinspect", 2, 0);
   await move("dong_goi");

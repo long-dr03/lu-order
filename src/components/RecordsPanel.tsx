@@ -422,6 +422,48 @@ export function RecordsPanel({
               )}
             </section>
           )}
+          {!personal && mode === "payroll" && !!payroll?.defects?.length && (
+            <section className="panel">
+              <div className="records-section-title">
+                <h3>Lỗi quy cho từng thợ</h3>
+                <span className="muted">
+                  {payroll.defect_penalty_percent
+                    ? `Gợi ý trừ ${payroll.defect_penalty_percent}% công sản phẩm lỗi`
+                    : "Chỉ theo dõi, chưa đặt mức trừ công"}
+                </span>
+              </div>
+              <div className="table-scroll">
+                <table className="mobile-stack-table">
+                  <thead>
+                    <tr>
+                      <th>Nhân viên</th>
+                      <th>Công đoạn gây lỗi</th>
+                      <th>Số sản phẩm lỗi</th>
+                      <th>Công của số lỗi</th>
+                      <th>Gợi ý trừ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payroll.defects.map((d) => (
+                      <tr key={`${d.employee_id}-${d.stage}`}>
+                        <td data-label="Nhân viên">{d.employee_name}</td>
+                        <td data-label="Công đoạn gây lỗi">{d.stage}</td>
+                        <td data-label="Số sản phẩm lỗi">
+                          {d.quantity.toLocaleString("vi-VN")}
+                        </td>
+                        <td data-label="Công của số lỗi">{money(d.value)}</td>
+                        <td data-label="Gợi ý trừ">{money(d.penalty)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="muted">
+                Số trừ chỉ là gợi ý. Nếu cần trừ, dùng Điều chỉnh có lý do ở bản
+                ghi sản lượng của thợ; hệ thống không tự trừ lương.
+              </p>
+            </section>
+          )}
           <details className="panel record-disclosure">
             <summary>Tổng hợp báo cáo</summary>
             <div className="padded stack">

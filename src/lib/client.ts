@@ -32,6 +32,15 @@ export interface PayrollData {
   lockedBy?: string;
   lockedAt?: string;
   logs: ProductionLog[];
+  defects?: {
+    employee_id: string;
+    employee_name: string;
+    stage: string;
+    quantity: number;
+    value: number;
+    penalty: number;
+  }[];
+  defect_penalty_percent?: number;
   summary: {
     employee_id: string;
     employee_name: string;

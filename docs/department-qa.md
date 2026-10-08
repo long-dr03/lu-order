@@ -34,7 +34,7 @@ Fixture độc lập: Admin; Quản lý không quyền giá/lương/quản trị
 | PROD-06 | Đổi giá sau có công | Công cũ không đổi; lần mới theo giá mới |
 | PROD-07 | Tháng chốt: nhập công/đóng gói | Công thường bị chặn; đóng gói lưu vật lý + công chờ, không ghi vào lương khóa |
 | QC-01 | QC gửi ID người kiểm khác | 403; người kiểm lấy từ session |
-| QC-02 | May gửi sửa hàng, QC sửa bằng thợ được giao | May bị chặn; QC ghi sửa và kiểm lại được |
+| QC-02 | QC gửi sửa hàng; người phụ trách May sửa bằng thợ May được giao | QC bị chặn (403); May ghi sửa, QC kiểm lại được |
 | QC-03 | QC lỗi → sửa → kiểm lại nhiều vòng | Đầu vào/lỗi/đạt đúng; không đóng gói vượt lượng đạt |
 | QC-04 | Thợ A nhận tiền công QC/sửa đã do B xử lý | Bị từ chối, không lấy lượng xử lý của người khác |
 | FLOW-01 | Đơn 100: Cắt/May/QC/Đóng gói/Giao 20; làm tiếp 80 | Giao 20 được khi phần còn lại đang sản xuất; cuối đủ 100 |

@@ -250,10 +250,8 @@ export default function Page() {
     ["overview", "orders", "lines", "production", "payroll"].includes(
       active?.id || "",
     ) &&
-    ["Cắt", "May", "Sửa hàng", "Đóng gói"].some(
-      (stage) =>
-        permits(session.user, "production.create", { stage }) ||
-        (stage === "Sửa hàng" && permits(session.user, "qc.manage", { stage })),
+    ["Cắt", "May", "Sửa hàng", "Đóng gói"].some((stage) =>
+      permits(session.user, "production.create", { stage }),
     );
 
   async function openOrder(order: Order) {

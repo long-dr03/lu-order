@@ -1,11 +1,12 @@
 "use client";
 import { MoneyInput, parseMoney } from "./SmartInputs";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, X } from "lucide-react";
 import type { Order } from "@/lib/types";
 import { type Api, type ViewLog, money, message } from "@/lib/client";
 import type { Rate } from "@/lib/server/business";
 import { Action, Field, ErrorNotice, Empty } from "./Primitives";
+import { DEFAULT_POLICY, type Policy } from "@/lib/policy";
 export { ProductionForm, OrderDetail } from "./DepartmentWorkspace";
 
 export function RatesPanel({
@@ -269,6 +270,7 @@ export function RatesPanel({
           </div>
         )}
       </section>
+      <PolicyCard api={api} />
       <section className="panel">
         <div className="panel-toolbar">
           <h2>Đơn giá đã lưu</h2>
@@ -527,5 +529,107 @@ function WorkPlanForm({
         </Action>
       </form>
     </details>
+  );
+}
+
+function PolicyCard({ api }: { api: Api }) {
+  const [policy, setPolicy] = useState<Policy>(DEFAULT_POLICY);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void api<Policy>("/api/settings/policy")
+      .then((p) => live && setPolicy(p))
+      .catch((e) => live && setError(message(e)));
+    return () => {
+      live = false;
+    };
+  }, [api]);
+  return (
+    <section className="panel padded">
+      <h2>Quy định xưởng</h2>
+      <p className="muted">
+        Áp dụng cho các lần ghi nhận tiếp theo; sản lượng và tiền công đã lưu
+        giữ nguyên.
+      </p>
+      <form
+        className="stack"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setBusy(true);
+          setError("");
+          setSaved("");
+          try {
+            setPolicy(await api<Policy>("/api/settings/policy", policy, "PUT"));
+            setSaved("Đã lưu quy định xưởng.");
+          } catch (e) {
+            setError(message(e));
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <ErrorNotice error={error} />
+        <div className="form-grid">
+          <Field
+            label="Cắt dư tối đa so với đơn (%)"
+            hint="Ví dụ 10: đơn 100 được nhập cắt tới 110."
+          >
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={1}
+              inputMode="numeric"
+              value={policy.overcut_percent}
+              onChange={(e) =>
+                setPolicy({
+                  ...policy,
+                  overcut_percent: Number(e.target.value),
+                })
+              }
+            />
+          </Field>
+          <Field
+            label="Gợi ý trừ công khi sản phẩm lỗi (%)"
+            hint="0 là chỉ theo dõi lỗi theo thợ; hệ thống không tự trừ lương."
+          >
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={1}
+              inputMode="numeric"
+              value={policy.defect_penalty_percent}
+              onChange={(e) =>
+                setPolicy({
+                  ...policy,
+                  defect_penalty_percent: Number(e.target.value),
+                })
+              }
+            />
+          </Field>
+        </div>
+        <label className="check-label">
+          <input
+            type="checkbox"
+            checked={policy.overcut_paid}
+            onChange={(e) =>
+              setPolicy({ ...policy, overcut_paid: e.target.checked })
+            }
+          />
+          Trả công phần cắt dư (bỏ chọn nếu chỉ trả công theo số lượng đặt)
+        </label>
+        {saved && (
+          <p role="status" className="rate-save-notice">
+            {saved}
+          </p>
+        )}
+        <Action type="submit" busy={busy}>
+          Lưu quy định
+        </Action>
+      </form>
+    </section>
   );
 }

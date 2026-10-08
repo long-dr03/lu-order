@@ -8,6 +8,7 @@ import { LUUTA_STAGES, type ProductionLog } from "../types";
 import { type Context, requirePermission, ensure, audit } from "./auth";
 import { text } from "./validation";
 import { cutLimit, sewLimit } from "../workflow";
+import { getPolicy } from "./policy";
 export const stageInfoSchema = z
   .object({
     version: z.number().int().positive(),
@@ -176,6 +177,7 @@ export async function adjustProduction(
   );
   ensure(v, 422, "Không tìm thấy biến thể.");
   const delta = input.quantity - old.quantity;
+  const overcut = (await getPolicy()).overcut_percent;
   const column =
     old.stage === "Cắt" ? "cut_qty" : old.stage === "May" ? "sewn_qty" : null;
   if (column) {
@@ -195,7 +197,7 @@ export async function adjustProduction(
       ).n;
       ensure(
         paid + delta <=
-          (column === "cut_qty" ? cutLimit(v.quantity) : sewLimit(v)),
+          (column === "cut_qty" ? cutLimit(v.quantity, overcut) : sewLimit(v)),
         422,
         "Phần việc vượt số lượng đầu vào.",
       );
@@ -206,7 +208,8 @@ export async function adjustProduction(
         : Number(
             (v as unknown as { qc_inspected_qty: number }).qc_inspected_qty,
           );
-    const max = column === "cut_qty" ? cutLimit(v.quantity) : sewLimit(v);
+    const max =
+      column === "cut_qty" ? cutLimit(v.quantity, overcut) : sewLimit(v);
     ensure(
       next >= min && next <= max,
       422,

@@ -10,6 +10,7 @@ import {
   assignmentsFor,
 } from "./departments";
 import { completedWork } from "./work-items";
+import { getPolicy } from "./policy";
 import {
   remainingOperation,
   transitionProblem,
@@ -119,6 +120,13 @@ export async function orderFor(
     work_totals: await db
       .prepare(
         "SELECT stage,work_item_id,color,size,SUM(quantity) quantity FROM production_logs WHERE order_id=? GROUP BY stage,work_item_id,color,size",
+      )
+      .all(id),
+    policy: await getPolicy(),
+    materials: await (await import("./materials")).materialsFor(id),
+    defects: await db
+      .prepare(
+        "SELECT d.id,d.color,d.size,d.stage,d.quantity,d.created_at,e.name employee_name FROM defect_attributions d JOIN employees e ON e.id=d.employee_id WHERE d.order_id=? ORDER BY d.id DESC",
       )
       .all(id),
     production_reasons: await db
@@ -397,10 +405,43 @@ export async function payrollFor(ctx: Context, f: Filters) {
   const lock = (await db
     .prepare("SELECT * FROM payroll_locks WHERE month=?")
     .get(month)) as { locked_by: string; locked_at: string } | undefined;
+  const percent = (await getPolicy()).defect_penalty_percent;
+  const defects = (
+    (await db
+      .prepare(
+        `SELECT d.employee_id,e.name employee_name,d.stage,SUM(d.quantity) quantity,
+          COALESCE(SUM(d.quantity*(SELECT SUM(p.total_pay)/NULLIF(SUM(p.quantity),0) FROM production_logs p WHERE p.order_id=d.order_id AND p.employee_id=d.employee_id AND p.stage=d.stage)),0) value
+         FROM defect_attributions d JOIN employees e ON e.id=d.employee_id
+         WHERE ${month ? "substr(d.created_at,1,7)=?" : "TRUE"}
+         GROUP BY d.employee_id,e.name,d.stage ORDER BY e.name,d.stage`,
+      )
+      .all(...(month ? [month] : []))) as {
+      employee_id: string;
+      employee_name: string;
+      stage: string;
+      quantity: number;
+      value: number;
+    }[]
+  )
+    .filter(
+      (d) =>
+        (!f.employee_id || d.employee_id === f.employee_id) &&
+        permits(ctx.user, "payroll.view", {
+          employeeId: d.employee_id,
+          stage: d.stage,
+        }),
+    )
+    .map((d) => ({
+      ...d,
+      value: Math.round(d.value),
+      penalty: Math.round((d.value * percent) / 100),
+    }));
   return {
     month,
     logs,
     summary: [...grouped.values()],
+    defects,
+    defect_penalty_percent: percent,
     isLocked: !!lock,
     lockedBy: lock?.locked_by,
     lockedAt: lock?.locked_at,
@@ -1053,22 +1094,29 @@ async function recordWorkerProduction(
         });
         fresh = (await getOrderById(input.order_id))!;
       }
-      logs.push(
-        await recordProductionSingle(ctx, {
-          log_date: input.log_date,
-          employee_id: input.employee_id,
-          order_id: input.order_id,
-          stage: input.stage,
-          work_item_id: input.work_item_id,
-          record_packing: input.record_packing,
-          reason: input.reason,
-          incident: input.incident,
-          version: fresh.version,
-          color: r.color,
-          size: r.size,
-          quantity: r.quantity,
-        }),
-      );
+      for (const piece of await splitSurplus(input, r, fresh)) {
+        if (piece.unpaid) fresh = (await getOrderById(input.order_id))!;
+        logs.push(
+          await recordProductionSingle(
+            ctx,
+            {
+              log_date: input.log_date,
+              employee_id: input.employee_id,
+              order_id: input.order_id,
+              stage: input.stage,
+              work_item_id: input.work_item_id,
+              record_packing: input.record_packing,
+              reason: input.reason,
+              incident: input.incident,
+              version: fresh.version,
+              color: r.color,
+              size: r.size,
+              quantity: piece.quantity,
+            },
+            { unpaid: piece.unpaid },
+          ),
+        );
+      }
     }
     return "entries" in input
       ? {
@@ -1081,20 +1129,49 @@ async function recordWorkerProduction(
       : logs[0];
   })();
 }
+/**
+ * When the workshop does not pay for pieces cut above the order, the surplus
+ * of one entry is saved as a separate zero-rate log so wages stay exact.
+ */
+async function splitSurplus(
+  input: { stage: string; employee_id: string; work_item_id?: number },
+  row: { color?: string; size: string; quantity: number },
+  order: NonNullable<Awaited<ReturnType<typeof getOrderById>>>,
+) {
+  if (input.stage !== "Cắt" || (await getPolicy()).overcut_paid)
+    return [{ quantity: row.quantity, unpaid: false }];
+  const v = order.variants?.find(
+    (x) => x.color === row.color && x.size === row.size,
+  );
+  if (!v) return [{ quantity: row.quantity, unpaid: false }];
+  const done = input.work_item_id
+    ? (
+        (await db
+          .prepare(
+            "SELECT COALESCE(SUM(quantity),0) n FROM production_logs WHERE work_item_id=? AND color=? AND size=?",
+          )
+          .get(input.work_item_id, v.color, v.size)) as { n: number }
+      ).n
+    : v.cut_qty;
+  const payable = Math.min(row.quantity, Math.max(0, v.quantity - done));
+  return [
+    ...(payable > 0 ? [{ quantity: payable, unpaid: false }] : []),
+    ...(row.quantity - payable > 0
+      ? [{ quantity: row.quantity - payable, unpaid: true }]
+      : []),
+  ];
+}
 async function recordProductionSingle(
   ctx: Context,
   input: z.infer<typeof logSchema>,
+  options: { unpaid?: boolean } = {},
 ) {
   const o = await getOrderById(input.order_id);
   ensure(o, 404, "Không tìm thấy đơn.");
   assertVersion(o, input.version);
   const emp = (await getEmployees()).find((e) => e.id === input.employee_id);
   ensure(emp, 422, "Nhân viên không hợp lệ.");
-  requirePermission(
-    ctx,
-    input.stage === "Sửa hàng" ? "qc.manage" : "production.create",
-    { stage: input.stage },
-  );
+  requirePermission(ctx, "production.create", { stage: input.stage });
   requireDepartment(ctx, input.stage);
   if (input.stage !== "QC")
     await requireAssignment(ctx, o.id, input.stage, emp.id, input.work_item_id);
@@ -1142,13 +1219,14 @@ async function recordProductionSingle(
     422,
     "Chọn phần việc đã được quản lý cấu hình; không ghi công chung khi công đoạn đã chia phần việc.",
   );
-  const rate =
-    part ||
-    ((await db
-      .prepare(
-        "SELECT unit_price FROM order_rates WHERE order_id=? AND stage=?",
-      )
-      .get(o.id, input.stage)) as { unit_price: number } | undefined);
+  const rate = options.unpaid
+    ? { unit_price: 0 }
+    : part ||
+      ((await db
+        .prepare(
+          "SELECT unit_price FROM order_rates WHERE order_id=? AND stage=?",
+        )
+        .get(o.id, input.stage)) as { unit_price: number } | undefined);
   let completedQuantity = input.quantity;
   ensure(rate, 422, "Chưa có đơn giá cho công đoạn. Liên hệ quản lý.");
   const totalPay = input.quantity * rate.unit_price;
@@ -1177,7 +1255,10 @@ async function recordProductionSingle(
       422,
       "Đơn hàng chưa ở công đoạn cần nhập.",
     );
-    const maximum = input.stage === "Cắt" ? cutLimit(v.quantity) : sewLimit(v);
+    const maximum =
+      input.stage === "Cắt"
+        ? cutLimit(v.quantity, (await getPolicy()).overcut_percent)
+        : sewLimit(v);
     const paidPart = part
       ? (
           (await db
@@ -1375,7 +1456,11 @@ async function recordProductionSingle(
     )
     .run(
       departmentFor(input.stage),
-      input.reason || null,
+      options.unpaid
+        ? [input.reason, "Cắt dư so với đơn, không tính công"]
+            .filter(Boolean)
+            .join(" — ")
+        : input.reason || null,
       ctx.actor.id,
       ctx.representing ? ctx.user.id : null,
       result.lastInsertRowid,
@@ -1392,6 +1477,18 @@ async function recordProductionSingle(
     .prepare("SELECT * FROM production_logs WHERE id=?")
     .get(result.lastInsertRowid)) as ProductionLog;
 }
+const blameSchema = z
+  .array(
+    z
+      .object({
+        employee_id: text,
+        quantity,
+        stage: z.enum(["May", "Cắt"]).default("May"),
+      })
+      .strict(),
+  )
+  .max(10)
+  .optional();
 export const operationSchema = z
   .object({
     version: z.number().int().positive(),
@@ -1412,6 +1509,7 @@ export const operationSchema = z
       .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
       .optional(),
     incident: z.boolean().optional(),
+    blame: blameSchema,
   })
   .strict();
 export const batchOperationSchema = operationSchema
@@ -1425,6 +1523,7 @@ export const batchOperationSchema = operationSchema
             size: text,
             quantity,
             passed: z.number().int().min(0).optional(),
+            blame: blameSchema,
           })
           .strict(),
       )
@@ -1489,7 +1588,7 @@ export async function recordOperation(
   ensure(o.status !== "completed", 422, "Đơn đã hoàn thành.");
   if (input.action === "deliver")
     return (await import("./shipments")).legacyDelivery(ctx, id, input);
-  const quality = ["qc", "rework", "reinspect"].includes(input.action);
+  const quality = ["qc", "reinspect"].includes(input.action);
   requirePermission(ctx, quality ? "qc.manage" : "production.create", {
     stage: input.action,
   });
@@ -1644,6 +1743,57 @@ export async function recordOperation(
         input.action === "reinspect" ? passed : 0,
         inspection ? ctx.user.name : actorLabel(ctx),
       );
+  if (input.blame?.length) {
+    ensure(input.action === "qc", 422, "Chỉ quy lỗi cho thợ khi QC lần đầu.");
+    const defects = input.quantity - passed;
+    ensure(
+      input.blame.reduce((n, b) => n + b.quantity, 0) <= defects,
+      422,
+      `Số lỗi quy cho thợ vượt số lỗi QC (${defects}).`,
+    );
+    const people = await getEmployees();
+    for (const b of input.blame) {
+      const worker = people.find((e) => e.id === b.employee_id);
+      ensure(
+        worker?.department_ids?.includes(
+          b.stage === "Cắt" ? "cutting" : "sewing",
+        ),
+        422,
+        "Thợ gây lỗi phải thuộc bộ phận của công đoạn.",
+      );
+      const sum = async (table: string) =>
+        Number(
+          (
+            (await db
+              .prepare(
+                `SELECT COALESCE(SUM(quantity),0) n FROM ${table} WHERE order_id=? AND color=? AND size=? AND employee_id=? AND stage=?`,
+              )
+              .get(id, v.color, v.size, b.employee_id, b.stage)) as {
+              n: number;
+            }
+          ).n,
+        );
+      ensure(
+        (await sum("defect_attributions")) + b.quantity <=
+          (await sum("production_logs")),
+        422,
+        `${worker?.name} chưa ghi nhận đủ sản lượng ${b.stage} ở màu–size này để quy lỗi.`,
+      );
+      await db
+        .prepare(
+          "INSERT INTO defect_attributions(operation_id,order_id,color,size,employee_id,stage,quantity) VALUES (?,?,?,?,?,?,?)",
+        )
+        .run(
+          opResult.lastInsertRowid,
+          id,
+          v.color,
+          v.size,
+          b.employee_id,
+          b.stage,
+          b.quantity,
+        );
+    }
+  }
   await db.prepare("UPDATE orders SET version=version+1 WHERE id=?").run(id);
   await audit(
     ctx,

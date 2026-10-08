@@ -13,20 +13,10 @@ export const departmentName = (id?: string | null) =>
   DEPARTMENTS.find((d) => d.id === id)?.name || "Chưa phân loại";
 export function departmentFor(stage: string): DepartmentId {
   if (["cat", "Cắt"].includes(stage)) return "cutting";
-  if (["may", "May"].includes(stage)) return "sewing";
-  if (
-    [
-      "qc",
-      "sua_hang",
-      "qc_lai",
-      "QC",
-      "Sửa hàng",
-      "qc",
-      "rework",
-      "reinspect",
-    ].includes(stage)
-  )
-    return "quality";
+  // Repairs are done by sewers; QC only inspects and re-inspects.
+  if (["may", "May", "sua_hang", "Sửa hàng", "rework"].includes(stage))
+    return "sewing";
+  if (["qc", "qc_lai", "QC", "reinspect"].includes(stage)) return "quality";
   if (["dong_goi", "Đóng gói", "pack"].includes(stage)) return "packing";
   if (["giao_hang", "Giao hàng", "deliver"].includes(stage)) return "delivery";
   return "management";
