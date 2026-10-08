@@ -241,6 +241,9 @@ export function ProductionForm({
     setByWorker((all) => ({ ...all, [person]: next }));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [date, setDate] = useState(day());
+  const [editDate, setEditDate] = useState(false);
+  const embedded = !!initialOrderId && orders.length === 1;
   const qty = (worker: string, key: string) => byWorker[worker]?.[key] || 0;
   const workerTotal = (worker: string) =>
     Object.values(byWorker[worker] || {}).reduce((n, q) => n + (q || 0), 0);
@@ -329,7 +332,7 @@ export function ProductionForm({
               order_id: id,
               stage,
               work_item_id: part,
-              log_date: form.get("date"),
+              log_date: date,
               reason: String(form.get("reason") || "").trim() || undefined,
               incident: form.get("incident") === "on",
               record_packing: stage === "Đóng gói",
@@ -338,6 +341,8 @@ export function ProductionForm({
             },
           );
           setByWorker({});
+          setEditDate(false);
+          setDate(day());
           await onSaved(
             result.pay_status === "pending"
               ? "Đã đóng gói; công đang chờ đối chiếu do tháng lương đã khóa."
@@ -353,55 +358,50 @@ export function ProductionForm({
       }}
     >
       <ErrorNotice error={error || loaded.error} />
-      <p className="muted">
-        Người ghi nhận: <strong>{session.user.name}</strong>. Thợ thực hiện
-        không cần đăng nhập.
-      </p>
       <div className="form-grid">
-        <Field label="Ngày làm việc">
-          <input
-            name="date"
-            type="date"
-            required
-            max={day()}
-            min={detail?.order_date}
-            defaultValue={day()}
-          />
-        </Field>
-        <Field label="Đơn hàng">
-          <select
-            value={id}
-            onChange={(e) => {
-              setId(e.target.value);
-              setByWorker({});
-              setPart(0);
-              setPerson("");
-            }}
-          >
-            {orders
-              .filter((o) => o.status !== "completed")
-              .map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.id} · {o.product_name}
-                </option>
+        {!embedded && (
+          <Field label="Đơn hàng">
+            <select
+              value={id}
+              onChange={(e) => {
+                setId(e.target.value);
+                setByWorker({});
+                setPart(0);
+                setPerson("");
+              }}
+            >
+              {orders
+                .filter((o) => o.status !== "completed")
+                .map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.id} · {o.product_name}
+                  </option>
+                ))}
+            </select>
+          </Field>
+        )}
+        {stages.length === 1 ? (
+          <div className="field">
+            <span>Công đoạn</span>
+            <strong>{stage}</strong>
+          </div>
+        ) : (
+          <Field label="Công đoạn">
+            <select
+              value={stage}
+              onChange={(e) => {
+                setStage(e.target.value);
+                setByWorker({});
+                setPart(0);
+                setPerson("");
+              }}
+            >
+              {stages.map((s) => (
+                <option key={s}>{s}</option>
               ))}
-          </select>
-        </Field>
-        <Field label="Công đoạn">
-          <select
-            value={stage}
-            onChange={(e) => {
-              setStage(e.target.value);
-              setByWorker({});
-              setPart(0);
-              setPerson("");
-            }}
-          >
-            {stages.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-        </Field>
+            </select>
+          </Field>
+        )}
         {!!parts.length && (
           <Field label="Phần việc">
             <select
@@ -503,6 +503,31 @@ export function ProductionForm({
           )}
         </div>
       )}
+      <div className="field">
+        <span>Ngày làm việc</span>
+        {editDate ? (
+          <input
+            name="date"
+            type="date"
+            required
+            max={day()}
+            min={detail?.order_date}
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+        ) : (
+          <div className="inline-actions">
+            <strong>Hôm nay, {date.split("-").reverse().join("/")}</strong>
+            <Action
+              type="button"
+              tone="secondary"
+              onClick={() => setEditDate(true)}
+            >
+              Làm vào ngày khác
+            </Action>
+          </div>
+        )}
+      </div>
       <label className="check-label">
         <input type="checkbox" name="incident" />
         Có sự cố cần giải trình
@@ -513,8 +538,15 @@ export function ProductionForm({
       >
         <textarea name="reason" maxLength={2000} />
       </Field>
+      <p className="muted">
+        Bạn ({session.user.name}) nhập thay cho thợ; thợ không cần đăng nhập.
+      </p>
       <div className="modal-footer">
-        <strong>Tổng lần này: {total.toLocaleString("vi-VN")} sản phẩm</strong>
+        <strong>
+          {total === 0
+            ? "Chưa nhập số lượng nào"
+            : `Tổng lần này: ${total.toLocaleString("vi-VN")} sản phẩm`}
+        </strong>
         <Action type="submit" busy={busy} disabled={!!problem || total === 0}>
           <Check size={18} />
           Ghi nhận một lần
@@ -589,7 +621,7 @@ export function OrderDetail({
   onChanged: () => Promise<void>;
 }) {
   const order = raw as Detail;
-  const [tab, setTab] = useState(() =>
+  const firstTab =
     isManagement(session.user) || !prepared(order)
       ? "progress"
       : permits(session.user, "qc.manage", { stage: "QC" })
@@ -600,8 +632,8 @@ export function OrderDetail({
                 permits(session.user, "production.create", { stage: s }),
               )
             ? "work"
-            : "progress",
-  );
+            : "progress";
+  const [tab, setTab] = useState(firstTab);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [removeImage, setRemoveImage] = useState(false);
   const [error, setError] = useState("");
@@ -617,7 +649,7 @@ export function OrderDetail({
     }),
     { cut: 0, sewn: 0, qc: 0, packed: 0, delivered: 0 },
   );
-  const tabs = [
+  const allTabs = [
     { id: "progress", label: "Tiến độ" },
     { id: "assignments", label: "Phân công" },
     ...(permits(session.user, "orders.edit", { stage: "nhan_don" }) ||
@@ -643,6 +675,11 @@ export function OrderDetail({
       (t) =>
         t.id !== "qc" || permits(session.user, "qc.manage", { stage: "QC" }),
     );
+  // The tab a person works in most comes first, so it is the first thing they see.
+  const tabs = [
+    ...allTabs.filter((t) => t.id === firstTab),
+    ...allTabs.filter((t) => t.id !== firstTab),
+  ];
   return (
     <div className="stack department-detail">
       <div className="order-detail-heading">
@@ -657,7 +694,7 @@ export function OrderDetail({
             {order.total_quantity} sản phẩm
           </p>
           <p>
-            Bước điều phối:{" "}
+            Đơn đang ở bước:{" "}
             <strong>
               {LUUTA_STAGES.find((s) => s.key === order.current_stage)?.label}
             </strong>
@@ -679,6 +716,9 @@ export function OrderDetail({
       <ErrorNotice error={error} />
       {tab === "progress" && (
         <>
+          {isManagement(session.user) && (
+            <NextStep order={order} onGo={setTab} />
+          )}
           <div className="department-metrics">
             {[
               ["Đã cắt", totals.cut],
@@ -971,8 +1011,12 @@ function StageMover({
     PREPARATION_STAGES.includes(order.current_stage) &&
     isManagement(session.user);
   return (
-    <div className="field" role="group" aria-label="Chuyển bước điều phối">
-      <span>Chuyển bước điều phối</span>
+    <div
+      className="field"
+      role="group"
+      aria-label="Chuyển đơn sang bước kế tiếp"
+    >
+      <span>Chuyển đơn sang bước kế tiếp</span>
       <div className="inline-actions">
         {preparing && (
           <Action
@@ -1132,6 +1176,60 @@ const STAGE_ASSIGNMENT: Record<string, string> = {
   dong_goi: "Đóng gói",
   giao_hang: "Giao hàng",
 };
+/** One plain sentence telling a manager what to do next, with a button that goes there. */
+function NextStep({
+  order,
+  onGo,
+}: {
+  order: Detail;
+  onGo: (tab: string) => void;
+}) {
+  if (order.status === "completed") return null;
+  const unassigned = assignmentStages.filter(
+    (st) =>
+      !(order.assignments || []).some(
+        (a) => a.active === 1 && a.stage === st,
+      ) && !(order.work_items || []).some((w) => w.stage === st),
+  );
+  const variants = order.variants || [];
+  const shortage = variants.reduce(
+    (n, v) => n + Math.max(0, v.quantity - v.delivered_qty),
+    0,
+  );
+  const left = daysLeft(order.deadline);
+  let text = "";
+  let tab = "";
+  let label = "";
+  if (!prepared(order) && order.current_stage !== "hoan_thanh") {
+    text =
+      "Đơn mới nhận. Giao thợ cho từng công đoạn, khai báo vải nếu cần, rồi bấm “Hoàn tất chuẩn bị” ở cuối trang để bắt đầu cắt.";
+    tab = "assignments";
+    label = "Giao thợ cho công đoạn";
+  } else if (unassigned.length) {
+    text = `Chưa giao thợ cho: ${unassigned.join(", ")}. Chưa giao thì chưa nhập được sản lượng.`;
+    tab = "assignments";
+    label = "Giao thợ";
+  } else if (variants.length && shortage === 0) {
+    text =
+      "Đã giao đủ số lượng. Có thể bấm “Chuyển sang Hoàn thành” ở cuối trang.";
+  } else if (left < 0) {
+    text = `Đơn đã trễ hạn ${-left} ngày, còn ${shortage} sản phẩm chưa giao. Bấm số ở cột Thiếu để ghi nguyên nhân giải trình với khách.`;
+  } else {
+    text = `Còn ${shortage} sản phẩm chưa giao, hạn giao ${left === 0 ? "là hôm nay" : `còn ${left} ngày`}.`;
+  }
+  return (
+    <div className="entry-guidance" role="status">
+      <p>
+        <strong>Việc tiếp theo:</strong> {text}
+      </p>
+      {tab && (
+        <Action type="button" tone="secondary" onClick={() => onGo(tab)}>
+          {label}
+        </Action>
+      )}
+    </div>
+  );
+}
 // Stage times are stored as Vietnam local "YYYY-MM-DD HH:mm:ss"; only ISO values need conversion.
 const stageTime = (v: string) =>
   v.includes("T") ? formatDateTime(v) : v.slice(0, 16);
@@ -2424,6 +2522,62 @@ const formatDateTime = (v: string) =>
     timeStyle: "short",
   }).format(new Date(v));
 
+type Workload = { label: string; todo: number; done: string };
+/** What one department still has to do on an order, in plain words. */
+function workload(department: string, o: Order): Workload {
+  const vs = o.variants || [];
+  const sum = (f: (v: OrderVariant) => number) =>
+    vs.reduce((n, v) => n + f(v), 0);
+  const total = o.total_quantity;
+  if (department === "cutting")
+    return {
+      label: "Cần cắt thêm",
+      todo: sum((v) => Math.max(0, v.quantity - v.cut_qty)),
+      done: `Đã cắt ${sum((v) => v.cut_qty)}/${total}`,
+    };
+  if (department === "sewing")
+    return {
+      label: "Có thể may ngay",
+      todo:
+        sum((v) => Math.max(0, sewLimit(v) - v.sewn_qty)) +
+        sum((v) => remainingOperation(v, "rework")),
+      done: `Đã may ${sum((v) => v.sewn_qty)}/${total}`,
+    };
+  if (department === "quality")
+    return {
+      label: "Chờ kiểm",
+      todo:
+        sum((v) => remainingOperation(v, "qc")) +
+        sum((v) => remainingOperation(v, "reinspect")),
+      done: `QC đạt ${sum((v) => v.qc_passed_qty)}/${total}`,
+    };
+  if (department === "packing")
+    return {
+      label: "Chờ đóng gói",
+      todo: sum((v) => remainingOperation(v, "pack")),
+      done: `Đã đóng gói ${sum((v) => v.packed_qty)}/${total}`,
+    };
+  if (department === "delivery")
+    return {
+      label: "Chờ giao",
+      todo: sum((v) => remainingOperation(v, "deliver")),
+      done: `Đã giao ${sum((v) => v.delivered_qty)}/${total}`,
+    };
+  return {
+    label: "Còn phải giao",
+    todo: sum((v) => Math.max(0, v.quantity - v.delivered_qty)),
+    done: `Đã giao ${sum((v) => v.delivered_qty)}/${total}`,
+  };
+}
+const ACTION_BY_DEPARTMENT: Record<string, string> = {
+  cutting: "Ghi sản lượng",
+  sewing: "Ghi sản lượng",
+  packing: "Ghi sản lượng",
+  quality: "Kiểm hàng",
+  delivery: "Ghi giao hàng",
+};
+const daysLeft = (deadline: string) =>
+  Math.round((Date.parse(deadline) - Date.parse(day())) / 86400000);
 export function DepartmentsPanel({
   orders,
   session,
@@ -2443,29 +2597,28 @@ export function DepartmentsPanel({
   );
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const rows = orders.filter(
-    (o) =>
-      o.status !== "completed" &&
-      `${o.id} ${o.product_name} ${o.customer}`
-        .toLocaleLowerCase("vi")
-        .includes(search.toLocaleLowerCase("vi")) &&
-      (!department ||
-        department === departmentFor(o.current_stage) ||
-        (o.variants || []).some((v) =>
-          department === "sewing"
-            ? v.cut_qty > v.sewn_qty
-            : department === "quality"
-              ? remainingOperation(v, "qc") > 0 ||
-                remainingOperation(v, "rework") > 0 ||
-                remainingOperation(v, "reinspect") > 0
-              : department === "packing"
-                ? remainingOperation(v, "pack") > 0
-                : department === "delivery"
-                  ? remainingOperation(v, "deliver") > 0
-                  : false,
-        )),
-  );
+  const matches = (o: Order) =>
+    o.status !== "completed" &&
+    `${o.id} ${o.product_name} ${o.customer}`
+      .toLocaleLowerCase("vi")
+      .includes(search.toLocaleLowerCase("vi"));
+  const rows = orders
+    .filter(
+      (o) =>
+        matches(o) &&
+        (!department ||
+          department === departmentFor(o.current_stage) ||
+          workload(department, o).todo > 0),
+    )
+    .map((o) => ({ o, w: workload(department, o) }))
+    .sort(
+      (a, b) =>
+        Number(b.w.todo > 0) - Number(a.w.todo > 0) ||
+        a.o.deadline.localeCompare(b.o.deadline),
+    );
+  const elsewhere = orders.filter(matches).length - rows.length;
   const current = Math.min(page, Math.max(1, Math.ceil(rows.length / 20)));
+  const action = ACTION_BY_DEPARTMENT[department] || "Mở đơn";
   return (
     <section className="panel department-panel">
       <div className="panel-toolbar">
@@ -2498,51 +2651,74 @@ export function DepartmentsPanel({
         </Field>
       </div>
       <div className="table-scroll">
-        <table>
+        <table className="mobile-stack-table">
           <thead>
             <tr>
               <th>Đơn / sản phẩm</th>
-              <th>Bước điều phối</th>
-              <th>Đã may</th>
-              <th>QC đạt</th>
-              <th>Đã giao</th>
+              <th>Hạn giao</th>
+              <th>Việc cần làm</th>
+              <th>Đơn đang ở bước</th>
               <th>Thao tác</th>
             </tr>
           </thead>
           <tbody>
-            {rows.slice((current - 1) * 20, current * 20).map((o) => (
-              <tr key={o.id}>
-                <td>
-                  <strong>{o.id}</strong>
-                  <p>{o.product_name}</p>
-                </td>
-                <td>
-                  {LUUTA_STAGES.find((s) => s.key === o.current_stage)?.label}
-                </td>
-                <td>
-                  {o.variants?.reduce((n, v) => n + v.sewn_qty, 0)}/
-                  {o.total_quantity}
-                </td>
-                <td>
-                  {o.variants?.reduce((n, v) => n + v.qc_passed_qty, 0)}/
-                  {o.total_quantity}
-                </td>
-                <td>
-                  {o.variants?.reduce((n, v) => n + v.delivered_qty, 0)}/
-                  {o.total_quantity}
-                </td>
-                <td>
-                  <Action tone="secondary" onClick={() => onOpen(o.id)}>
-                    <ClipboardList size={18} />
-                    Mở công việc
-                  </Action>
-                </td>
-              </tr>
-            ))}
+            {rows.slice((current - 1) * 20, current * 20).map(({ o, w }) => {
+              const left = daysLeft(o.deadline);
+              return (
+                <tr key={o.id}>
+                  <td data-label="Đơn / sản phẩm">
+                    <strong>{o.id}</strong>
+                    <p>
+                      {o.product_name} · {o.customer}
+                    </p>
+                  </td>
+                  <td data-label="Hạn giao">
+                    {o.deadline.split("-").reverse().join("/")}
+                    <p>
+                      <span
+                        className={`status ${left < 0 ? "delayed" : left <= 3 ? "at_risk" : "on_track"}`}
+                      >
+                        {left < 0
+                          ? `Trễ ${-left} ngày`
+                          : left === 0
+                            ? "Hôm nay"
+                            : `Còn ${left} ngày`}
+                      </span>
+                    </p>
+                  </td>
+                  <td data-label="Việc cần làm">
+                    <strong>
+                      {w.label}: {w.todo.toLocaleString("vi-VN")}
+                    </strong>
+                    <p className="muted">{w.done}</p>
+                  </td>
+                  <td data-label="Đơn đang ở bước">
+                    {LUUTA_STAGES.find((s) => s.key === o.current_stage)?.label}
+                  </td>
+                  <td data-label="Thao tác">
+                    <Action
+                      tone={w.todo > 0 ? "primary" : "secondary"}
+                      onClick={() => onOpen(o.id)}
+                    >
+                      <ClipboardList size={18} />
+                      {action}
+                    </Action>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
-      {!rows.length && <Empty>Chưa có đơn phù hợp.</Empty>}
+      {!rows.length && (
+        <Empty>
+          {department
+            ? `Chưa có đơn nào đến lượt ${departmentName(department)}.`
+            : "Chưa có đơn nào đang chạy."}
+          {elsewhere > 0 &&
+            ` Có ${elsewhere} đơn khác đang ở bước khác; khi đến lượt sẽ hiện ở đây.`}
+        </Empty>
+      )}
       <Pagination
         page={current}
         total={rows.length}

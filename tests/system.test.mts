@@ -1504,7 +1504,9 @@ test("Long department lists render bounded accessible tables rather than hundred
   assert.match(html, /UX-020/);
   assert.doesNotMatch(html, /UX-021/);
   assert.match(html, /Trang 1\/6/);
-  assert.match(html, /Mở công việc/);
+  assert.match(html, /Mở đơn/);
+  assert.match(html, /Hạn giao/);
+  assert.match(html, /Việc cần làm/);
   assert.doesNotMatch(html, /Chuyền/);
 });
 test("New orders and worker profiles carry no fabricated legacy line number", async () => {

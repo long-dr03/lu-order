@@ -2313,6 +2313,11 @@ th.sticky-col {
 .department-panel td p { margin:4px 0 0; font-size:14px; }
 .department-panel .panel-toolbar .field { flex:1 1 200px; }
 .department-detail fieldset { min-width:0; }
+/* Plain-language guidance box: what to do next and why a button is unavailable. */
+.entry-guidance { display:grid; gap:10px; justify-items:start; padding:14px 16px; border:1px solid var(--border); border-radius:8px; background:#fafafa; font-size:15px; }
+.entry-guidance p { margin:0; }
+/* Keep the save button in reach while a long production form scrolls. */
+.department-form .modal-footer { position:sticky; bottom:-1px; z-index:2; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:12px 0; margin-top:4px; background:var(--surface,#fff); border-top:1px solid var(--border); }
 
 /* One persistent production action, outside animated page containers. */
 .app-main main.with-production-shortcut { padding-bottom: calc(104px + env(safe-area-inset-bottom, 0px)); }

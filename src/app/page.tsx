@@ -709,18 +709,23 @@ export default function Page() {
               {session.user.department_ids?.map(departmentName).join(", ") ||
                 "Chưa phân loại"}
             </p>
-            {!session.representing && (
-              <PasswordForm
-                api={api}
-                onChanged={() => {
-                  unauthorized();
-                }}
-              />
-            )}
-            <Action tone="secondary" onClick={logout}>
+            <Action onClick={logout}>
               <LogOut size={18} />
               Đăng xuất
             </Action>
+            {!session.representing && (
+              <details className="record-disclosure">
+                <summary>Đổi mật khẩu</summary>
+                <div className="padded">
+                  <PasswordForm
+                    api={api}
+                    onChanged={() => {
+                      unauthorized();
+                    }}
+                  />
+                </div>
+              </details>
+            )}
           </div>
         </Modal>
       </div>
