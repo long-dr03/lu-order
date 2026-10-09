@@ -3553,7 +3553,6 @@ test("Large order lists render bounded rows with stage actions and line paginati
   const React = await import("react");
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { OrderWorkspace } = await import("../../src/components/OrderWorkspace");
-  const { OperationsPanel } = await import("../../src/components/RecordsPanel");
   const base = await fixture("qc", 3);
   const orders = Array.from({ length: 120 }, (_, i) => ({
     ...base,
@@ -3578,17 +3577,6 @@ test("Large order lists render bounded rows with stage actions and line paginati
   assert.match(html, /UX-025/);
   assert.doesNotMatch(html, /UX-026/);
   assert.match(html, /Trang 1\/5/);
-  const qcHtml = renderToStaticMarkup(
-    React.createElement(OperationsPanel, {
-      orders,
-      mode: "qc",
-      session,
-      onOpen: noop,
-    }),
-  );
-  assert.match(qcHtml, /UX-012/);
-  assert.doesNotMatch(qcHtml, /UX-013/);
-  assert.match(qcHtml, /Trang 1\/10/);
 });
 
 test("UX USE-22: missing rate blocks production with an actionable explanation", async () => {

@@ -167,7 +167,15 @@ export async function saveStaff(
 export const assignmentSchema = z
   .object({
     version: z.number().int().positive(),
-    stage: z.enum(["Cắt", "May", "Sửa hàng", "Đóng gói", "Giao hàng"]),
+    stage: z.enum([
+      "Kiểm NPL/Vải",
+      "Kiểm rập",
+      "Cắt",
+      "May",
+      "Sửa hàng",
+      "Đóng gói",
+      "Giao hàng",
+    ]),
     work_item_id: z.number().int().positive().optional(),
     employee_ids: z.array(text).max(200),
   })

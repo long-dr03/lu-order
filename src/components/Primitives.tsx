@@ -69,6 +69,7 @@ export function Modal({
   description,
   children,
   wide = false,
+  medium = false,
   drawer = false,
 }: {
   open: boolean;
@@ -77,6 +78,7 @@ export function Modal({
   description?: string;
   children: ReactNode;
   wide?: boolean;
+  medium?: boolean;
   drawer?: boolean;
 }) {
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -118,7 +120,7 @@ export function Modal({
               }}
             >
               <motion.div
-                className={`modal-content ${wide ? "wide" : ""} ${drawer ? "navigation-drawer" : ""}`}
+                className={`modal-content ${wide ? "wide" : ""} ${medium ? "medium" : ""} ${drawer ? "navigation-drawer" : ""}`}
                 initial={
                   reduceMotion
                     ? { opacity: 1 }

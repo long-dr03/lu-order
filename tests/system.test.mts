@@ -276,7 +276,7 @@ test("Six stable departments; startup is repeatable and does not reinstate remov
         .prepare("SELECT MAX(version) n FROM schema_migrations")
         .get()) as { n: number }
     ).n,
-    12,
+    21,
   );
 });
 test("Passwords use distinct salts and verify without plaintext", () => {
@@ -1317,6 +1317,591 @@ test("Product and QC images use authenticated uploads and survive full snapshots
     saved.tables.operation_records.some((r) => r.image_url === defect.url),
   );
 });
+test("Orders keep several photos, each tied to a color or shared, and the first one stays the cover", async () => {
+  const sharp = (await import("sharp")).default;
+  const upload = await import("../src/app/api/product-images/route");
+  const bytes = await sharp({
+    create: { width: 16, height: 16, channels: 3, background: "#336699" },
+  })
+    .png()
+    .toBuffer();
+  const uploadPhoto = async () => {
+    const form = new FormData();
+    form.set(
+      "file",
+      new File([new Uint8Array(bytes)], "mau.png", { type: "image/png" }),
+    );
+    const response = await upload.POST(
+      new Request("http://localhost:3003/api/product-images", {
+        method: "POST",
+        headers: {
+          cookie: people.admin.cookie,
+          origin: process.env.APP_ORIGIN!,
+          "x-csrf-token": people.admin.csrf,
+        },
+        body: form,
+      }),
+    );
+    return (await result<{ url: string }>(response, 201)).url;
+  };
+  const first = await uploadPhoto();
+  const second = await uploadPhoto();
+  const third = await uploadPhoto();
+  const variants = [
+    { color: "Đen", size: "M", quantity: 10 },
+    { color: "Trắng", size: "M", quantity: 10 },
+  ];
+  const created = await business.createOrder(
+    await ctx("admin"),
+    business.createOrderSchema.parse({
+      customer: "Khách nhiều mẫu",
+      product_name: "Áo nhiều ảnh",
+      order_date: "2020-01-01",
+      deadline: "2030-01-01",
+      variants,
+      photos: [
+        { image_url: first, color: "Đen" },
+        { image_url: second, color: "" },
+      ],
+    }),
+  );
+  assert.equal(created.image_url, first);
+  assert.deepEqual(
+    created.photos?.map((p) => [p.image_url, p.color]),
+    [
+      [first, "Đen"],
+      [second, ""],
+    ],
+  );
+  await assert.rejects(
+    business.createOrder(
+      await ctx("admin"),
+      business.createOrderSchema.parse({
+        customer: "Khách",
+        product_name: "Áo",
+        order_date: "2020-01-01",
+        deadline: "2030-01-01",
+        variants,
+        photos: [{ image_url: third, color: "Xanh" }],
+      }),
+    ),
+    (error: { status?: number }) => error.status === 422,
+  );
+  assert.throws(() =>
+    business.createOrderSchema.parse({
+      customer: "Khách",
+      product_name: "Áo",
+      order_date: "2020-01-01",
+      deadline: "2030-01-01",
+      variants,
+      photos: Array.from({ length: 13 }, (_, i) => ({
+        image_url: `/api/product-images/00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+        color: "",
+      })),
+    }),
+  );
+  const reordered = (await business.moveOrder(
+    await ctx("admin"),
+    created.id,
+    business.moveSchema.parse({
+      version: created.version,
+      photos: [
+        { image_url: second, color: "Trắng" },
+        { image_url: first, color: "" },
+      ],
+    }),
+  ))!;
+  assert.equal(reordered.image_url, second);
+  assert.deepEqual(
+    reordered.photos?.map((p) => [p.image_url, p.color]),
+    [
+      [second, "Trắng"],
+      [first, ""],
+    ],
+  );
+  const cleared = (await business.moveOrder(
+    await ctx("admin"),
+    created.id,
+    business.moveSchema.parse({ version: reordered.version, photos: [] }),
+  ))!;
+  assert.equal(cleared.image_url, null);
+  assert.deepEqual(cleared.photos, []);
+});
+test("Preparation checks record NPL and pattern results with history, without blocking cutting", async () => {
+  const id = await order();
+  const checks = await import("../src/app/api/orders/[id]/checks/route");
+  const payload = {
+    stage: "Kiểm rập",
+    result: "dat_co_ghi_chu",
+    defect_qty: 0,
+    notes: "Rập tay áo lệch, chỉnh lại đường nách",
+    pattern_version: "Rev B",
+    sizes_checked: "M, L",
+    pieces_expected: 6,
+    pieces_received: 5,
+    measurements: [
+      { point: "Dài áo", size: "M", spec: 70, actual: 70.3, tolerance: 0.5 },
+      { point: "Rộng ngực", size: "M", spec: 52, actual: 53.2, tolerance: 0.5 },
+    ],
+    checked_by: workers.cutting[0],
+    approved_by: null,
+    checked_on: today(),
+  };
+  const saved = await result<
+    {
+      id: number;
+      stage: string;
+      defect_qty: number;
+      pieces_received: number;
+      measurements: unknown[];
+    }[]
+  >(
+    await checks.POST(
+      req(`/api/orders/${id}/checks`, "admin", payload),
+      params("id", id),
+    ),
+    201,
+  );
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].stage, "kiem_rap");
+  assert.equal(
+    saved[0].defect_qty,
+    1,
+    "only the chest point is out of tolerance",
+  );
+  assert.equal(saved[0].pieces_received, 5);
+  assert.equal(saved[0].measurements.length, 2);
+  const sharp = (await import("sharp")).default;
+  const upload = await import("../src/app/api/product-images/route");
+  const photoForm = new FormData();
+  photoForm.set(
+    "file",
+    new File(
+      [
+        new Uint8Array(
+          await sharp({
+            create: { width: 8, height: 8, channels: 3, background: "#aa3333" },
+          })
+            .png()
+            .toBuffer(),
+        ),
+      ],
+      "lech.png",
+      { type: "image/png" },
+    ),
+  );
+  const photo = await result<{ url: string }>(
+    await upload.POST(
+      new Request("http://localhost:3003/api/product-images", {
+        method: "POST",
+        headers: {
+          cookie: people.cutting.cookie,
+          origin: process.env.APP_ORIGIN!,
+          "x-csrf-token": people.cutting.csrf,
+        },
+        body: photoForm,
+      }),
+    ),
+    201,
+  );
+  const withPhoto = await result<{ photos: string[] }[]>(
+    await checks.POST(
+      req(`/api/orders/${id}/checks`, "cutting", {
+        ...payload,
+        photos: [photo.url],
+      }),
+      params("id", id),
+    ),
+    201,
+  );
+  assert.deepEqual(withPhoto.at(-1)?.photos, [photo.url]);
+  const imageApi = await import("../src/app/api/product-images/[id]/route");
+  assert.equal(
+    (
+      await imageApi.GET(
+        req(photo.url, "cutting"),
+        params("id", photo.url.split("/").at(-1)!),
+      )
+    ).status,
+    200,
+    "people who can see the order can see its check photos",
+  );
+  const forbidden = await checks.POST(
+    req(`/api/orders/${id}/checks`, "sewing", payload),
+    params("id", id),
+  );
+  assert.equal(forbidden.status, 403);
+  const wrongWorker = await checks.POST(
+    req(`/api/orders/${id}/checks`, "admin", {
+      ...payload,
+      checked_by: workers.sewing[0],
+    }),
+    params("id", id),
+  );
+  assert.equal(wrongWorker.status, 422);
+  const read = await result<{ stage: string; checked_by_name: string }[]>(
+    await checks.GET(
+      req(`/api/orders/${id}/checks`, "admin"),
+      params("id", id),
+    ),
+  );
+  assert.equal(read.length, 2);
+  const before = await current(id);
+  const detail = await getOrderById(id);
+  assert.equal(detail?.checks?.length, 2);
+  assert.equal(detail?.current_stage, before.current_stage);
+});
+test("Pattern check can be a written assessment only, which must say something and carries no measurements", async () => {
+  const id = await order();
+  const checks = await import("../src/app/api/orders/[id]/checks/route");
+  const base = {
+    stage: "Kiểm rập",
+    result: "dat_co_ghi_chu",
+    mode: "text",
+    sizes_checked: "M",
+    checked_on: today(),
+  };
+  const empty = await checks.POST(
+    req(`/api/orders/${id}/checks`, "cutting", { ...base, notes: "  " }),
+    params("id", id),
+  );
+  assert.equal(empty.status, 422);
+  const measured = await checks.POST(
+    req(`/api/orders/${id}/checks`, "cutting", {
+      ...base,
+      notes: "Rập đủ mảnh",
+      measurements: [
+        { point: "Dài áo", size: "M", spec: 70, actual: 70, tolerance: 0.5 },
+      ],
+    }),
+    params("id", id),
+  );
+  assert.equal(measured.status, 422);
+  const saved = await result<
+    { mode: string; notes: string; measurements: unknown[] }[]
+  >(
+    await checks.POST(
+      req(`/api/orders/${id}/checks`, "cutting", {
+        ...base,
+        notes: "Rập đủ mảnh, cổ sau cần chỉnh lại đường cong.",
+      }),
+      params("id", id),
+    ),
+    201,
+  );
+  assert.equal(saved[0].mode, "text");
+  assert.deepEqual(saved[0].measurements, []);
+  const phased = await result<{ phase: string }[]>(
+    await checks.POST(
+      req(`/api/orders/${id}/checks`, "cutting", {
+        ...base,
+        notes: "Mẫu PPS đạt",
+        phase: "pps",
+      }),
+      params("id", id),
+    ),
+    201,
+  );
+  assert.deepEqual(
+    phased.map((c) => c.phase),
+    ["", "pps"],
+    "the first round was saved without a stage; the second records PPS",
+  );
+  const badPhase = await checks.POST(
+    req(`/api/orders/${id}/checks`, "cutting", {
+      ...base,
+      notes: "x",
+      phase: "bat_ky",
+    }),
+    params("id", id),
+  );
+  assert.equal(badPhase.status, 422);
+});
+test("A pattern check can be confirmed by a photo of the sheet or an attached file, with real file validation", async () => {
+  const id = await order();
+  const checks = await import("../src/app/api/orders/[id]/checks/route");
+  const filesApi = await import("../src/app/api/preparation-files/route");
+  const fileApi = await import("../src/app/api/preparation-files/[id]/route");
+  const sharp = (await import("sharp")).default;
+  const upload = (who: string, name: string, bytes: Uint8Array) => {
+    const form = new FormData();
+    form.set("file", new File([bytes as BlobPart], name));
+    return filesApi.POST(
+      new Request("http://localhost:3003/api/preparation-files", {
+        method: "POST",
+        headers: {
+          cookie: people[who].cookie,
+          origin: process.env.APP_ORIGIN!,
+          "x-csrf-token": people[who].csrf,
+        },
+        body: form,
+      }),
+    );
+  };
+  const pdf = new TextEncoder().encode("%PDF-1.4\n1 0 obj<<>>endobj\n%%EOF");
+  const zipLike = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4]);
+  assert.equal((await upload("sewing", "bang-do.pdf", pdf)).status, 403);
+  assert.equal(
+    (await upload("cutting", "bang-do.exe", pdf)).status,
+    422,
+    "only office documents and PDFs",
+  );
+  assert.equal(
+    (
+      await upload(
+        "cutting",
+        "gia-mao.pdf",
+        new TextEncoder().encode("<html>not a pdf</html>"),
+      )
+    ).status,
+    422,
+    "content must match the extension",
+  );
+  assert.equal(
+    (await upload("cutting", "gia-mao.xlsx", pdf)).status,
+    422,
+    "a PDF renamed to .xlsx is rejected",
+  );
+  const stored = await result<{ url: string; name: string; size: number }>(
+    await upload("cutting", "../bảng đo rập.xlsx", zipLike),
+    201,
+  );
+  assert.equal(stored.name, "bảng đo rập.xlsx");
+  const base = {
+    stage: "Kiểm rập",
+    result: "dat",
+    checked_on: today(),
+  };
+  const post = (who: string, input: Record<string, unknown>) =>
+    checks.POST(
+      req(`/api/orders/${id}/checks`, who, { ...base, ...input }),
+      params("id", id),
+    );
+  assert.equal(
+    (await post("cutting", { mode: "file" })).status,
+    422,
+    "needs a file",
+  );
+  assert.equal(
+    (
+      await post("cutting", {
+        mode: "file",
+        files: [{ ...stored, name: "x" }],
+        measurements: [
+          { point: "Dài áo", size: "M", spec: 1, actual: 1, tolerance: 1 },
+        ],
+      })
+    ).status,
+    422,
+    "no measurements with a file",
+  );
+  assert.equal(
+    (await post("admin", { mode: "file", files: [stored] })).status,
+    422,
+    "somebody else's upload cannot be attached",
+  );
+  const withFile = await result<
+    { mode: string; files: { name: string; url: string }[] }[]
+  >(
+    await post("cutting", {
+      mode: "file",
+      files: [{ ...stored, name: "doi-ten.xlsx" }],
+    }),
+    201,
+  );
+  assert.equal(withFile[0].mode, "file");
+  assert.equal(
+    withFile[0].files[0].name,
+    "bảng đo rập.xlsx",
+    "the stored name is used, not the one sent with the check",
+  );
+  const download = (who: string) =>
+    fileApi.GET(
+      req(stored.url, who),
+      params("id", stored.url.split("/").at(-1)!),
+    );
+  const downloaded = await download("admin");
+  assert.equal(downloaded.status, 200);
+  assert.match(
+    downloaded.headers.get("content-disposition") || "",
+    /^attachment;/,
+  );
+  assert.equal(downloaded.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(
+    (
+      await fileApi.GET(
+        new Request(`http://localhost:3003${stored.url}`),
+        params("id", stored.url.split("/").at(-1)!),
+      )
+    ).status,
+    401,
+  );
+  assert.equal(
+    (await post("cutting", { mode: "photo" })).status,
+    422,
+    "needs a photo",
+  );
+  const photoForm = new FormData();
+  photoForm.set(
+    "file",
+    new File(
+      [
+        new Uint8Array(
+          await sharp({
+            create: { width: 8, height: 8, channels: 3, background: "#228833" },
+          })
+            .png()
+            .toBuffer(),
+        ),
+      ],
+      "bang.png",
+      { type: "image/png" },
+    ),
+  );
+  const imageUpload = await import("../src/app/api/product-images/route");
+  const photo = await result<{ url: string }>(
+    await imageUpload.POST(
+      new Request("http://localhost:3003/api/product-images", {
+        method: "POST",
+        headers: {
+          cookie: people.cutting.cookie,
+          origin: process.env.APP_ORIGIN!,
+          "x-csrf-token": people.cutting.csrf,
+        },
+        body: photoForm,
+      }),
+    ),
+    201,
+  );
+  const withPhoto = await result<
+    { mode: string; photos: string[]; files: unknown[] }[]
+  >(await post("cutting", { mode: "photo", photos: [photo.url] }), 201);
+  assert.equal(withPhoto.at(-1)?.mode, "photo");
+  assert.deepEqual(withPhoto.at(-1)?.photos, [photo.url]);
+  assert.deepEqual(withPhoto.at(-1)?.files, []);
+  assert.equal(
+    (
+      await post("cutting", {
+        mode: "photo",
+        photos: [photo.url],
+        files: [stored],
+      })
+    ).status,
+    422,
+    "files belong to file mode only",
+  );
+});
+test("Spec sheet values read inch fractions and Excel pastes the way tech packs write them", async () => {
+  const m = await import("../src/lib/measure");
+  for (const [raw, value] of [
+    ["28 1/4", 28.25],
+    ["28-1/4", 28.25],
+    ["3/8", 0.375],
+    ["28.25", 28.25],
+    ["70,5", 70.5],
+    ["½", 0.5],
+  ] as const)
+    assert.equal(m.parseMeasure(raw), value, raw);
+  assert.equal(m.parseMeasure("abc"), null);
+  assert.equal(m.formatMeasure(28.25, "inch"), "28 1/4");
+  assert.equal(m.formatMeasure(0.375, "inch"), "3/8");
+  assert.equal(m.formatDeviation(-0.125, "inch"), "-1/8");
+  const pasted = m.parsePomPaste(
+    "POM\tPOINT OF MEASURE\tTOL +/-\tS\tM\tL (BASE)\n1\tFRONT LENGTH - FROM HPS\t3/8\t28 1/4\t29 1/2\t30 1/4\n3\tNECK WIDTH\t1/4\t\t7 1/4\t7 1/2",
+    [],
+  );
+  assert.deepEqual(pasted.sizes, ["S", "M", "L"]);
+  assert.equal(pasted.baseSize, "L");
+  assert.deepEqual(pasted.rows[0], {
+    code: "1",
+    point: "FRONT LENGTH - FROM HPS",
+    tolerance: 0.375,
+    values: { S: 28.25, M: 29.5, L: 30.25 },
+  });
+  assert.deepEqual(pasted.rows[1].values, { M: 7.25, L: 7.5 });
+  const piped = m.parsePomPaste(
+    "POM | Điểm đo | Dung sai | S | M | L (gốc)\n1 | Dài váy | 3/8 | 43 | 43 1/2 | 44\n2 | Rộng vai | 3/8 | | 15 | 15 1/2",
+    [],
+  );
+  assert.deepEqual(piped.sizes, ["S", "M", "L"]);
+  assert.equal(piped.baseSize, "L");
+  assert.deepEqual(piped.rows[0].values, { S: 43, M: 43.5, L: 44 });
+  assert.deepEqual(
+    piped.rows[1].values,
+    { M: 15, L: 15.5 },
+    "an empty cell means the size has no standard for this point",
+  );
+});
+test("POM chart is declared once per order as points × sizes in inches, and replaced as a whole", async () => {
+  const id = await order();
+  const specsApi =
+    await import("../src/app/api/orders/[id]/pattern-specs/route");
+  const sheet = {
+    unit: "inch",
+    sizes: ["S", "M", "L", "XL"],
+    base_size: "L",
+    poms: [
+      {
+        code: "1",
+        point: "Front length from HPS",
+        tolerance: 0.375,
+        values: { S: 28.25, M: 29.5, L: 30.25, XL: 31.25 },
+      },
+      {
+        code: "3",
+        point: "Neck width",
+        tolerance: 0.25,
+        values: { M: 7.25, L: 7.5 },
+      },
+    ],
+  };
+  const saved = await result<{
+    unit: string;
+    base_size: string;
+    poms: { point: string; values: Record<string, number> }[];
+  }>(
+    await specsApi.POST(
+      req(`/api/orders/${id}/pattern-specs`, "admin", sheet),
+      params("id", id),
+    ),
+  );
+  assert.equal(saved.unit, "inch");
+  assert.equal(saved.base_size, "L");
+  assert.deepEqual(saved.poms[0].values, sheet.poms[0].values);
+  assert.deepEqual(saved.poms[1].values, { M: 7.25, L: 7.5 });
+  const forbidden = await specsApi.POST(
+    req(`/api/orders/${id}/pattern-specs`, "sewing", sheet),
+    params("id", id),
+  );
+  assert.equal(forbidden.status, 403);
+  for (const invalid of [
+    { ...sheet, poms: [sheet.poms[0], sheet.poms[0]] },
+    { ...sheet, base_size: "3XL" },
+    { ...sheet, sizes: ["S", "M"] },
+  ]) {
+    const response = await specsApi.POST(
+      req(`/api/orders/${id}/pattern-specs`, "admin", invalid),
+      params("id", id),
+    );
+    assert.equal(response.status, 422, JSON.stringify(invalid).slice(0, 80));
+  }
+  await result(
+    await specsApi.POST(
+      req(`/api/orders/${id}/pattern-specs`, "cutting", {
+        ...sheet,
+        unit: "cm",
+        poms: [sheet.poms[1]],
+      }),
+      params("id", id),
+    ),
+  );
+  const replaced = (await current(id)).pattern_sheet!;
+  assert.equal(replaced.unit, "cm");
+  assert.deepEqual(
+    replaced.poms.map((p) => p.point),
+    ["Neck width"],
+  );
+});
 test("Register waits approval; Admin links own profile with departments and rejects worker-only account role", async () => {
   const username = "pendingqa";
   await result(
@@ -2020,8 +2605,17 @@ test("Quick assignment fills only unassigned tasks with each department's active
       ids.includes(workers.sewing[0]) && ids.includes(workers.sewing[1]),
     );
   }
-  for (const stage of ["Sửa hàng", "Đóng gói", "Giao hàng"])
-    assert.ok(rows.some((r) => r.stage === stage));
+  for (const stage of [
+    "Kiểm NPL/Vải",
+    "Kiểm rập",
+    "Sửa hàng",
+    "Đóng gói",
+    "Giao hàng",
+  ])
+    assert.ok(
+      rows.some((r) => r.stage === stage),
+      stage,
+    );
   const employees = (await db
     .prepare(
       "SELECT e.id,e.active,d.department_id FROM employees e JOIN employee_departments d ON d.employee_id=e.id",
@@ -2035,6 +2629,8 @@ test("Quick assignment fills only unassigned tasks with each department's active
           e.active !== 0 &&
           e.department_id ===
             {
+              "Kiểm rập": "cutting",
+              "Kiểm NPL/Vải": "quality",
               Cắt: "cutting",
               May: "sewing",
               "Sửa hàng": "sewing",

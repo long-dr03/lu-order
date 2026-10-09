@@ -54,7 +54,68 @@ export interface WorkItem {
   name: string;
 }
 
+export interface PreparationFile {
+  url: string;
+  name: string;
+  size: number;
+}
+export interface PreparationCheck {
+  id: number;
+  order_id: string;
+  stage: "kiem_npl" | "kiem_rap";
+  result: "dat" | "dat_co_ghi_chu" | "khong_dat";
+  defect_qty: number;
+  notes: string;
+  pattern_version: string;
+  sizes_checked: string;
+  pieces_expected: number | null;
+  pieces_received: number | null;
+  measurements: PatternMeasurement[];
+  /** "text": written assessment; "photo": photo of the filled sheet; "file": attached PDF/Excel/Word. */
+  mode: "measure" | "text" | "photo" | "file";
+  files: PreparationFile[];
+  /** Sample stage the measurements belong to; "" when not recorded. */
+  phase: "" | "rap_thu" | "fit" | "pps" | "bulk";
+  unit: "inch" | "cm";
+  photos: string[];
+  checked_by: string | null;
+  checked_by_name?: string | null;
+  approved_by: string | null;
+  approved_by_name?: string | null;
+  checked_on: string;
+  created_at: string;
+}
+/** One row of a POM chart: a point of measure with its tolerance and the standard value per size. */
+export interface PatternPom {
+  code: string;
+  point: string;
+  tolerance: number;
+  values: Record<string, number>;
+}
+export interface PatternSheet {
+  unit: "inch" | "cm";
+  sizes: string[];
+  base_size: string;
+  poms: PatternPom[];
+}
+export interface PatternMeasurement {
+  code?: string;
+  point: string;
+  size: string;
+  spec: number;
+  actual: number;
+  tolerance: number;
+}
+export interface OrderPhoto {
+  id: number;
+  image_url: string;
+  color: string;
+  position: number;
+}
 export interface Order {
+  photos?: OrderPhoto[];
+  checks?: PreparationCheck[];
+  pattern_sheet?: PatternSheet | null;
   work_items?: WorkItem[];
   risk_reason?: string;
   delivered_complete?: boolean;

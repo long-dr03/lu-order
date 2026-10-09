@@ -81,7 +81,7 @@ Phải kiểm tra riêng tại **390, 768, 1024, 1366 và 1920px**, cả ngang/d
 | UI-11 | Bật prefers-reduced-motion | Không animation gây khó chịu; transition nhẹ khi chế độ bình thường |
 | UI-12 | Năm kích thước màn hình | Không tràn trang; bảng chỉ cuộn trong vùng; sidebar drawer không che tác vụ; chữ nội dung16/nhãn14/vùng chạm44px |
 | UI-13 | Chỉnh ảnh/size riêng/màu phối/giá | Color picker kéo được; giá có dấu nhóm; ảnh xem lớn được; size riêng lưu đúng |
-| UI-14 | Nhấn Xem hướng dẫn trên sidebar | Hướng dẫn đúng sáu bộ phận; không còn chỉ dẫn thợ tự đăng nhập/chọn chuyền |
+| UI-14 | Nhấn Hướng dẫn ở cuối sidebar | Hướng dẫn đúng sáu bộ phận; không còn chỉ dẫn thợ tự đăng nhập/chọn chuyền |
 
 **Giới hạn phiên kiểm tra hiện tại:** truy cập trình duyệt tới ứng dụng local bị chặn bởi thiết lập quyền đã lưu. Chưa chạy tương tác/chụp ảnh hoặc xác nhận responsive bằng trình duyệt. Tự động kiểm tra CSS/SSR chỉ xác nhận một phần bố cục. Không coi bản này đã hoàn tất nghiệm thu mobile/UAT.
 

@@ -139,13 +139,34 @@ export async function runBackup(now = Date.now()) {
     const related = (table: string) =>
       rows(table).filter((r) => ids.has(r.order_id));
     const photoIds = new Set(
-      [...orders, ...related("operation_records")].map((r) => r.image_url),
+      [...orders, ...related("operation_records"), ...related("order_photos")]
+        .map((r) => r.image_url)
+        .concat(
+          related("preparation_checks").flatMap(
+            (r) => JSON.parse(String(r.photos || "[]")) as string[],
+          ),
+        ),
     );
     const photos = rows("product_images")
       .filter((r) => photoIds.has(`/api/product-images/${r.id}`))
       .map((r) => ({
         id: r.id,
         mime: "image/jpeg",
+        base64: (r.data as Buffer).toString("base64"),
+      }));
+    const checkFileIds = new Set(
+      related("preparation_checks")
+        .flatMap(
+          (r) => JSON.parse(String(r.files || "[]")) as { url: string }[],
+        )
+        .map((f) => f.url),
+    );
+    const checkFiles = rows("preparation_files")
+      .filter((r) => checkFileIds.has(`/api/preparation-files/${r.id}`))
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        mime: r.mime,
         base64: (r.data as Buffer).toString("base64"),
       }));
     const productionIds = new Set(production.map((r) => r.id));
@@ -156,6 +177,10 @@ export async function runBackup(now = Date.now()) {
       until,
       orders,
       variants: related("order_variants"),
+      orderPhotos: related("order_photos"),
+      preparationChecks: related("preparation_checks"),
+      patternSpecs: related("pattern_specs"),
+      patternSheets: related("pattern_sheets"),
       stages: related("order_stages"),
       rates: related("order_rates"),
       departments: rows("departments"),
@@ -184,6 +209,7 @@ export async function runBackup(now = Date.now()) {
       lines: rows("lines"),
       audit: rows("audit_logs").filter((r) => within(r.created_at)),
       photos,
+      checkFiles,
     };
     await writeFile(
       join(folder(), base + ".json.gz"),

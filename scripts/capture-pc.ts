@@ -189,7 +189,7 @@ async function main() {
   }
 
   // 9. Lines view
-  await captureTab("Chuyền sản xuất", "09_lines.png");
+  await captureTab("Bộ phận", "09_lines.png");
 
   // 10. Production view
   await captureTab("Sản lượng", "10_production.png");
@@ -197,20 +197,23 @@ async function main() {
   // 11. Payroll view
   await captureTab("Lương sản phẩm", "11_payroll.png");
 
-  // 12. QC view
-  await captureTab("Kiểm soát chất lượng", "12_qc.png");
 
-  // 13. Delivery view
-  await captureTab("Giao hàng", "13_delivery.png");
 
   // 14. Rates view
   await captureTab("Đơn giá", "14_rates.png");
 
   // 15. Admin Accounts view
-  await captureTab("Tài khoản", "15_admin_accounts.png");
+  await captureTab("Tài khoản và quyền", "15_admin_accounts.png");
 
   // 16. Admin Roles view
-  await captureTab("Vai trò", "16_admin_roles.png");
+  await page.evaluate(() => {
+    const btn = Array.from(document.querySelectorAll("main .segmented button")).find(
+      (b) => b.textContent?.includes("Vai trò"),
+    );
+    (btn as HTMLElement | undefined)?.click();
+  });
+  await wait(700);
+  await page.screenshot({ path: path.join(SCREENSHOT_DIR, "16_admin_roles.png") });
 
   // 17. Backup view
   await captureTab("Sao lưu", "17_backup.png");
@@ -219,7 +222,7 @@ async function main() {
   await captureTab("Nhật ký", "18_audit.png");
 
   // 19. User Guide view
-  await captureTab("Xem hướng dẫn", "19_user_guide.png");
+  await captureTab("Hướng dẫn", "19_user_guide.png");
 
   // 20. User Profile Modal
   console.log("Opening profile dialog...");

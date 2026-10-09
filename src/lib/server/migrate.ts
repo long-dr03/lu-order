@@ -385,6 +385,16 @@ export function initializeDatabase() {
       }
       await (await import("./department-migration")).migrateDepartments();
       await (await import("./workshop-migration")).migrateWorkshopExtras();
+      await (await import("./photo-migration")).migrateOrderPhotos();
+      const preparation = await import("./preparation-migration");
+      await preparation.migratePreparationChecks();
+      await preparation.migratePatternCheckDetails();
+      await preparation.migratePatternSpecs();
+      await preparation.migratePreparationPhotos();
+      await preparation.migratePomSheet();
+      await preparation.migrateCheckMode();
+      await preparation.migrateCheckPhase();
+      await preparation.migrateCheckAttachments();
     })()
     .catch((error) => {
       initialization = undefined;

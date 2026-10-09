@@ -1,9 +1,7 @@
 "use client";
 import { PendingPackingPanel } from "./PendingPackingPanel";
 import { Pagination } from "./Pagination";
-import { DEPARTMENTS, departmentFor, departmentName } from "@/lib/departments";
-import { availableOperations } from "@/lib/workflow";
-import { ProductPhoto } from "./ProductImage";
+import { DEPARTMENTS, departmentName } from "@/lib/departments";
 import { useEffect, useState } from "react";
 import {
   Download,
@@ -23,7 +21,7 @@ import {
   message,
   day,
 } from "@/lib/client";
-import type { Employee, Line, Order } from "@/lib/types";
+import type { Employee, Line } from "@/lib/types";
 import type { SessionInfo } from "@/lib/permissions";
 import { hasPermission, permits } from "@/lib/permissions";
 import type { AuditEntry } from "@/lib/server/business";
@@ -653,150 +651,5 @@ export function AuditPanel({ api }: { api: Api }) {
         onChange={setPage}
       />
     </section>
-  );
-}
-export function OperationsPanel({
-  mode,
-  orders,
-  onOpen,
-  session,
-}: {
-  mode: "qc" | "delivery";
-  orders: Order[];
-  onOpen: (order: Order) => void;
-  session: SessionInfo;
-}) {
-  const [page, setPage] = useState(1);
-  const [line, setLine] = useState("");
-  const [search, setSearch] = useState("");
-  const visible = orders.filter(
-    (o) =>
-      permits(session.user, mode === "qc" ? "qc.view" : "delivery.view", {
-        lineId: o.line_id,
-      }) &&
-      (mode === "qc"
-        ? ["may", "qc", "sua_hang", "qc_lai"].includes(o.current_stage)
-        : ["dong_goi", "giao_hang", "hoan_thanh"].includes(o.current_stage)) &&
-      (!line || line === departmentFor(o.current_stage)) &&
-      `${o.id} ${o.customer} ${o.product_name}`
-        .toLowerCase()
-        .includes(search.toLowerCase()),
-  );
-  const currentPage = Math.min(
-    page,
-    Math.max(1, Math.ceil(visible.length / 12)),
-  );
-  return (
-    <div className="stack">
-      <div className="panel-toolbar panel">
-        <input
-          aria-label="Tìm đơn trong phân hệ"
-          placeholder="Tìm đơn hàng…"
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setPage(1);
-          }}
-        />
-        <select
-          aria-label="Lọc bộ phận"
-          value={line}
-          onChange={(e) => {
-            setLine(e.target.value);
-            setPage(1);
-          }}
-        >
-          <option value="">Tất cả bộ phận</option>
-          {DEPARTMENTS.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))}
-        </select>
-        {hasPermission(session.user, "export.data") && (
-          <a
-            className="action secondary"
-            href={`/api/export/excel?dataset=${mode}&${new URLSearchParams({ search, ...(line ? { department_id: line } : {}) })}`}
-          >
-            <Download size={18} />
-            Excel
-          </a>
-        )}
-      </div>
-      <div className="operations-grid">
-        {visible.slice((currentPage - 1) * 12, currentPage * 12).map((o) => (
-          <article key={o.id} className="panel padded operation-card">
-            <div className="operation-card-header">
-              <ProductPhoto url={o.image_url} name={o.product_name} />
-              <div className="operation-card-info">
-                <div className="card-top">
-                  <strong>{o.id}</strong>
-                  <span className="muted">
-                    {departmentName(departmentFor(o.current_stage))}
-                  </span>
-                </div>
-                <h3>{o.product_name}</h3>
-                <p className="muted">{o.customer}</p>
-              </div>
-            </div>
-            <dl className="numbers">
-              <div>
-                <dt>Yêu cầu</dt>
-                <dd>{o.total_quantity.toLocaleString("vi-VN")}</dd>
-              </div>
-              <div>
-                <dt>{mode === "qc" ? "QC đạt" : "Đã giao"}</dt>
-                <dd>
-                  {o.variants
-                    ?.reduce(
-                      (n, v) =>
-                        n + (mode === "qc" ? v.qc_passed_qty : v.delivered_qty),
-                      0,
-                    )
-                    .toLocaleString("vi-VN")}
-                </dd>
-              </div>
-              <div>
-                <dt>Còn thiếu</dt>
-                <dd>
-                  {o.variants
-                    ?.reduce(
-                      (n, v) =>
-                        n +
-                        v.quantity -
-                        (mode === "qc" ? v.qc_passed_qty : v.delivered_qty),
-                      0,
-                    )
-                    .toLocaleString("vi-VN")}
-                </dd>
-              </div>
-            </dl>
-            {mode === "qc" && o.current_stage === "may" && (
-              <p className="muted">
-                Đang may; chờ chuyển sang QC để nhập kết quả.
-              </p>
-            )}
-            <Action
-              tone={
-                availableOperations(session.user, o).length
-                  ? "primary"
-                  : "secondary"
-              }
-              onClick={() => onOpen(o)}
-            >
-              {availableOperations(session.user, o)[0]?.label ||
-                "Xem chi tiết và tiến độ"}
-            </Action>
-          </article>
-        ))}
-      </div>
-      <Pagination
-        page={currentPage}
-        total={visible.length}
-        pageSize={12}
-        onChange={setPage}
-      />
-      {!visible.length && <Empty>Chưa có đơn hàng ở phân hệ này.</Empty>}
-    </div>
   );
 }

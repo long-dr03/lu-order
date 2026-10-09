@@ -29,7 +29,8 @@ export async function POST(request: Request) {
           (g) =>
             g.permission === "orders.create" ||
             g.permission === "orders.edit" ||
-            g.permission === "qc.manage",
+            g.permission === "qc.manage" ||
+            g.permission === "production.create",
         ),
       ),
       403,
@@ -61,7 +62,10 @@ export async function POST(request: Request) {
     ensure(
       permits(ctx.user, "orders.create", { stage: "nhan_don" }) ||
         permits(ctx.user, "orders.edit", { stage: "nhan_don" }) ||
-        permits(ctx.user, "qc.manage", { stage: "QC" }),
+        permits(ctx.user, "qc.manage", { stage: "QC" }) ||
+        // Pattern and fabric checkers photograph the problems they find.
+        permits(ctx.user, "production.create", { stage: "Kiểm rập" }) ||
+        permits(ctx.user, "production.create", { stage: "Kiểm NPL/Vải" }),
       403,
       "Bạn không được thêm ảnh cho nghiệp vụ này.",
     );
@@ -124,7 +128,7 @@ export async function POST(request: Request) {
     await db.transaction(async () => {
       await db
         .prepare(
-          "DELETE FROM product_images WHERE created_at<? AND NOT EXISTS (SELECT 1 FROM orders WHERE image_url='/api/product-images/' || product_images.id) AND NOT EXISTS (SELECT 1 FROM operation_records WHERE image_url='/api/product-images/' || product_images.id)",
+          "DELETE FROM product_images WHERE created_at<? AND NOT EXISTS (SELECT 1 FROM orders WHERE image_url='/api/product-images/' || product_images.id) AND NOT EXISTS (SELECT 1 FROM order_photos WHERE image_url='/api/product-images/' || product_images.id) AND NOT EXISTS (SELECT 1 FROM preparation_checks WHERE photos LIKE '%/api/product-images/' || product_images.id || '%') AND NOT EXISTS (SELECT 1 FROM operation_records WHERE image_url='/api/product-images/' || product_images.id)",
         )
         .run(Date.now() - 86400000);
       await db

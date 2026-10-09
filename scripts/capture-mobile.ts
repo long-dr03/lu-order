@@ -166,16 +166,12 @@ async function main() {
   }
 
   // 8. Lines view
-  await captureTab("Chuyền sản xuất", "08_lines.png");
+  await captureTab("Bộ phận", "08_lines.png");
 
   // 9. Payroll view
   await captureTab("Lương sản phẩm", "09_payroll.png");
 
-  // 10. QC view
-  await captureTab("Kiểm soát chất lượng", "10_qc.png");
 
-  // 11. Delivery view
-  await captureTab("Giao hàng", "11_delivery.png");
 
   // 12. Rates view
   await captureTab("Đơn giá", "12_rates.png");
@@ -184,9 +180,9 @@ async function main() {
   await captureTab("Sao lưu", "13_backup.png");
 
   // 14. User Guide view
-  await captureTab("Xem hướng dẫn", "14_user_guide.png");
+  await captureTab("Hướng dẫn", "14_user_guide.png");
 
-  console.log("All 14 mobile screenshots captured successfully!");
+  console.log("All 12 mobile screenshots captured successfully!");
   await browser.close();
 }
 

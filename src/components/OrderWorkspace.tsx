@@ -2,13 +2,14 @@
 import { departmentFor, departmentAccess } from "@/lib/departments";
 import {
   ProductPhoto,
-  ProductImagePicker,
-  uploadProductImage,
+  ProductPhotosField,
+  type PhotoDraft,
+  resolvePhotos,
 } from "./ProductImage";
 import { GarmentColors, SizeSelect } from "./SmartInputs";
 import { createViewPreference } from "@/lib/view-preference";
 import { Pagination } from "./Pagination";
-import { useState, useSyncExternalStore } from "react";
+import { memo, useState, useSyncExternalStore } from "react";
 import {
   DndContext,
   PointerSensor,
@@ -26,7 +27,9 @@ import {
   Plus,
   List,
   Columns3,
+  ArrowDown,
   ArrowRight,
+  ArrowUp,
   Download,
   Search,
   AlertTriangle,
@@ -59,6 +62,76 @@ function saveView(view: "list" | "board") {
   viewPreference.save(view);
   window.dispatchEvent(new Event("luuta-view"));
 }
+type OrderSortField =
+  "created" | "id" | "deadline" | "customer" | "quantity" | "progress";
+type OrderSort = { field: OrderSortField; dir: "asc" | "desc" };
+const sortLabels: Record<OrderSortField, string> = {
+  created: "Ngày tạo",
+  id: "Mã đơn",
+  deadline: "Hạn giao",
+  customer: "Khách hàng",
+  quantity: "Số lượng",
+  progress: "Tiến độ",
+};
+function compareOrders(a: Order, b: Order, sort: OrderSort) {
+  let value: number;
+  switch (sort.field) {
+    case "created":
+      value = (a.created_at || "").localeCompare(b.created_at || "");
+      break;
+    case "id":
+      value = a.id.localeCompare(b.id, "vi", { numeric: true });
+      break;
+    case "deadline":
+      value = a.deadline.localeCompare(b.deadline);
+      break;
+    case "customer":
+      value = a.customer.localeCompare(b.customer, "vi");
+      break;
+    case "quantity":
+      value = a.total_quantity - b.total_quantity;
+      break;
+    case "progress":
+      value = a.progress - b.progress;
+      break;
+  }
+  const direction = sort.dir === "asc" ? 1 : -1;
+  return value * direction || a.id.localeCompare(b.id, "vi", { numeric: true });
+}
+function SortableHeader({
+  field,
+  label,
+  sort,
+  onSort,
+}: {
+  field: OrderSortField;
+  label: string;
+  sort: OrderSort;
+  onSort: (field: OrderSortField) => void;
+}) {
+  const active = sort.field === field;
+  return (
+    <th
+      aria-sort={
+        active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"
+      }
+    >
+      <button
+        type="button"
+        className="sort-button"
+        onClick={() => onSort(field)}
+      >
+        {label}
+        {active &&
+          (sort.dir === "asc" ? (
+            <ArrowUp size={14} />
+          ) : (
+            <ArrowDown size={14} />
+          ))}
+      </button>
+    </th>
+  );
+}
 const statusLabels: Record<Order["status"], string> = {
   on_track: "Đúng tiến độ",
   at_risk: "Nguy cơ trễ",
@@ -75,7 +148,7 @@ export function Status({ order }: { order: Order }) {
     </span>
   );
 }
-export function OrderWorkspace({
+function OrderWorkspaceView({
   orders,
   lines,
   session,
@@ -95,6 +168,18 @@ export function OrderWorkspace({
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
+  const [sort, setSort] = useState<OrderSort>({
+    field: "created",
+    dir: "desc",
+  });
+  function sortBy(field: OrderSortField) {
+    setSort((old) =>
+      old.field === field
+        ? { field, dir: old.dir === "asc" ? "desc" : "asc" }
+        : { field, dir: "asc" },
+    );
+    setPage(1);
+  }
   void lines;
   const view = useSyncExternalStore(
     subscribeView,
@@ -203,8 +288,9 @@ export function OrderWorkspace({
     }
   }
   const columns = LUUTA_STAGES.map((s) => ({ id: s.key, label: s.label }));
-  const listPage = Math.min(page, Math.max(1, Math.ceil(filtered.length / 25)));
-  const visible = filtered.slice((listPage - 1) * 25, listPage * 25);
+  const sorted = [...filtered].sort((a, b) => compareOrders(a, b, sort));
+  const listPage = Math.min(page, Math.max(1, Math.ceil(sorted.length / 25)));
+  const visible = sorted.slice((listPage - 1) * 25, listPage * 25);
   const stageChoices = (order: Order) => (
     <select
       className="order-stage-select"
@@ -291,6 +377,48 @@ export function OrderWorkspace({
             <option value="da_giao_du">Đã giao đủ</option>
             <option value="completed">Hoàn thành</option>
           </select>
+          {view === "list" && (
+            <>
+              <select
+                aria-label="Sắp xếp theo"
+                value={sort.field}
+                onChange={(e) => {
+                  setSort({
+                    field: e.target.value as OrderSortField,
+                    dir: sort.dir,
+                  });
+                  setPage(1);
+                }}
+              >
+                {(Object.keys(sortLabels) as OrderSortField[]).map((key) => (
+                  <option key={key} value={key}>
+                    Sắp xếp: {sortLabels[key]}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="action secondary"
+                aria-label={
+                  sort.dir === "asc" ? "Đổi sang giảm dần" : "Đổi sang tăng dần"
+                }
+                onClick={() => {
+                  setSort((old) => ({
+                    ...old,
+                    dir: old.dir === "asc" ? "desc" : "asc",
+                  }));
+                  setPage(1);
+                }}
+              >
+                {sort.dir === "asc" ? (
+                  <ArrowUp size={18} />
+                ) : (
+                  <ArrowDown size={18} />
+                )}
+                {sort.dir === "asc" ? "Tăng dần" : "Giảm dần"}
+              </button>
+            </>
+          )}
         </div>
         <div className="segmented">
           <button
@@ -416,11 +544,37 @@ export function OrderWorkspace({
             <table>
               <thead>
                 <tr>
-                  <th>Mã đơn</th>
-                  <th>Sản phẩm / khách</th>
+                  <SortableHeader
+                    field="id"
+                    label="Mã đơn"
+                    sort={sort}
+                    onSort={sortBy}
+                  />
+                  <SortableHeader
+                    field="customer"
+                    label="Sản phẩm / khách"
+                    sort={sort}
+                    onSort={sortBy}
+                  />
+                  <SortableHeader
+                    field="created"
+                    label="Ngày tạo"
+                    sort={sort}
+                    onSort={sortBy}
+                  />
                   <th>Đã giao</th>
-                  <th>Số lượng</th>
-                  <th>Hạn giao</th>
+                  <SortableHeader
+                    field="quantity"
+                    label="Số lượng"
+                    sort={sort}
+                    onSort={sortBy}
+                  />
+                  <SortableHeader
+                    field="deadline"
+                    label="Hạn giao"
+                    sort={sort}
+                    onSort={sortBy}
+                  />
                   <th>Công đoạn</th>
                   <th>Trạng thái</th>
                   <th />
@@ -459,6 +613,9 @@ export function OrderWorkspace({
                       </div>
                     </td>
                     <td>
+                      {o.created_at.slice(0, 10).split("-").reverse().join("/")}
+                    </td>
+                    <td>
                       {o.variants?.reduce((n, v) => n + v.delivered_qty, 0)}/
                       {o.total_quantity}
                     </td>
@@ -480,14 +637,16 @@ export function OrderWorkspace({
                       )}
                     </td>
                     <td>
-                      {stageChoices(o)}
-                      <button
-                        className="icon-button"
-                        aria-label={`Xem ${o.id}`}
-                        onClick={() => onOpen(o)}
-                      >
-                        <Eye size={20} />
-                      </button>
+                      <div className="row-actions">
+                        {stageChoices(o)}
+                        <button
+                          className="icon-button"
+                          aria-label={`Xem ${o.id}`}
+                          onClick={() => onOpen(o)}
+                        >
+                          <Eye size={20} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -530,6 +689,10 @@ export function OrderWorkspace({
                 </p>
                 <div className="muted">
                   <span>{o.total_quantity} sản phẩm</span>
+                  <span>
+                    Tạo{" "}
+                    {o.created_at.slice(0, 10).split("-").reverse().join("/")}
+                  </span>
                   <span>Hạn {o.deadline.split("-").reverse().join("/")}</span>
                 </div>
                 <div className="mobile-order-actions">
@@ -545,13 +708,9 @@ export function OrderWorkspace({
           </div>
         </>
       )}
-      {!filtered.length && <Empty>Không có đơn hàng phù hợp.</Empty>}
+      {!sorted.length && <Empty>Không có đơn hàng phù hợp.</Empty>}
       {view === "list" ? (
-        <Pagination
-          page={listPage}
-          total={filtered.length}
-          onChange={setPage}
-        />
+        <Pagination page={listPage} total={sorted.length} onChange={setPage} />
       ) : (
         <div className="panel-footer">
           {filtered.length} đơn hàng · Mỗi cột hiển thị theo từng nhóm 10 đơn
@@ -783,8 +942,7 @@ export function CreateOrderForm({
   const [productCode] = useState(
     () => `SP-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
   );
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<PhotoDraft[]>([]);
   const [variants, setVariants] = useState([
     {
       color: "",
@@ -800,13 +958,9 @@ export function CreateOrderForm({
     setBusy(true);
     setError("");
     try {
-      let url = imageUrl;
-      if (imageFile && !url) {
-        url = await uploadProductImage(imageFile, session);
-        setImageUrl(url);
-      }
+      const uploaded = await resolvePhotos(photos, session);
       await api("/api/orders", {
-        image_url: url,
+        photos: uploaded,
         customer: form.get("customer"),
         product_name: form.get("product_name"),
         responsible_id: String(form.get("responsible_id") || "") || null,
@@ -836,17 +990,10 @@ export function CreateOrderForm({
       className="stack"
     >
       <ErrorNotice error={error} />
-      <ProductImagePicker
-        existing={imageUrl}
-        file={imageFile}
-        onFile={(file) => {
-          setImageFile(file);
-          setImageUrl(null);
-        }}
-        onRemove={() => {
-          setImageFile(null);
-          setImageUrl(null);
-        }}
+      <ProductPhotosField
+        photos={photos}
+        onChange={setPhotos}
+        colors={variants.map((v) => v.color)}
       />
       <div className="form-grid">
         <Field label="Mã đơn hàng">
@@ -1049,3 +1196,6 @@ export function CreateOrderForm({
     </form>
   );
 }
+
+/** Memoised so opening an order's detail dialog does not rebuild every card in the list. */
+export const OrderWorkspace = memo(OrderWorkspaceView);

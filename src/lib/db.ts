@@ -10,6 +10,9 @@ import {
   Employee,
   ProductionLog,
   AuditLog,
+  OrderPhoto,
+  PreparationCheck,
+  PatternSheet,
 } from "./types";
 
 export * from "./types";
@@ -78,18 +81,72 @@ export async function getAllOrders(filter?: {
       "SELECT w.id,w.order_id,w.stage,w.name,COALESCE(SUM(p.quantity),0) recorded_quantity FROM order_work_items w LEFT JOIN production_logs p ON p.work_item_id=w.id WHERE w.order_id=ANY(?::text[]) GROUP BY w.id ORDER BY w.id",
     )
     .all(ids)) as WorkItem[];
+  const photos = (await db
+    .prepare(
+      "SELECT id,order_id,image_url,color,position FROM order_photos WHERE order_id=ANY(?::text[]) ORDER BY position,id",
+    )
+    .all(ids)) as (OrderPhoto & { order_id: string })[];
   const byId = new Map(orders.map((o) => [o.id, o]));
   for (const order of orders) {
     order.variants = [];
     order.work_items = [];
+    order.photos = [];
   }
   for (const variant of variants)
     byId.get(variant.order_id)?.variants?.push(decodeColors(variant));
   for (const item of workItems) byId.get(item.order_id)?.work_items?.push(item);
+  for (const { order_id, ...photo } of photos)
+    byId.get(order_id)?.photos?.push(photo);
 
   return assessOrders(orders, await getLines(), await throughput());
 }
 
+/** Rebuilds the POM chart (rows × sizes) from the flat spec rows. Null when nothing is declared. */
+export async function patternSheetFor(
+  orderId: string,
+): Promise<PatternSheet | null> {
+  const sheet = (await db
+    .prepare("SELECT unit,sizes,base_size FROM pattern_sheets WHERE order_id=?")
+    .get(orderId)) as
+    | { unit: PatternSheet["unit"]; sizes: string; base_size: string }
+    | undefined;
+  const rows = (await db
+    .prepare(
+      "SELECT code,point,size,spec,tolerance FROM pattern_specs WHERE order_id=? ORDER BY position,id",
+    )
+    .all(orderId)) as {
+    code: string;
+    point: string;
+    size: string;
+    spec: number;
+    tolerance: number;
+  }[];
+  if (!sheet && !rows.length) return null;
+  const poms: PatternSheet["poms"] = [];
+  for (const row of rows) {
+    let pom = poms.find((p) => p.point === row.point);
+    if (!pom) {
+      pom = {
+        code: row.code,
+        point: row.point,
+        tolerance: Number(row.tolerance),
+        values: {},
+      };
+      poms.push(pom);
+    }
+    pom.values[row.size] = Number(row.spec);
+  }
+  const sizes: string[] = sheet
+    ? JSON.parse(sheet.sizes || "[]")
+    : [...new Set(rows.map((r) => r.size))];
+  return {
+    // Sheets declared before migration 18 were in centimetres.
+    unit: sheet?.unit || "cm",
+    sizes,
+    base_size: sheet?.base_size || "",
+    poms,
+  };
+}
 export async function getOrderById(id: string): Promise<Order | null> {
   const order = (await db
     .prepare("SELECT * FROM orders WHERE id = ?")
@@ -130,15 +187,35 @@ export async function getOrderById(id: string): Promise<Order | null> {
     stage.remaining_qty = Math.max(0, stage.received_qty - stage.completed_qty);
   }
 
+  const checks = (await db
+    .prepare(
+      "SELECT c.*,e.name checked_by_name,a.name approved_by_name FROM preparation_checks c LEFT JOIN employees e ON e.id=c.checked_by LEFT JOIN employees a ON a.id=c.approved_by WHERE c.order_id=? ORDER BY c.id",
+    )
+    .all(id)) as PreparationCheck[];
+  for (const check of checks) {
+    check.measurements = JSON.parse(
+      (check.measurements as unknown as string) || "[]",
+    );
+    check.photos = JSON.parse((check.photos as unknown as string) || "[]");
+    check.files = JSON.parse((check.files as unknown as string) || "[]");
+  }
+  const pattern_sheet = await patternSheetFor(id);
   const all = await getAllOrders();
   const assessed = all.find((o) => o.id === id);
-  return { ...order, ...assessed, stages: order.stages };
+  return {
+    ...order,
+    ...assessed,
+    stages: order.stages,
+    checks,
+    pattern_sheet,
+  };
 }
 
 export async function createOrderWithVariants(
   data: {
     order: Omit<Order, "created_at" | "progress" | "status" | "version">;
     variants: Array<{ color: string; size: string; quantity: number }>;
+    photos?: Array<{ image_url: string; color: string }>;
   },
   actor = "Hệ thống",
 ): Promise<Order> {
@@ -178,6 +255,14 @@ export async function createOrderWithVariants(
           quantity: Number(v.quantity),
         });
       }
+    }
+
+    for (const [position, photo] of (data.photos || []).entries()) {
+      await db
+        .prepare(
+          "INSERT INTO order_photos(order_id,image_url,color,position) VALUES (?,?,?,?)",
+        )
+        .run(data.order.id, photo.image_url, photo.color, position);
     }
 
     // Initialize all 11 stages

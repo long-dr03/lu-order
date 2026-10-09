@@ -567,6 +567,22 @@ const productImageUrl = z
   .string()
   .regex(/^\/api\/product-images\/[0-9a-f-]{36}$/)
   .nullable();
+const productPhotos = z
+  .array(
+    z
+      .object({
+        image_url: z.string().regex(/^\/api\/product-images\/[0-9a-f-]{36}$/),
+        color: z.string().trim().max(40).default(""),
+      })
+      .strict(),
+  )
+  .max(12)
+  .refine(
+    (photos) => new Set(photos.map((p) => p.image_url)).size === photos.length,
+    "Ảnh bị trùng trong đơn.",
+  )
+  .optional();
+type Photo = { image_url: string; color: string };
 async function validateProductImage(
   ctx: Context,
   url: string | null | undefined,
@@ -580,6 +596,40 @@ async function validateProductImage(
     image && image.owner_id === ctx.user.id,
     422,
     "Ảnh chưa được tải lên bằng tài khoản của bạn.",
+  );
+}
+/** New photos must be uploaded by this user; photos already on the order were checked earlier. */
+async function validatePhotos(
+  ctx: Context,
+  photos: Photo[],
+  current: string[] = [],
+) {
+  for (const photo of photos)
+    if (!current.includes(photo.image_url))
+      await validateProductImage(ctx, photo.image_url);
+}
+/** A photo can be tagged only with a color this order actually has. */
+function validatePhotoColors(photos: Photo[], colors: string[]) {
+  const known = new Set(colors.map((c) => c.trim().toLocaleLowerCase("vi")));
+  for (const photo of photos)
+    ensure(
+      !photo.color || known.has(photo.color.trim().toLocaleLowerCase("vi")),
+      422,
+      `Ảnh gán màu "${photo.color}" không có trong đơn.`,
+    );
+}
+/** Photos from the new list, or from the legacy single image_url (which replaces only the cover). */
+function requestedPhotos(
+  input: { photos?: Photo[]; image_url?: string | null },
+  current: { image_url: string; color: string }[] = [],
+): Photo[] | undefined {
+  if (input.photos) return input.photos;
+  if (input.image_url === undefined) return undefined;
+  const cover = input.image_url
+    ? [{ image_url: input.image_url, color: current[0]?.color || "" }]
+    : [];
+  return [...cover, ...current.slice(1)].filter(
+    (p, i, all) => all.findIndex((q) => q.image_url === p.image_url) === i,
   );
 }
 export const createOrderSchema = z
@@ -596,6 +646,7 @@ export const createOrderSchema = z
     responsible_id: text.nullable().optional(),
     product_code: text.optional(),
     image_url: productImageUrl.optional(),
+    photos: productPhotos,
     deadline: date,
     order_date: date,
     line_id: line.optional(),
@@ -654,7 +705,12 @@ export async function createOrder(
       422,
       "Người điều phối phải thuộc bộ phận Quản lý.",
     );
-  await validateProductImage(ctx, input.image_url);
+  const photos = requestedPhotos(input) || [];
+  await validatePhotos(ctx, photos);
+  validatePhotoColors(
+    photos,
+    input.variants.map((v) => v.color),
+  );
   const keys = input.variants.map(
     (v) => `${v.color.toLocaleLowerCase()}|${v.size}`,
   );
@@ -686,12 +742,13 @@ export async function createOrder(
         priority: input.priority,
         notes: input.notes,
         reason: input.reason || null,
-        image_url: input.image_url || null,
+        image_url: photos[0]?.image_url || null,
         total_quantity: 0,
         current_stage: "nhan_don",
         assigned_to: "Bộ phận Quản lý",
       },
       variants: input.variants,
+      photos,
     },
     actorLabel(ctx),
   );
@@ -728,6 +785,7 @@ export const moveSchema = z
   .object({
     version: z.number().int().positive(),
     image_url: productImageUrl.optional(),
+    photos: productPhotos,
     stage: stageSchema.optional(),
     exception: z.boolean().optional(),
     reason: z.string().trim().max(2000).nullable().optional(),
@@ -744,6 +802,7 @@ export const moveSchema = z
       v.responsible_id !== undefined ||
       v.product_code !== undefined ||
       v.image_url !== undefined ||
+      v.photos !== undefined ||
       v.stage !== undefined ||
       v.line_id !== undefined ||
       v.customer !== undefined ||
@@ -802,7 +861,8 @@ export async function moveOrder(
     input.deadline ||
     input.notes !== undefined ||
     (input.reason !== undefined && !input.exception) ||
-    input.image_url !== undefined
+    input.image_url !== undefined ||
+    input.photos !== undefined
   )
     requirePermission(ctx, "orders.edit", { stage: "nhan_don" });
   ensure(
@@ -810,7 +870,18 @@ export async function moveOrder(
     422,
     "Hạn giao không được trước ngày nhận đơn.",
   );
-  await validateProductImage(ctx, input.image_url, o.image_url);
+  const photos = requestedPhotos(input, o.photos);
+  if (photos) {
+    await validatePhotos(
+      ctx,
+      photos,
+      (o.photos || []).map((p) => p.image_url),
+    );
+    validatePhotoColors(
+      photos,
+      (o.variants || []).map((v) => v.color),
+    );
+  }
   const responsible =
     input.responsible_id === undefined
       ? input.line_id && input.line_id !== o.line_id
@@ -849,7 +920,7 @@ export async function moveOrder(
       input.deadline || o.deadline,
       input.notes ?? o.notes,
       updatedReason,
-      input.image_url === undefined ? o.image_url : input.image_url,
+      photos ? photos[0]?.image_url || null : o.image_url,
       input.stage
         ? Math.round((index / (LUUTA_STAGES.length - 1)) * 100)
         : o.progress,
@@ -860,6 +931,15 @@ export async function moveOrder(
           : o.status,
       id,
     );
+  if (photos) {
+    await db.prepare("DELETE FROM order_photos WHERE order_id=?").run(id);
+    for (const [position, photo] of photos.entries())
+      await db
+        .prepare(
+          "INSERT INTO order_photos(order_id,image_url,color,position) VALUES (?,?,?,?)",
+        )
+        .run(id, photo.image_url, photo.color.trim(), position);
+  }
   if (input.stage && input.exception) {
     await db
       .prepare(
@@ -1382,7 +1462,7 @@ async function recordProductionSingle(
       422,
       input.stage === "Đóng gói"
         ? `Đã xác nhận đóng gói ${processed}, đã ghi công ${paid}; còn ${Math.max(0, processed - paid - reserved)} sản phẩm có thể ghi công. ${reserved ? "Phần chờ đối chiếu phải được quản lý xử lý tại Lương sản phẩm → Công đóng gói chờ đối chiếu." : "Quản lý cần vào Giao hàng → mở đơn → Đóng gói để xác nhận số lượng trước."}`
-        : `Đã xử lý ${processed}, đã ghi công ${paid}; còn ${Math.max(0, processed - paid)} sản phẩm có thể ghi công ${input.stage}. Cần ghi nhận xử lý tại Kiểm soát chất lượng trước.`,
+        : `Đã xử lý ${processed}, đã ghi công ${paid}; còn ${Math.max(0, processed - paid)} sản phẩm có thể ghi công ${input.stage}. Cần ghi nhận xử lý ở bước Kiểm QC của đơn trước.`,
     );
   }
   if (deferPackingPay) {

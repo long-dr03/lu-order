@@ -15,8 +15,6 @@ import {
   Factory,
   ChartNoAxesCombined,
   DollarSign,
-  ShieldCheck,
-  Truck,
   Users,
   Shield,
   ClipboardList,
@@ -66,75 +64,83 @@ const navigation = [
     label: "Tổng quan",
     icon: LayoutDashboard,
     permission: "orders.view",
+    group: "work",
   },
   {
     id: "orders",
     label: "Đơn hàng",
     icon: ShoppingBag,
     permission: "orders.view",
-  },
-  {
-    id: "rates",
-    label: "Đơn giá",
-    icon: Settings2,
-    permission: "rates.manage",
+    group: "work",
   },
   {
     id: "lines",
     label: "Bộ phận",
     icon: Factory,
     permission: "orders.view",
-  },
-  {
-    id: "employees",
-    label: "Danh sách thợ",
-    icon: UserCheck,
-    permission: "employees.manage",
+    group: "work",
   },
   {
     id: "production",
     label: "Sản lượng",
     icon: ChartNoAxesCombined,
     permission: "production.view",
-  },
-  {
-    id: "qc",
-    label: "Kiểm soát chất lượng",
-    icon: ShieldCheck,
-    permission: "qc.view",
-  },
-  {
-    id: "delivery",
-    label: "Giao hàng",
-    icon: Truck,
-    permission: "delivery.view",
+    group: "work",
   },
   {
     id: "payroll",
     label: "Lương sản phẩm",
     icon: DollarSign,
     permission: "payroll.view",
+    group: "work",
+  },
+  {
+    id: "employees",
+    label: "Danh sách thợ",
+    icon: UserCheck,
+    permission: "employees.manage",
+    group: "admin",
+  },
+  {
+    id: "rates",
+    label: "Đơn giá",
+    icon: Settings2,
+    permission: "rates.manage",
+    group: "admin",
+  },
+  {
+    id: "accounts",
+    label: "Tài khoản và quyền",
+    icon: Users,
+    permission: "users.manage",
+    group: "admin",
   },
   {
     id: "audit",
     label: "Nhật ký",
     icon: ClipboardList,
     permission: "audit.view",
-  },
-  { id: "users", label: "Tài khoản", icon: Users, permission: "users.manage" },
-  {
-    id: "roles",
-    label: "Vai trò và quyền",
-    icon: Shield,
-    permission: "roles.manage",
+    group: "admin",
   },
   {
     id: "backup",
     label: "Sao lưu",
     icon: DatabaseBackup,
     permission: "users.manage",
+    group: "admin",
   },
-  { id: "guide", label: "Xem hướng dẫn", icon: BookOpen, permission: null },
+  {
+    id: "guide",
+    label: "Hướng dẫn",
+    icon: BookOpen,
+    permission: null,
+    group: "help",
+  },
+] as const;
+const navGroups = [
+  { id: "work", label: null },
+  { id: "admin", label: "Quản trị" },
+  { id: "help", label: null },
 ] as const;
 type Tab = (typeof navigation)[number]["id"];
 export default function Page() {
@@ -151,6 +157,7 @@ export default function Page() {
   const [productionOrder, setProductionOrder] = useState("");
   const [selected, setSelected] = useState<Order | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [adminMode, setAdminMode] = useState<"users" | "roles">("users");
   const [notice, setNotice] = useState("");
   const unauthorized = useCallback(() => {
     setSession(null);
@@ -237,11 +244,13 @@ export default function Page() {
           (n.permission === null ||
             hasPermission(session.user, n.permission) ||
             (n.id === "employees" &&
-              hasPermission(session.user, "users.manage"))) &&
+              hasPermission(session.user, "users.manage")) ||
+            (n.id === "accounts" &&
+              hasPermission(session.user, "roles.manage"))) &&
           (n.id !== "backup" ||
             session.user.roles.some((r) => r.id === "admin")) &&
           (!session.representing ||
-            !["users", "roles", "employees", "backup"].includes(n.id)),
+            !["accounts", "employees", "backup"].includes(n.id)),
       )
     : [];
   const active = tabs.find((n) => n.id === tab) || tabs[0];
@@ -254,13 +263,31 @@ export default function Page() {
       permits(session.user, "production.create", { stage }),
     );
 
-  async function openOrder(order: Order) {
-    try {
-      setSelected(await api<Order>(`/api/orders/${order.id}`));
-    } catch (e) {
-      setError(message(e));
-    }
-  }
+  // Stable callbacks: the order list is memoised and must not re-render when a detail dialog opens.
+  const openOrder = useCallback(
+    async (order: Order) => {
+      try {
+        setSelected(await api<Order>(`/api/orders/${order.id}`));
+      } catch (e) {
+        setError(message(e));
+      }
+    },
+    [api],
+  );
+  const startCreate = useCallback(() => setCreate(true), []);
+  const orderProps = useMemo(
+    () => ({
+      orders: data?.orders || [],
+      lines: data?.lines || [],
+      // The list is only rendered after the session check below, so a session is always present here.
+      session: session as SessionInfo,
+      api,
+      onOpen: openOrder,
+      onCreate: startCreate,
+      onChanged: refresh,
+    }),
+    [data, session, api, openOrder, startCreate, refresh],
+  );
   async function reloadDetail() {
     await refresh();
     if (selected) {
@@ -322,15 +349,13 @@ export default function Page() {
     active?.id === "lines" && !isManagement(session.user)
       ? "Công việc bộ phận tôi"
       : active?.label || "Không gian làm việc";
-  const orderProps = {
-    orders: data?.orders || [],
-    lines: data?.lines || [],
-    session,
-    api,
-    onOpen: openOrder,
-    onCreate: () => setCreate(true),
-    onChanged: refresh,
-  };
+  const canManageUsers = hasPermission(session.user, "users.manage");
+  const canManageRoles = hasPermission(session.user, "roles.manage");
+  const adminView = !canManageRoles
+    ? "users"
+    : !canManageUsers
+      ? "roles"
+      : adminMode;
   const panel =
     active?.id === "guide" ? (
       <UserGuide user={session.user} />
@@ -396,7 +421,6 @@ export default function Page() {
             session={session}
           />
         )}
-        <OrderWorkspace {...orderProps} />
       </div>
     ) : active?.id === "orders" ? (
       <OrderWorkspace {...orderProps} />
@@ -418,17 +442,6 @@ export default function Page() {
         employees={data?.employees || []}
         lines={data?.lines || []}
       />
-    ) : active?.id === "qc" || active?.id === "delivery" ? (
-      <DepartmentsPanel
-        key={active.id}
-        initialDepartment={active.id === "qc" ? "quality" : "delivery"}
-        orders={data?.orders || []}
-        session={session}
-        onOpen={(id) => {
-          const order = data?.orders.find((o) => o.id === id);
-          if (order) void openOrder(order);
-        }}
-      />
     ) : active?.id === "rates" ? (
       <RatesPanel
         orders={(data?.orders || []).filter((o) =>
@@ -440,14 +453,34 @@ export default function Page() {
       />
     ) : active?.id === "employees" ? (
       <StaffPanel session={session} api={api} onSaved={refresh} />
-    ) : active?.id === "users" || active?.id === "roles" ? (
-      <AdminPanel
-        key={active.id}
-        mode={active.id}
-        api={api}
-        session={session}
-        onRepresent={loadSession}
-      />
+    ) : active?.id === "accounts" ? (
+      <div className="stack">
+        {canManageUsers && canManageRoles && (
+          <div className="segmented">
+            <button
+              aria-pressed={adminView === "users"}
+              onClick={() => setAdminMode("users")}
+            >
+              <Users size={18} />
+              Tài khoản
+            </button>
+            <button
+              aria-pressed={adminView === "roles"}
+              onClick={() => setAdminMode("roles")}
+            >
+              <Shield size={18} />
+              Vai trò và quyền
+            </button>
+          </div>
+        )}
+        <AdminPanel
+          key={adminView}
+          mode={adminView}
+          api={api}
+          session={session}
+          onRepresent={loadSession}
+        />
+      </div>
     ) : active?.id === "backup" ? (
       <BackupPanel api={api} />
     ) : active?.id === "audit" ? (
@@ -456,27 +489,41 @@ export default function Page() {
       <Empty>Chưa có quyền truy cập phân hệ. Liên hệ admin.</Empty>
     );
   function renderNavigation(mobile: boolean) {
-    return tabs.map((item) => {
-      const Icon = item.icon;
+    return navGroups.map((group) => {
+      const items = tabs.filter((item) => item.group === group.id);
+      if (!items.length) return null;
       return (
-        <button
-          key={item.id}
-          aria-current={active?.id === item.id ? "page" : undefined}
-          onClick={() => {
-            setTab(item.id);
-            if (mobile) setSidebar(false);
-          }}
+        <div
+          key={group.id}
+          className={`nav-group nav-group-${group.id}`}
+          role="group"
+          aria-label={group.label || undefined}
         >
-          <Icon size={20} />
-          {item.label}
-          {!mobile && active?.id === item.id && (
-            <motion.span
-              layoutId="nav-indicator"
-              className="nav-indicator"
-              transition={{ duration: 0.18 }}
-            />
-          )}
-        </button>
+          {group.label && <div className="nav-label">{group.label}</div>}
+          {items.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                aria-current={active?.id === item.id ? "page" : undefined}
+                onClick={() => {
+                  setTab(item.id);
+                  if (mobile) setSidebar(false);
+                }}
+              >
+                <Icon size={20} />
+                {item.label}
+                {!mobile && active?.id === item.id && (
+                  <motion.span
+                    layoutId="nav-indicator"
+                    className="nav-indicator"
+                    transition={{ duration: 0.18 }}
+                  />
+                )}
+              </button>
+            );
+          })}
+        </div>
       );
     });
   }
@@ -488,9 +535,6 @@ export default function Page() {
         <aside className="sidebar">
           <Logo />
           <nav aria-label="Điều hướng chính">{renderNavigation(false)}</nav>
-          <div className="sidebar-footer">
-            LUUTA Garment<span>Không gian làm việc local</span>
-          </div>
         </aside>
         <Modal
           open={sidebar}
@@ -498,7 +542,6 @@ export default function Page() {
           title="Điều hướng"
           drawer
         >
-          <Logo />
           <nav aria-label="Điều hướng điện thoại">{renderNavigation(true)}</nav>
         </Modal>
         <div className="app-main">
@@ -513,7 +556,6 @@ export default function Page() {
               >
                 <Menu size={22} />
               </button>
-              <span className="header-label">Không gian làm việc</span>
               <span className="mobile-brand">LUUTA</span>
             </div>
             <button
@@ -533,7 +575,7 @@ export default function Page() {
           {session.representing && (
             <div className="represent-banner">
               <span>
-                <EyeBadge /> {session.actor.name} đang thao tác thay{" "}
+                <UserRound size={20} /> {session.actor.name} đang thao tác thay{" "}
                 <strong>{session.user.name}</strong>
               </span>
               <Action
@@ -558,11 +600,12 @@ export default function Page() {
             <div className="page-heading">
               <div>
                 <h1>{title}</h1>
-                <p>
-                  {active?.id === "guide"
-                    ? "Hướng dẫn từng bước, từ nhận đơn đến giao hàng và đối chiếu tiền công."
-                    : "Theo dõi và ghi nhận công việc theo bộ phận."}
-                </p>
+                {active?.id === "guide" && (
+                  <p>
+                    Hướng dẫn từng bước, từ nhận đơn đến giao hàng và đối chiếu
+                    tiền công.
+                  </p>
+                )}
               </div>
               <div className="inline-actions" hidden={active?.id === "guide"}>
                 <Action
@@ -732,9 +775,6 @@ export default function Page() {
     </MotionConfig>
   );
 }
-function EyeBadge() {
-  return <UserRound size={20} />;
-}
 function PasswordForm({ api, onChanged }: { api: Api; onChanged: () => void }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -761,7 +801,6 @@ function PasswordForm({ api, onChanged }: { api: Api; onChanged: () => void }) {
       }}
       className="stack"
     >
-      <h3>Đổi mật khẩu</h3>
       <ErrorNotice error={error} />
       <Field label="Mật khẩu hiện tại">
         <input

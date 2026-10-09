@@ -18,9 +18,14 @@ export async function GET(
     ensure(image, 404, "Không tìm thấy ảnh.");
     const orders = (await db
       .prepare(
-        "SELECT line_id FROM orders WHERE image_url=? UNION SELECT o.line_id FROM operation_records r JOIN orders o ON o.id=r.order_id WHERE r.image_url=?",
+        "SELECT line_id FROM orders WHERE image_url=? UNION SELECT o.line_id FROM order_photos p JOIN orders o ON o.id=p.order_id WHERE p.image_url=? UNION SELECT o.line_id FROM operation_records r JOIN orders o ON o.id=r.order_id WHERE r.image_url=? UNION SELECT o.line_id FROM preparation_checks c JOIN orders o ON o.id=c.order_id WHERE c.photos LIKE ?",
       )
-      .all(`/api/product-images/${id}`, `/api/product-images/${id}`)) as {
+      .all(
+        `/api/product-images/${id}`,
+        `/api/product-images/${id}`,
+        `/api/product-images/${id}`,
+        `%/api/product-images/${id}%`,
+      )) as {
       line_id: number;
     }[];
     ensure(

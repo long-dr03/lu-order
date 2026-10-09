@@ -19,6 +19,9 @@ export function departmentFor(stage: string): DepartmentId {
   if (["qc", "qc_lai", "QC", "reinspect"].includes(stage)) return "quality";
   if (["dong_goi", "Đóng gói", "pack"].includes(stage)) return "packing";
   if (["giao_hang", "Giao hàng", "deliver"].includes(stage)) return "delivery";
+  // Material and pattern checks happen before cutting: QC checks fabric, cutters check patterns.
+  if (["kiem_npl", "Kiểm NPL/Vải"].includes(stage)) return "quality";
+  if (["kiem_rap", "Kiểm rập"].includes(stage)) return "cutting";
   return "management";
 }
 export const isAdmin = (user: Account) =>

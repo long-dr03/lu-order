@@ -1,5 +1,4 @@
 "use client";
-import { StaffPanel } from "./DepartmentWorkspace";
 import { DEPARTMENTS, departmentName } from "@/lib/departments";
 import { useEffect, useState } from "react";
 import {
@@ -39,7 +38,7 @@ export function AdminPanel({
   api: Api;
   session: SessionInfo;
   onRepresent: () => Promise<void>;
-  mode: "users" | "roles" | "employees";
+  mode: "users" | "roles";
 }) {
   const [data, setData] = useState<AdminData | null>(null);
   const [error, setError] = useState("");
@@ -214,7 +213,7 @@ export function AdminPanel({
             onChange={setPage}
           />
         </section>
-      ) : mode === "roles" ? (
+      ) : (
         <>
           <div className="inline-actions">
             <Action
@@ -253,14 +252,6 @@ export function AdminPanel({
             ))}
           </div>
         </>
-      ) : (
-        <StaffPanel
-          api={api}
-          session={session}
-          onSaved={async () => {
-            setRevision((r) => r + 1);
-          }}
-        />
       )}
 
       <Modal
