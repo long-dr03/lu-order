@@ -2952,3 +2952,8 @@ th.sticky-col {
 .rate-quick { display: grid; gap: 10px; width: 100%; justify-items: start; }
 .rate-quick .money-input { width: 100%; max-width: 320px; }
 .prepare-callout { border-color: #18181b; background: #fff; }
+
+/* Explanatory lines help at a desk; on a phone they only push the controls down. */
+@media (max-width: 767px) {
+  .desktop-hint { display: none; }
+}

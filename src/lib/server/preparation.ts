@@ -236,15 +236,7 @@ export async function savePreparationCheck(
     checkNames.set(file.url, stored.name);
   }
   if (input.mode === "photo" || input.mode === "file") {
-    // The paper must list the points, and every point must be ticked as checked.
-    const total = input.total_points ?? 0;
-    const checked = input.checked_points ?? 0;
-    ensure(total >= 1, 422, "Nhập số điểm có trên tờ đo.");
-    ensure(
-      checked === total,
-      422,
-      `Mới kiểm ${checked}/${total} điểm. Chỉ lưu khi đã kiểm đủ.`,
-    );
+    // The paper itself is the record; the checker only confirms the overall result.
     ensure(
       input.result !== undefined,
       422,

@@ -718,7 +718,7 @@ export function OrderDetail({
               </div>
             ))}
           </div>
-          <p className="muted">
+          <p className="muted desktop-hint">
             Các bộ phận xử lý song song theo lượng thực tế. Vị trí Kanban không
             thay thế số lượng đã làm.
           </p>

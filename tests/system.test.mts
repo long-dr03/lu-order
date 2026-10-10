@@ -1792,25 +1792,14 @@ test("A pattern check can be confirmed by a photo of the sheet or an attached fi
     422,
     "files belong to file mode only",
   );
-  // A sheet with points still unticked cannot be confirmed.
-  const unchecked = await post("cutting", {
+  // Counting points is optional: the paper is the record, the result is what matters.
+  const uncounted = await post("cutting", {
     mode: "file",
     files: [{ ...stored, name: "bang-do.xlsx" }],
-    total_points: 5,
-    checked_points: 3,
+    total_points: undefined,
+    checked_points: undefined,
   });
-  assert.equal(unchecked.status, 422, "unchecked points must block the save");
-  const noTotal = await post("cutting", {
-    mode: "file",
-    files: [{ ...stored, name: "bang-do.xlsx" }],
-    total_points: 0,
-    checked_points: 0,
-  });
-  assert.equal(
-    noTotal.status,
-    422,
-    "a sheet with no points cannot be confirmed",
-  );
+  assert.equal(uncounted.status, 201, "a result alone confirms a sheet");
 });
 test("Spec sheet values read inch fractions and Excel pastes the way tech packs write them", async () => {
   const m = await import("../src/lib/measure");
