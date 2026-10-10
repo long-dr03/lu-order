@@ -742,6 +742,10 @@ export function PreparationCard({
   const [carried, setCarried] = useState<MeasureRow[]>([]);
   const [extra, setExtra] = useState<MeasureRow[]>([]);
   const [chosenResult, setChosenResult] = useState<string | null>(null);
+  // Photo / file confirmations must say which points were checked on the paper.
+  const [ticked, setTicked] = useState<Record<string, boolean>>({});
+  const [paperTotal, setPaperTotal] = useState("");
+  const [paperChecked, setPaperChecked] = useState("");
   // Three ways to confirm: type it on the web (measure or written), a photo of the filled sheet, or an attached file.
   const [channel, setChannel] = useState<"web" | "photo" | "file">("web");
   const [webMode, setWebMode] = useState<"measure" | "text">("measure");
@@ -782,8 +786,25 @@ export function PreparationCard({
   const measured = rows.filter((r) => rowState(r, unit) !== "empty").length;
   const pending = fixedRows.filter((r) => !r.actual).length;
   // Suggest the result from the measurements until the checker picks one.
+  const attachmentMode = photoMode || fileMode;
   const result =
-    chosenResult ?? (isPattern && out > 0 ? "dat_co_ghi_chu" : "dat");
+    chosenResult ??
+    (attachmentMode ? "" : isPattern && out > 0 ? "dat_co_ghi_chu" : "dat");
+  // Points on the sheet: from the POM chart for the chosen sizes, or typed in when there is no chart.
+  const checklist = sheet
+    ? sizesOn.flatMap((size) =>
+        sheet.poms
+          .filter((p) => p.values[size] !== undefined)
+          .map((p) => ({
+            key: rowKey(p.point, size),
+            label: `${p.point}${size ? ` · size ${size}` : ""}`,
+          })),
+      )
+    : [];
+  const pointsTotal = sheet ? checklist.length : Number(paperTotal || 0);
+  const pointsChecked = sheet
+    ? checklist.filter((c) => ticked[c.key]).length
+    : Number(paperChecked || 0);
   const setActual = (key: string, value: string) =>
     setActuals((old) => ({ ...old, [key]: value }));
   const step = (r: MeasureRow, direction: 1 | -1) => {
@@ -834,6 +855,9 @@ export function PreparationCard({
     setCarried(sheet ? [] : fromLast);
     setExtra(isPattern && !sheet && !fromLast.length ? [newRow(unit)] : []);
     setChosenResult(null);
+    setTicked({});
+    setPaperTotal("");
+    setPaperChecked("");
     // Keep the way this order was checked last time; without a POM chart a written assessment is quicker.
     const lastMode = last?.mode;
     setChannel(
@@ -882,6 +906,26 @@ export function PreparationCard({
       setError("Chọn ít nhất một file để đính kèm.");
       return;
     }
+    if (attachmentMode) {
+      if (!result) {
+        setError("Chọn kết quả duyệt trước khi lưu.");
+        return;
+      }
+      if (pointsTotal < 1) {
+        setError(
+          sheet
+            ? "Chọn size và tick các điểm đã kiểm trên tờ đo."
+            : "Nhập số điểm có trên tờ đo.",
+        );
+        return;
+      }
+      if (pointsChecked !== pointsTotal) {
+        setError(
+          `Mới kiểm ${pointsChecked}/${pointsTotal} điểm. Chỉ lưu khi đã kiểm đủ, hoặc ghi lại lượt khác.`,
+        );
+        return;
+      }
+    }
     setBusy(true);
     setError("");
     try {
@@ -914,6 +958,8 @@ export function PreparationCard({
         pieces_expected: isPattern ? optionalNumber("pieces_expected") : null,
         pieces_received: isPattern ? optionalNumber("pieces_received") : null,
         measurements: measureMode ? measurements : [],
+        total_points: attachmentMode ? pointsTotal : null,
+        checked_points: attachmentMode ? pointsChecked : null,
         checked_by: String(f.get("checked_by") || "") || null,
         approved_by: isPattern
           ? String(f.get("approved_by") || "") || null
@@ -964,9 +1010,9 @@ export function PreparationCard({
                     : check.mode === "text"
                       ? " · Đánh giá bằng chữ"
                       : check.mode === "photo"
-                        ? " · Ảnh chụp bảng đo"
+                        ? ` · Ảnh chụp bảng đo${check.total_points ? ` · Đã kiểm ${check.checked_points}/${check.total_points} điểm` : ""}`
                         : check.mode === "file"
-                          ? " · File đính kèm"
+                          ? ` · File đính kèm${check.total_points ? ` · Đã kiểm ${check.checked_points}/${check.total_points} điểm` : ""}`
                           : ` · Vượt dung sai: ${check.defect_qty}`}
                 </summary>
                 <dl>
@@ -1219,7 +1265,7 @@ export function PreparationCard({
               />
             </Field>
           )}
-          {sheet && measureMode && (
+          {sheet && (measureMode || attachmentMode) && (
             <div className="stack">
               <span className="field-label">Size đang đo</span>
               <div className="size-chips">
@@ -1412,11 +1458,68 @@ export function PreparationCard({
               </div>
             </fieldset>
           )}
+          {attachmentMode && (
+            <fieldset className="prep-fieldset">
+              <legend>Đã kiểm trên tờ đo</legend>
+              {sheet ? (
+                <div className="stack">
+                  <p className="muted">
+                    Tick từng điểm đã kiểm trên tờ đo. Đã tick {pointsChecked}/
+                    {pointsTotal} điểm.
+                  </p>
+                  {checklist.length === 0 && (
+                    <p className="muted">Chọn ít nhất một size phía trên.</p>
+                  )}
+                  {checklist.map((c) => (
+                    <label className="check-label" key={c.key}>
+                      <input
+                        type="checkbox"
+                        checked={!!ticked[c.key]}
+                        onChange={(e) =>
+                          setTicked((old) => ({
+                            ...old,
+                            [c.key]: e.target.checked,
+                          }))
+                        }
+                      />
+                      {c.label}
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <div className="form-grid">
+                  <Field label="Số điểm có trên tờ đo">
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      value={paperTotal}
+                      onChange={(e) => setPaperTotal(e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Số điểm đã kiểm">
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      value={paperChecked}
+                      onChange={(e) => setPaperChecked(e.target.value)}
+                    />
+                  </Field>
+                </div>
+              )}
+            </fieldset>
+          )}
           <Field label={measureMode ? "Kết quả (gợi ý theo số đo)" : "Kết quả"}>
             <select
               value={result}
               onChange={(e) => setChosenResult(e.target.value)}
             >
+              {attachmentMode && (
+                <option value="" disabled>
+                  — chọn kết quả —
+                </option>
+              )}
               {Object.entries(results).map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}

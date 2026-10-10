@@ -142,3 +142,16 @@ export async function migrateCheckAttachments() {
   `);
   await db.prepare("INSERT INTO schema_migrations(version) VALUES (21)").run();
 }
+
+/** Migration 22: photo/file confirmations record how many sheet points were checked. */
+export async function migrateCheckPointCounts() {
+  if (
+    await db.prepare("SELECT 1 FROM schema_migrations WHERE version=22").get()
+  )
+    return;
+  await db.exec(`
+    ALTER TABLE preparation_checks ADD COLUMN IF NOT EXISTS total_points BIGINT;
+    ALTER TABLE preparation_checks ADD COLUMN IF NOT EXISTS checked_points BIGINT;
+  `);
+  await db.prepare("INSERT INTO schema_migrations(version) VALUES (22)").run();
+}

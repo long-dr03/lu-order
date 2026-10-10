@@ -2926,3 +2926,20 @@ th.sticky-col {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Order detail header: one photo at a time on top, order facts below it. */
+.department-detail .order-detail-heading { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; gap:12px; }
+.department-detail .order-detail-heading h3 { margin:0 0 4px; }
+.department-detail .order-detail-heading p { margin:2px 0; }
+.photo-carousel { position:relative; margin:0; display:grid; gap:6px; }
+.photo-carousel figcaption { font-size:13px; color:#71717a; text-align:center; }
+.department-detail .order-detail-heading .photo-carousel .product-photo,
+.photo-carousel .product-photo { width:100%; max-width:none; height:min(55vh,380px); background:#f4f4f5; }
+.photo-carousel-nav { position:absolute; top:calc(50% - 13px); translate:0 -50%; display:inline-flex; align-items:center; justify-content:center; width:40px; height:40px; border:1px solid #e4e4e7; border-radius:999px; background:#ffffffe6; color:#18181b; box-shadow:0 1px 3px #0000001a; cursor:pointer; }
+.photo-carousel-nav:hover { background:#fff; }
+.photo-carousel-nav.prev { left:8px; }
+.photo-carousel-nav.next { right:8px; }
+/* Order detail tabs: one compact row that scrolls sideways instead of wrapping into a grid. */
+.department-detail .detail-tabs { display:flex; flex-wrap:nowrap; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none; gap:4px; padding:4px; background:#f4f4f5; border-radius:8px; }
+.department-detail .detail-tabs::-webkit-scrollbar { display:none; }
+.department-detail .detail-tabs button { flex:0 0 auto; white-space:nowrap; min-height:38px; padding:6px 12px; font-size:14px; }

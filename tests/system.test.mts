@@ -276,7 +276,7 @@ test("Six stable departments; startup is repeatable and does not reinstate remov
         .prepare("SELECT MAX(version) n FROM schema_migrations")
         .get()) as { n: number }
     ).n,
-    21,
+    22,
   );
 });
 test("Passwords use distinct salts and verify without plaintext", () => {
@@ -1670,6 +1670,8 @@ test("A pattern check can be confirmed by a photo of the sheet or an attached fi
   const base = {
     stage: "Kiểm rập",
     result: "dat",
+    total_points: 2,
+    checked_points: 2,
     checked_on: today(),
   };
   const post = (who: string, input: Record<string, unknown>) =>
@@ -1789,6 +1791,25 @@ test("A pattern check can be confirmed by a photo of the sheet or an attached fi
     ).status,
     422,
     "files belong to file mode only",
+  );
+  // A sheet with points still unticked cannot be confirmed.
+  const unchecked = await post("cutting", {
+    mode: "file",
+    files: [{ ...stored, name: "bang-do.xlsx" }],
+    total_points: 5,
+    checked_points: 3,
+  });
+  assert.equal(unchecked.status, 422, "unchecked points must block the save");
+  const noTotal = await post("cutting", {
+    mode: "file",
+    files: [{ ...stored, name: "bang-do.xlsx" }],
+    total_points: 0,
+    checked_points: 0,
+  });
+  assert.equal(
+    noTotal.status,
+    422,
+    "a sheet with no points cannot be confirmed",
   );
 });
 test("Spec sheet values read inch fractions and Excel pastes the way tech packs write them", async () => {

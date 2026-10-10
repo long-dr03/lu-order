@@ -1,7 +1,16 @@
 "use client";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
-import { ImagePlus, ImageOff, Plus, Upload, X, ZoomIn } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  ImagePlus,
+  ImageOff,
+  Plus,
+  Upload,
+  X,
+  ZoomIn,
+} from "lucide-react";
 import { Modal, ErrorNotice, Field } from "./Primitives";
 import type { SessionInfo } from "@/lib/permissions";
 import type { OrderPhoto } from "@/lib/types";
@@ -434,6 +443,7 @@ export function ProductPhotosField({
     </div>
   );
 }
+/** One photo at a time, full width, with arrows (and swipe) to move between photos. */
 export function ProductPhotoGallery({
   photos,
   fallbackUrl,
@@ -444,18 +454,62 @@ export function ProductPhotoGallery({
   name: string;
 }) {
   const list = photoDraftsFrom(photos, fallbackUrl);
+  const [index, setIndex] = useState(0);
+  const touchStart = useRef<number | null>(null);
   if (!list.length) return <ProductPhoto name={name} large />;
+  const current = Math.min(index, list.length - 1);
+  const photo = list[current];
+  const many = list.length > 1;
+  const go = (step: number) =>
+    setIndex((current + step + list.length) % list.length);
   return (
-    <div className="photo-gallery">
-      {list.map((photo) => (
-        <figure key={photo.key}>
-          <ProductPhoto
-            url={photo.url}
-            name={photo.color ? `${name} · ${photo.color}` : name}
-          />
-          <figcaption>{photo.color || "Ảnh chung"}</figcaption>
-        </figure>
-      ))}
-    </div>
+    <figure
+      className="photo-carousel"
+      onKeyDown={(e) => {
+        if (!many) return;
+        if (e.key === "ArrowLeft") go(-1);
+        if (e.key === "ArrowRight") go(1);
+      }}
+      onTouchStart={(e) => {
+        touchStart.current = e.touches[0].clientX;
+      }}
+      onTouchEnd={(e) => {
+        const start = touchStart.current;
+        touchStart.current = null;
+        if (!many || start === null) return;
+        const dx = e.changedTouches[0].clientX - start;
+        if (Math.abs(dx) > 40) go(dx < 0 ? 1 : -1);
+      }}
+    >
+      <ProductPhoto
+        key={photo.key}
+        url={photo.url}
+        name={photo.color ? `${name} · ${photo.color}` : name}
+      />
+      {many && (
+        <>
+          <button
+            type="button"
+            className="photo-carousel-nav prev"
+            aria-label="Ảnh trước"
+            onClick={() => go(-1)}
+          >
+            <ChevronLeft size={22} />
+          </button>
+          <button
+            type="button"
+            className="photo-carousel-nav next"
+            aria-label="Ảnh sau"
+            onClick={() => go(1)}
+          >
+            <ChevronRight size={22} />
+          </button>
+        </>
+      )}
+      <figcaption>
+        {photo.color || "Ảnh chung"}
+        {many && ` · ${current + 1}/${list.length}`}
+      </figcaption>
+    </figure>
   );
 }

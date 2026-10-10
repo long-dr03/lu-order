@@ -600,7 +600,15 @@ export function OrderDetail({
             type="button"
             key={t.id}
             aria-pressed={tab === t.id}
-            onClick={() => setTab(t.id)}
+            onClick={(e) => {
+              setTab(t.id);
+              // Tabs share one scrolling row; bring the picked one fully into view.
+              e.currentTarget.scrollIntoView({
+                block: "nearest",
+                inline: "nearest",
+                behavior: "smooth",
+              });
+            }}
           >
             {t.label}
           </button>

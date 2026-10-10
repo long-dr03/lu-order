@@ -52,6 +52,8 @@ export const preparationSchema = z
       .max(3)
       .default([]),
     phase: z.enum(["", "rap_thu", "fit", "pps", "bulk"]).default(""),
+    total_points: z.number().int().min(0).max(500).nullable().optional(),
+    checked_points: z.number().int().min(0).max(500).nullable().optional(),
     photos: z
       .array(z.string().regex(/^\/api\/product-images\/[0-9a-f-]{36}$/))
       .max(6)
@@ -233,6 +235,22 @@ export async function savePreparationCheck(
     // The name and size shown in the history come from the stored file, never from the request.
     checkNames.set(file.url, stored.name);
   }
+  if (input.mode === "photo" || input.mode === "file") {
+    // The paper must list the points, and every point must be ticked as checked.
+    const total = input.total_points ?? 0;
+    const checked = input.checked_points ?? 0;
+    ensure(total >= 1, 422, "Nhập số điểm có trên tờ đo.");
+    ensure(
+      checked === total,
+      422,
+      `Mới kiểm ${checked}/${total} điểm. Chỉ lưu khi đã kiểm đủ.`,
+    );
+    ensure(
+      input.result !== undefined,
+      422,
+      "Chọn kết quả duyệt trước khi lưu.",
+    );
+  }
   if (input.mode === "photo")
     ensure(
       input.photos.length > 0,
@@ -269,7 +287,7 @@ export async function savePreparationCheck(
     key === "kiem_rap" ? outOfTolerance(input.measurements) : input.defect_qty;
   await db
     .prepare(
-      "INSERT INTO preparation_checks(order_id,stage,result,defect_qty,notes,pattern_version,sizes_checked,pieces_expected,pieces_received,measurements,unit,mode,phase,photos,files,checked_by,approved_by,checked_on,actor_id,represented_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO preparation_checks(order_id,stage,result,defect_qty,notes,pattern_version,sizes_checked,pieces_expected,pieces_received,measurements,unit,mode,phase,photos,files,checked_by,approved_by,checked_on,actor_id,represented_id,total_points,checked_points) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
     )
     .run(
       orderId,
@@ -298,6 +316,8 @@ export async function savePreparationCheck(
       input.checked_on,
       ctx.actor.id,
       ctx.representing ? ctx.user.id : null,
+      input.total_points ?? null,
+      input.checked_points ?? null,
     );
   await audit(
     ctx,

@@ -74,6 +74,9 @@ export interface PreparationCheck {
   /** "text": written assessment; "photo": photo of the filled sheet; "file": attached PDF/Excel/Word. */
   mode: "measure" | "text" | "photo" | "file";
   files: PreparationFile[];
+  /** Photo/file confirmations: points checked on the paper out of the total on it. */
+  total_points: number | null;
+  checked_points: number | null;
   /** Sample stage the measurements belong to; "" when not recorded. */
   phase: "" | "rap_thu" | "fit" | "pps" | "bulk";
   unit: "inch" | "cm";
