@@ -200,11 +200,34 @@ export async function getOrderById(id: string): Promise<Order | null> {
     check.files = JSON.parse((check.files as unknown as string) || "[]");
   }
   const pattern_sheet = await patternSheetFor(id);
-  const all = await getAllOrders();
-  const assessed = all.find((o) => o.id === id);
+  // Only this order and the backlog SQL aggregate are read, not the whole order table.
+  const workItems = (await db
+    .prepare(
+      "SELECT w.id,w.order_id,w.stage,w.name,COALESCE(SUM(p.quantity),0) recorded_quantity FROM order_work_items w LEFT JOIN production_logs p ON p.work_item_id=w.id WHERE w.order_id=? GROUP BY w.id ORDER BY w.id",
+    )
+    .all(id)) as WorkItem[];
+  const photos = (await db
+    .prepare(
+      "SELECT id,image_url,color,position FROM order_photos WHERE order_id=? ORDER BY position,id",
+    )
+    .all(id)) as OrderPhoto[];
+  const backlog = (await db
+    .prepare(
+      "SELECT COALESCE(SUM(CASE WHEN v.quantity>v.delivered_qty THEN v.quantity-v.delivered_qty ELSE 0 END),0) n FROM order_variants v JOIN orders o ON o.id=v.order_id WHERE o.status<>'completed' AND o.deadline<=?",
+    )
+    .get(order.deadline)) as { n: number };
+  const [assessed] = assessOrders(
+    [{ ...order, work_items: workItems, photos }],
+    await getLines(),
+    await throughput(),
+    undefined,
+    Number(backlog.n),
+  );
   return {
     ...order,
     ...assessed,
+    work_items: workItems,
+    photos,
     stages: order.stages,
     checks,
     pattern_sheet,

@@ -1832,6 +1832,29 @@ test("Spec sheet values read inch fractions and Excel pastes the way tech packs 
     "an empty cell means the size has no standard for this point",
   );
 });
+test("A single order is assessed the same way as in the list, including backlog from other orders", async () => {
+  const { getAllOrders } = await import("../src/lib/db");
+  await order([{ color: "Đen", size: "M", quantity: 40 }]);
+  await order([{ color: "Trắng", size: "L", quantity: 60 }]);
+  await db
+    .prepare(
+      "UPDATE orders SET deadline='2029-06-01' WHERE id=(SELECT MIN(id) FROM orders)",
+    )
+    .run();
+  const list = await getAllOrders();
+  assert(list.length >= 2);
+  for (const listed of list) {
+    const single = await getOrderById(listed.id);
+    assert(single, listed.id);
+    assert.equal(single.status, listed.status, `${listed.id} status`);
+    assert.equal(single.progress, listed.progress, `${listed.id} progress`);
+    assert.equal(single.risk_reason, listed.risk_reason, `${listed.id} reason`);
+    assert.deepEqual(
+      single.work_items?.map((w) => w.recorded_quantity),
+      listed.work_items?.map((w) => w.recorded_quantity),
+    );
+  }
+});
 test("POM chart is declared once per order as points × sizes in inches, and replaced as a whole", async () => {
   const id = await order();
   const specsApi =

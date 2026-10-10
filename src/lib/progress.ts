@@ -3,11 +3,16 @@ export interface Throughput {
   line_id: number | null;
   daily: number;
 }
+/**
+ * `backlogOverride` lets a single order be assessed without loading every other order:
+ * the caller passes the same backlog the full list would have computed for it.
+ */
 export function assessOrders(
   orders: Order[],
   lines: Line[],
   rates: Throughput[],
   now = new Date(),
+  backlogOverride?: number,
 ) {
   void lines;
   const today = new Intl.DateTimeFormat("en-CA", {
@@ -52,17 +57,19 @@ export function assessOrders(
     const days = Math.floor(
       (Date.parse(o.deadline) - Date.parse(today)) / 86400000,
     );
-    const backlog = orders
-      .filter((x) => x.status !== "completed" && x.deadline <= o.deadline)
-      .reduce(
-        (n, x) =>
-          n +
-          (x.variants || []).reduce(
-            (sum, v) => sum + Math.max(0, v.quantity - v.delivered_qty),
-            0,
-          ),
-        0,
-      );
+    const backlog =
+      backlogOverride ??
+      orders
+        .filter((x) => x.status !== "completed" && x.deadline <= o.deadline)
+        .reduce(
+          (n, x) =>
+            n +
+            (x.variants || []).reduce(
+              (sum, v) => sum + Math.max(0, v.quantity - v.delivered_qty),
+              0,
+            ),
+          0,
+        );
     if (days < 0 && remaining > 0) {
       o.status = "delayed";
       o.risk_reason = `Quá hạn ${-days} ngày; còn ${remaining} sản phẩm chưa giao`;
