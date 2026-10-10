@@ -35,6 +35,7 @@ import {
 } from "@/lib/workflow";
 import { Action, Field, ErrorNotice, Empty, Modal } from "./Primitives";
 import { Pagination } from "./Pagination";
+import { MoneyInput } from "./SmartInputs";
 import {
   ProductPhotoGallery,
   ProductPhotosField,
@@ -213,25 +214,35 @@ export function ProductionForm({
     !!stage &&
     (permits(session.user, "rates.manage", { stage }) ||
       permits(session.user, "payroll.view", { stage, employeeId: person }));
+  const canSetPrice =
+    !!stage && permits(session.user, "rates.manage", { stage });
   const [fetchedRates, setFetchedRates] = useState<Rate[]>([]);
+  const [ratesReady, setRatesReady] = useState(false);
+  const [rateTick, setRateTick] = useState(0);
+  const [price, setPrice] = useState<number | null>(null);
+  const [pricing, setPricing] = useState(false);
   useEffect(() => {
     let live = true;
     if (canSeePrice)
       void api<Rate[]>("/api/rates")
         .then((rows) => {
-          if (live) setFetchedRates(rows);
+          if (!live) return;
+          setFetchedRates(rows);
+          setRatesReady(true);
         })
         .catch(() => {});
     return () => {
       live = false;
     };
-  }, [api, canSeePrice, detail?.version]);
+  }, [api, canSeePrice, detail?.version, rateTick]);
   const rate = [...rates, ...fetchedRates].find(
     (r) =>
       r.order_id === id &&
       r.stage === stage &&
       (r.work_item_id || 0) === (part || 0),
   );
+  // Without a rate the server refuses the record, so say so before the worker types anything.
+  const missingRate = canSeePrice && ratesReady && !!detail && !rate;
   const problem = !detail
     ? "Đang tải số lượng và phân công…"
     : !stage
@@ -240,9 +251,32 @@ export function ProductionForm({
         ? "Quản lý cần hoàn tất chuẩn bị đơn trước khi sản xuất."
         : !person
           ? "Chưa có thợ được phân công cho công đoạn/phần việc này."
-          : invalid
-            ? "Có số lượng vượt mức còn lại hoặc không phải số nguyên."
-            : "";
+          : missingRate
+            ? canSetPrice
+              ? `Chưa có đơn giá ${stage}. Đặt đơn giá ở ngay bên dưới rồi ghi sản lượng.`
+              : `Chưa có đơn giá ${stage}. Báo quản lý đặt đơn giá trước khi ghi sản lượng.`
+            : invalid
+              ? "Có số lượng vượt mức còn lại hoặc không phải số nguyên."
+              : "";
+  async function saveRate() {
+    if (price === null) return;
+    setPricing(true);
+    setError("");
+    try {
+      await api("/api/rates", {
+        order_id: id,
+        stage,
+        unit_price: price,
+        ...(part ? { work_item_id: part } : {}),
+      });
+      setPrice(null);
+      setRateTick((n) => n + 1);
+    } catch (err) {
+      setError(message(err));
+    } finally {
+      setPricing(false);
+    }
+  }
   return (
     <form
       className="stack department-form"
@@ -426,6 +460,27 @@ export function ProductionForm({
               <span>Đơn giá {money(rate.unit_price)} / sản phẩm</span>
               <strong>{money(rate.unit_price * total)}</strong>
             </>
+          ) : canSetPrice && ratesReady ? (
+            <div className="rate-quick">
+              <span>
+                Chưa có đơn giá {stage} cho đơn này. Nhập đơn giá để ghi được
+                sản lượng:
+              </span>
+              <MoneyInput
+                aria-label={`Đơn giá ${stage} (đ / sản phẩm)`}
+                placeholder="đ / sản phẩm"
+                defaultValue=""
+                onValueChange={(value) => setPrice(value)}
+              />
+              <Action
+                type="button"
+                busy={pricing}
+                disabled={price === null}
+                onClick={() => void saveRate()}
+              >
+                Lưu đơn giá
+              </Action>
+            </div>
           ) : (
             <span>Chưa cấu hình đơn giá cho công đoạn/phần việc này.</span>
           )}
@@ -526,6 +581,22 @@ export function OrderDetail({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [historyPage, setHistoryPage] = useState(1);
+  async function move(change: { stage: string } | { prepare: true }) {
+    setBusy(true);
+    setError("");
+    try {
+      await api(
+        `/api/orders/${encodeURIComponent(order.id)}`,
+        { version: order.version, ...change },
+        "PATCH",
+      );
+      await onChanged();
+    } catch (err) {
+      setError(message(err));
+    } finally {
+      setBusy(false);
+    }
+  }
   const totals = (order.variants || []).reduce(
     (n, v) => ({
       cut: n.cut + v.cut_qty,
@@ -618,7 +689,16 @@ export function OrderDetail({
       {tab === "progress" && (
         <>
           {isManagement(session.user) && (
-            <NextStep order={order} onGo={setTab} />
+            <NextStep
+              order={order}
+              onGo={setTab}
+              busy={busy}
+              onPrepare={
+                transitionPermissionProblem(session.user, order)
+                  ? undefined
+                  : () => void move({ prepare: true })
+              }
+            />
           )}
           <div className="department-metrics">
             {[
@@ -669,22 +749,7 @@ export function OrderDetail({
             order={order}
             session={session}
             busy={busy}
-            onMove={async (change) => {
-              setBusy(true);
-              setError("");
-              try {
-                await api(
-                  `/api/orders/${encodeURIComponent(order.id)}`,
-                  { version: order.version, ...change },
-                  "PATCH",
-                );
-                await onChanged();
-              } catch (err) {
-                setError(message(err));
-              } finally {
-                setBusy(false);
-              }
-            }}
+            onMove={move}
           />
         </>
       )}
@@ -742,6 +807,13 @@ export function OrderDetail({
             employees={employees}
             onChanged={onChanged}
           />
+          <PrepareCallout
+            stage="kiem_npl"
+            order={order}
+            session={session}
+            busy={busy}
+            onPrepare={() => void move({ prepare: true })}
+          />
           <MaterialsPanel
             order={order}
             session={session}
@@ -751,14 +823,23 @@ export function OrderDetail({
         </div>
       )}
       {tab === "pattern" && (
-        <PreparationCheck
-          stage="Kiểm rập"
-          order={order}
-          session={session}
-          api={api}
-          employees={employees}
-          onChanged={onChanged}
-        />
+        <div className="stack">
+          <PreparationCheck
+            stage="Kiểm rập"
+            order={order}
+            session={session}
+            api={api}
+            employees={employees}
+            onChanged={onChanged}
+          />
+          <PrepareCallout
+            stage="kiem_rap"
+            order={order}
+            session={session}
+            busy={busy}
+            onPrepare={() => void move({ prepare: true })}
+          />
+        </div>
       )}
       {tab === "shipments" && (
         <ShipmentPanel
@@ -1074,12 +1155,75 @@ function VariantTable({
   );
 }
 
+/** Latest recorded result of a preparation stage, or undefined when it has not been checked. */
+const lastCheck = (order: Detail, stage: "kiem_npl" | "kiem_rap") =>
+  (order.checks || []).filter((c) => c.stage === stage).at(-1);
+
+/**
+ * Recording a check does not move the order: several rounds (proto, fit, PPS…) may be needed.
+ * Once a round passes, this offers the move right where the checker is standing.
+ */
+function PrepareCallout({
+  stage,
+  order,
+  session,
+  busy,
+  onPrepare,
+}: {
+  stage: "kiem_npl" | "kiem_rap";
+  order: Detail;
+  session: SessionInfo;
+  busy: boolean;
+  onPrepare: () => void;
+}) {
+  const last = lastCheck(order, stage);
+  if (!last || !PREPARATION_STAGES.includes(order.current_stage)) return null;
+  const name = stage === "kiem_rap" ? "Kiểm rập" : "Kiểm NPL/Vải";
+  const here = LUUTA_STAGES.find((s) => s.key === order.current_stage)?.label;
+  if (last.result === "khong_dat")
+    return (
+      <div className="entry-guidance" role="status">
+        <p>
+          <strong>Lượt {name} gần nhất chưa đạt.</strong> Sửa rồi ghi thêm một
+          lượt kiểm mới; đơn vẫn ở bước {here}.
+        </p>
+      </div>
+    );
+  const blocked = transitionPermissionProblem(session.user, order);
+  if (!isManagement(session.user) || blocked)
+    return (
+      <div className="entry-guidance" role="status">
+        <p>
+          <strong>Đã ghi kết quả {name}: đạt.</strong> Đơn vẫn ở bước {here} cho
+          tới khi quản lý bấm “Hoàn tất chuẩn bị → Cắt”.
+        </p>
+      </div>
+    );
+  return (
+    <div className="entry-guidance prepare-callout" role="status">
+      <p>
+        <strong>{name} đã đạt.</strong> Ghi kết quả không tự chuyển bước (có thể
+        cần kiểm thêm lượt khác). Khi đã sẵn sàng cắt, bấm nút dưới đây — đơn
+        đang ở bước {here}.
+      </p>
+      <Action type="button" busy={busy} onClick={onPrepare}>
+        <Check size={18} />
+        Hoàn tất chuẩn bị → Cắt
+      </Action>
+    </div>
+  );
+}
+
 function NextStep({
   order,
   onGo,
+  onPrepare,
+  busy,
 }: {
   order: Detail;
   onGo: (tab: string) => void;
+  onPrepare?: () => void;
+  busy?: boolean;
 }) {
   if (order.status === "completed") return null;
   const unassigned = assignmentStages.filter(
@@ -1099,8 +1243,13 @@ function NextStep({
   let text = "";
   let tab = "";
   let label = "";
+  let prepare = false;
   const checked = (key: string) =>
     (order.checks || []).some((c) => c.stage === key);
+  const failed =
+    (order.current_stage === "kiem_npl" ||
+      order.current_stage === "kiem_rap") &&
+    lastCheck(order, order.current_stage)?.result === "khong_dat";
   if (order.current_stage === "kiem_npl" && !checked("kiem_npl")) {
     text =
       "Đơn đang ở bước Kiểm NPL/Vải. Ghi kết quả kiểm vải và phụ liệu trước khi chuẩn bị cắt.";
@@ -1111,11 +1260,25 @@ function NextStep({
       "Đơn đang ở bước Kiểm rập. Ghi kết quả kiểm rập (phiên bản, số mảnh, bảng đo) trước khi cắt.";
     tab = "pattern";
     label = "Ghi kết quả Kiểm rập";
-  } else if (!prepared(order) && order.current_stage !== "hoan_thanh") {
+  } else if (failed) {
     text =
-      "Đơn mới nhận. Giao thợ cho từng công đoạn, khai báo vải nếu cần, rồi bấm “Hoàn tất chuẩn bị” ở cuối trang để bắt đầu cắt.";
-    tab = "assignments";
-    label = "Giao thợ cho công đoạn";
+      "Lượt kiểm gần nhất chưa đạt. Sửa rồi ghi thêm một lượt kiểm mới trước khi cắt.";
+    tab = order.current_stage === "kiem_rap" ? "pattern" : "materials";
+    label = "Ghi lượt kiểm mới";
+  } else if (!prepared(order) && order.current_stage !== "hoan_thanh") {
+    prepare = true;
+    if (order.current_stage === "nhan_don") {
+      text =
+        "Đơn mới nhận. Giao thợ cho từng công đoạn, khai báo vải nếu cần, rồi bấm “Hoàn tất chuẩn bị → Cắt” để bắt đầu sản xuất.";
+      tab = "assignments";
+      label = "Giao thợ cho công đoạn";
+    } else {
+      text = `Đã có kết quả kiểm đạt. Ghi kết quả không tự chuyển bước — bấm “Hoàn tất chuẩn bị → Cắt” để đưa đơn vào sản xuất.${unassigned.length ? ` Còn chưa giao thợ cho: ${unassigned.join(", ")}.` : ""}`;
+      if (unassigned.length) {
+        tab = "assignments";
+        label = "Giao thợ";
+      }
+    }
   } else if (unassigned.length) {
     text = `Chưa giao thợ cho: ${unassigned.join(", ")}. Chưa giao thì chưa nhập được sản lượng.`;
     tab = "assignments";
@@ -1133,10 +1296,20 @@ function NextStep({
       <p>
         <strong>Việc tiếp theo:</strong> {text}
       </p>
-      {tab && (
-        <Action type="button" tone="secondary" onClick={() => onGo(tab)}>
-          {label}
-        </Action>
+      {(tab || (prepare && onPrepare)) && (
+        <div className="inline-actions">
+          {prepare && onPrepare && (
+            <Action type="button" busy={busy} onClick={onPrepare}>
+              <Check size={18} />
+              Hoàn tất chuẩn bị → Cắt
+            </Action>
+          )}
+          {tab && (
+            <Action type="button" tone="secondary" onClick={() => onGo(tab)}>
+              {label}
+            </Action>
+          )}
+        </div>
       )}
     </div>
   );

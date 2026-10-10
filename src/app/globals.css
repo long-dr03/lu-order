@@ -2943,3 +2943,12 @@ th.sticky-col {
 .department-detail .detail-tabs { display:flex; flex-wrap:nowrap; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none; gap:4px; padding:4px; background:#f4f4f5; border-radius:8px; }
 .department-detail .detail-tabs::-webkit-scrollbar { display:none; }
 .department-detail .detail-tabs button { flex:0 0 auto; white-space:nowrap; min-height:38px; padding:6px 12px; font-size:14px; }
+
+/* Order detail on a phone: show every tab instead of hiding half of them behind a sideways scroll. */
+@media (max-width: 767px) {
+  .department-detail .detail-tabs { flex-wrap: wrap; overflow-x: visible; }
+  .department-detail .detail-tabs button { flex: 1 1 auto; min-height: 44px; }
+}
+.rate-quick { display: grid; gap: 10px; width: 100%; justify-items: start; }
+.rate-quick .money-input { width: 100%; max-width: 320px; }
+.prepare-callout { border-color: #18181b; background: #fff; }
