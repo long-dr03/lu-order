@@ -385,7 +385,37 @@ async function main() {
     await text(page, ".prep-round summary"),
   );
 
-  // 6. Finish preparation → cutting, offered right under the saved result
+  // 6. Prices are fixed before production: the move to cutting waits for the Cắt rate.
+  const gated = await locate(
+    page,
+    ".prepare-callout button",
+    "Hoàn tất chuẩn bị",
+  );
+  const gatedOff = gated
+    ? await gated.evaluate((b) => (b as HTMLButtonElement).disabled)
+    : false;
+  record(
+    "Move to Cắt is held until the Cắt rate is set",
+    !!gated && gatedOff,
+    gated
+      ? gatedOff
+        ? ""
+        : "button is enabled without a rate"
+      : "no button on the check tab",
+  );
+  await openTab(page, "Tiến độ");
+  await typeText(
+    page,
+    '.rates-setup input[aria-label="Đơn giá Cắt"]',
+    "1500",
+    "Đơn giá Cắt",
+    "1.500",
+  );
+  await shot("rates-setup");
+  await touch(page, ".rates-setup button", "Lưu đơn giá");
+  await until("rate saved", () => locate(page, ".rates-setup", "Đang áp dụng"));
+  record("Set the Cắt rate on the Tiến độ tab", true, "");
+  await openTab(page, "Kiểm rập");
   const offered = await locate(
     page,
     ".prepare-callout button",
@@ -393,12 +423,12 @@ async function main() {
   );
   record(
     "Passing check offers the move to Cắt on the same tab",
-    !!offered,
-    offered ? "" : "the checker has to hunt for it on another tab",
+    !!offered &&
+      !(await offered.evaluate((b) => (b as HTMLButtonElement).disabled)),
+    "",
   );
-  if (!offered) await openTab(page, "Tiến độ");
   await shot("before-prepare");
-  await touch(page, "button", "Hoàn tất chuẩn bị");
+  await touch(page, ".prepare-callout button", "Hoàn tất chuẩn bị");
   await wait(2500);
   const afterPrepare = await stageLine(page);
   await shot("after-prepare");
@@ -412,18 +442,6 @@ async function main() {
   await openTab(page, "Ghi sản lượng");
   await until("worker tiles", () => page.$(".rate-stage-card"));
   await touch(page, ".rate-stage-card");
-  // A new order has no piece rate yet; the form lets a manager set it in place.
-  if (await locate(page, ".rate-quick input")) {
-    await typeText(page, ".rate-quick input", "1500", "Đơn giá Cắt", "1.500");
-    await shot("rate-missing");
-    await touch(page, ".rate-quick button", "Lưu đơn giá");
-    await until("rate saved", async () => !(await locate(page, ".rate-quick")));
-    record(
-      "Set the missing piece rate in the form",
-      true,
-      await text(page, ".pay-preview"),
-    );
-  }
   await touch(page, "button", "Điền tối đa còn lại");
   await shot("cutting-filled");
   const blocked = await alerts(page);

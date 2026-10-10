@@ -35,7 +35,7 @@ import {
 } from "@/lib/workflow";
 import { Action, Field, ErrorNotice, Empty, Modal } from "./Primitives";
 import { Pagination } from "./Pagination";
-import { MoneyInput } from "./SmartInputs";
+import { RatesSetup, useOrderRates } from "./detail-rates";
 import {
   ProductPhotoGallery,
   ProductPhotosField,
@@ -214,13 +214,8 @@ export function ProductionForm({
     !!stage &&
     (permits(session.user, "rates.manage", { stage }) ||
       permits(session.user, "payroll.view", { stage, employeeId: person }));
-  const canSetPrice =
-    !!stage && permits(session.user, "rates.manage", { stage });
   const [fetchedRates, setFetchedRates] = useState<Rate[]>([]);
   const [ratesReady, setRatesReady] = useState(false);
-  const [rateTick, setRateTick] = useState(0);
-  const [price, setPrice] = useState<number | null>(null);
-  const [pricing, setPricing] = useState(false);
   useEffect(() => {
     let live = true;
     if (canSeePrice)
@@ -234,7 +229,7 @@ export function ProductionForm({
     return () => {
       live = false;
     };
-  }, [api, canSeePrice, detail?.version, rateTick]);
+  }, [api, canSeePrice, detail?.version]);
   const rate = [...rates, ...fetchedRates].find(
     (r) =>
       r.order_id === id &&
@@ -252,31 +247,10 @@ export function ProductionForm({
         : !person
           ? "Chưa có thợ được phân công cho công đoạn/phần việc này."
           : missingRate
-            ? canSetPrice
-              ? `Chưa có đơn giá ${stage}. Đặt đơn giá ở ngay bên dưới rồi ghi sản lượng.`
-              : `Chưa có đơn giá ${stage}. Báo quản lý đặt đơn giá trước khi ghi sản lượng.`
+            ? `Chưa có đơn giá ${stage}. Quản lý đặt ở tab Tiến độ → Đơn giá công đoạn rồi mới ghi sản lượng.`
             : invalid
               ? "Có số lượng vượt mức còn lại hoặc không phải số nguyên."
               : "";
-  async function saveRate() {
-    if (price === null) return;
-    setPricing(true);
-    setError("");
-    try {
-      await api("/api/rates", {
-        order_id: id,
-        stage,
-        unit_price: price,
-        ...(part ? { work_item_id: part } : {}),
-      });
-      setPrice(null);
-      setRateTick((n) => n + 1);
-    } catch (err) {
-      setError(message(err));
-    } finally {
-      setPricing(false);
-    }
-  }
   return (
     <form
       className="stack department-form"
@@ -460,27 +434,6 @@ export function ProductionForm({
               <span>Đơn giá {money(rate.unit_price)} / sản phẩm</span>
               <strong>{money(rate.unit_price * total)}</strong>
             </>
-          ) : canSetPrice && ratesReady ? (
-            <div className="rate-quick">
-              <span>
-                Chưa có đơn giá {stage} cho đơn này. Nhập đơn giá để ghi được
-                sản lượng:
-              </span>
-              <MoneyInput
-                aria-label={`Đơn giá ${stage} (đ / sản phẩm)`}
-                placeholder="đ / sản phẩm"
-                defaultValue=""
-                onValueChange={(value) => setPrice(value)}
-              />
-              <Action
-                type="button"
-                busy={pricing}
-                disabled={price === null}
-                onClick={() => void saveRate()}
-              >
-                Lưu đơn giá
-              </Action>
-            </div>
           ) : (
             <span>Chưa cấu hình đơn giá cho công đoạn/phần việc này.</span>
           )}
@@ -581,6 +534,13 @@ export function OrderDetail({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [historyPage, setHistoryPage] = useState(1);
+  const manager = isManagement(session.user);
+  const rates = useOrderRates(order, session, api, manager);
+  // Rates are fixed before production, so the order cannot leave preparation without a cutting rate.
+  const rateBlock =
+    manager && rates.ready && rates.canPrice && !rates.cutPriced
+      ? "Đặt đơn giá Cắt ở mục “Đơn giá công đoạn” (tab Tiến độ) trước khi hoàn tất chuẩn bị."
+      : "";
   async function move(change: { stage: string } | { prepare: true }) {
     setBusy(true);
     setError("");
@@ -688,17 +648,27 @@ export function OrderDetail({
       <ErrorNotice error={error} />
       {tab === "progress" && (
         <>
-          {isManagement(session.user) && (
-            <NextStep
-              order={order}
-              onGo={setTab}
-              busy={busy}
-              onPrepare={
-                transitionPermissionProblem(session.user, order)
-                  ? undefined
-                  : () => void move({ prepare: true })
-              }
-            />
+          {manager && (
+            <>
+              <NextStep
+                order={order}
+                onGo={setTab}
+                busy={busy}
+                rateBlock={rateBlock}
+                onPrepare={
+                  transitionPermissionProblem(session.user, order)
+                    ? undefined
+                    : () => void move({ prepare: true })
+                }
+              />
+              <RatesSetup
+                order={order}
+                session={session}
+                api={api}
+                rates={rates}
+                onChanged={onChanged}
+              />
+            </>
           )}
           <div className="department-metrics">
             {[
@@ -749,6 +719,7 @@ export function OrderDetail({
             order={order}
             session={session}
             busy={busy}
+            rateBlock={rateBlock}
             onMove={move}
           />
         </>
@@ -812,6 +783,7 @@ export function OrderDetail({
             order={order}
             session={session}
             busy={busy}
+            rateBlock={rateBlock}
             onPrepare={() => void move({ prepare: true })}
           />
           <MaterialsPanel
@@ -837,6 +809,7 @@ export function OrderDetail({
             order={order}
             session={session}
             busy={busy}
+            rateBlock={rateBlock}
             onPrepare={() => void move({ prepare: true })}
           />
         </div>
@@ -996,11 +969,13 @@ function StageMover({
   order,
   session,
   busy,
+  rateBlock,
   onMove,
 }: {
   order: Detail;
   session: SessionInfo;
   busy: boolean;
+  rateBlock: string;
   onMove: (change: { stage: string } | { prepare: true }) => Promise<void>;
 }) {
   const blocked = transitionPermissionProblem(session.user, order);
@@ -1024,7 +999,7 @@ function StageMover({
           <Action
             type="button"
             busy={busy}
-            disabled={!!blocked}
+            disabled={!!blocked || !!rateBlock}
             onClick={() => void onMove({ prepare: true })}
           >
             <Check size={18} />
@@ -1046,6 +1021,7 @@ function StageMover({
       </div>
       <small>
         {blocked ||
+          (preparing && rateBlock) ||
           (next.length
             ? preparing
               ? "Hoàn tất chuẩn bị chuyển qua Kiểm NPL/Vải và Kiểm rập trong một lần; lịch sử từng bước vẫn được lưu."
@@ -1168,12 +1144,14 @@ function PrepareCallout({
   order,
   session,
   busy,
+  rateBlock,
   onPrepare,
 }: {
   stage: "kiem_npl" | "kiem_rap";
   order: Detail;
   session: SessionInfo;
   busy: boolean;
+  rateBlock: string;
   onPrepare: () => void;
 }) {
   const last = lastCheck(order, stage);
@@ -1206,10 +1184,16 @@ function PrepareCallout({
         cần kiểm thêm lượt khác). Khi đã sẵn sàng cắt, bấm nút dưới đây — đơn
         đang ở bước {here}.
       </p>
-      <Action type="button" busy={busy} onClick={onPrepare}>
+      <Action
+        type="button"
+        busy={busy}
+        disabled={!!rateBlock}
+        onClick={onPrepare}
+      >
         <Check size={18} />
         Hoàn tất chuẩn bị → Cắt
       </Action>
+      {rateBlock && <small>{rateBlock}</small>}
     </div>
   );
 }
@@ -1219,11 +1203,13 @@ function NextStep({
   onGo,
   onPrepare,
   busy,
+  rateBlock,
 }: {
   order: Detail;
   onGo: (tab: string) => void;
   onPrepare?: () => void;
   busy?: boolean;
+  rateBlock?: string;
 }) {
   if (order.status === "completed") return null;
   const unassigned = assignmentStages.filter(
@@ -1299,7 +1285,12 @@ function NextStep({
       {(tab || (prepare && onPrepare)) && (
         <div className="inline-actions">
           {prepare && onPrepare && (
-            <Action type="button" busy={busy} onClick={onPrepare}>
+            <Action
+              type="button"
+              busy={busy}
+              disabled={!!rateBlock}
+              onClick={onPrepare}
+            >
               <Check size={18} />
               Hoàn tất chuẩn bị → Cắt
             </Action>

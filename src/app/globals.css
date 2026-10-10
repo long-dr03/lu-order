@@ -2957,3 +2957,10 @@ th.sticky-col {
 @media (max-width: 767px) {
   .desktop-hint { display: none; }
 }
+
+.rates-setup { display: grid; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+.rates-setup h3 { margin: 0; }
+.rates-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.rates-row { display: grid; gap: 6px; font-weight: 600; }
+.rates-row small { font-weight: 400; color: var(--muted); }
+.rates-row .money-input { width: 100%; }
