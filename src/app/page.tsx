@@ -58,6 +58,7 @@ import { DashboardInsights } from "@/components/RequirementPanels";
 import { BackupPanel } from "@/components/BackupPanel";
 import { AdminPanel } from "@/components/AdminPanel";
 import { UserGuide } from "@/components/UserGuide";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 const navigation = [
   {
     id: "overview",
@@ -631,7 +632,9 @@ export default function Page() {
                 exit={{ opacity: 0, y: -4 }}
                 transition={{ duration: 0.16 }}
               >
-                {panel}
+                <ErrorBoundary label={`Màn hình ${active?.label || ""}`}>
+                  {panel}
+                </ErrorBoundary>
               </motion.div>
             </AnimatePresence>
           </main>
@@ -723,15 +726,17 @@ export default function Page() {
           wide
         >
           {selected && (
-            <OrderDetail
-              key={selected.id}
-              order={selected}
-              session={session}
-              api={api}
-              lines={data?.lines || []}
-              employees={data?.employees || []}
-              onChanged={reloadDetail}
-            />
+            <ErrorBoundary label={`Chi tiết đơn ${selected.id}`}>
+              <OrderDetail
+                key={selected.id}
+                order={selected}
+                session={session}
+                api={api}
+                lines={data?.lines || []}
+                employees={data?.employees || []}
+                onChanged={reloadDetail}
+              />
+            </ErrorBoundary>
           )}
         </Modal>
         <Modal
