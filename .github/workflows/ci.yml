@@ -37,14 +37,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Build first: Next.js generates route and layout types (e.g. LayoutProps) during the build,
+      # and the type check needs them.
+      - name: Build
+        run: npm run build
+
       - name: Type check
         run: npx tsc --noEmit
 
       - name: Lint
         run: npm run lint
-
-      - name: Build
-        run: npm run build
 
       - name: System tests (disposable PostgreSQL)
         run: npm test
