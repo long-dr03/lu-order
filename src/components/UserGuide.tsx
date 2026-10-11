@@ -38,7 +38,7 @@ const sections = [
     steps: [
       "Mở Bộ phận: mỗi đơn hiện hạn giao (còn bao nhiêu ngày), việc bộ phận cần làm (ví dụ “Cần cắt thêm: 100”) và nút lớn để bắt đầu (Ghi sản lượng, Kiểm hàng hoặc Ghi giao hàng). Đơn còn việc được xếp lên trên, đơn gấp lên trước. Quản lý có thể chọn toàn quy trình theo quyền được cấp.",
       "Công đoạn thuộc bộ phận của bạn được chọn sẵn; ngày làm việc mặc định là hôm nay (bấm “Làm vào ngày khác” nếu cần). Thanh dưới cùng luôn hiện tổng số và nút lưu. Chọn phần việc nếu có, rồi bấm tên thợ đã được phân công. Nhiều thợ cùng làm: bấm thợ thứ nhất, nhập số; bấm thợ tiếp theo, nhập số của người đó — một lần lưu ghi cho tất cả, mỗi thợ nhận công riêng. Nếu chưa có thợ, dùng Mở đơn để phân công; không nhập vào hồ sơ của người khác để thay thế.",
-      "Nhập lượng vừa làm thêm cho các màu–size trong cùng bảng. Ví dụ hôm qua 5, hôm nay thêm 2 thì ghi 2. Điền tối đa còn lại chỉ dùng khi đã thực sự làm xong số hiển thị.",
+      "Nhập lượng vừa làm thêm cho các màu–size trong cùng bảng. Ví dụ hôm qua 5, hôm nay thêm 2 thì ghi 2. “Điền tối đa” chỉ dùng khi đã thực sự làm xong số hiển thị.",
       "Công đoạn Cắt được nhập dư so với đơn vì thực tế thường cắt nhiều hơn. Mức dư tối đa (mặc định 10%) và việc có trả công phần dư hay không do người có quyền Đơn giá chỉnh ở mục Quy định xưởng của tab Đơn giá. May và các bước sau luôn chỉ tính tối đa theo số lượng đặt.",
       "Nhấn Ghi nhận một lần. Cả bảng được lưu trong cùng giao dịch; một dòng sai khiến toàn bộ lần nhập bị từ chối. Nếu dữ liệu đã thay đổi, tải lại số lượng trước khi nhập tiếp.",
     ],
@@ -79,11 +79,11 @@ const sections = [
     ],
   },
   {
-    title: "Điều phối Kanban và hoàn thành đơn",
+    title: "Điều phối trên bảng theo bước và hoàn thành đơn",
     paragraphs: [
-      "Đơn hàng có Danh sách và Kanban; cả hai hỗ trợ Chuyển đến. Kanban chỉ thể hiện bước điều phối chính. Các bộ phận vẫn xử lý song song theo lũy kế màu–size thực tế.",
+      "Đơn hàng có Danh sách và Bảng theo bước; cả hai hỗ trợ Chuyển đến. Bảng chỉ thể hiện bước điều phối chính. Các bộ phận vẫn xử lý song song theo lũy kế màu–size thực tế.",
       "Di chuyển thẻ không tự tạo sản lượng. Người chuyển phải có quyền và thuộc bộ phận của công đoạn đang điều phối; Quản lý chuyển toàn quy trình. Khâu chuẩn bị và xác nhận hoàn thành thuộc Quản lý.",
-      "Hoàn thành chỉ khi đã giao đủ từng màu–size. Quay lại/nhảy bước cần quyền ngoại lệ và nguyên nhân; không xóa số lượng, tiền công hay bỏ qua điều kiện đầu vào.",
+      "Hoàn thành chỉ khi đã giao đủ từng màu–size. Quản lý được quay lại/nhảy bước ngay trong ô Chuyển bước, chỉ cần ghi nguyên nhân; không xóa số lượng, tiền công hay bỏ qua điều kiện đầu vào.",
     ],
   },
   {

@@ -28,6 +28,7 @@ import type { AuditEntry } from "@/lib/server/business";
 import { Action, Field, Modal, ErrorNotice, Empty } from "./Primitives";
 import { AdjustmentControls } from "./RequirementPanels";
 import { ProductionHistory } from "./ProductionForms";
+import { DateInput } from "./DateInput";
 export function RecordsPanel({
   mode,
   api,
@@ -207,11 +208,11 @@ export function RecordsPanel({
           className={`filter-grid record-primary-filters ${personal ? "personal-filters" : ""}`}
         >
           <Field label="Tháng">
-            <input
-              type="month"
+            <DateInput
+              mode="month"
               value={month}
-              onChange={(e) => {
-                setMonth(e.target.value);
+              onChange={(next) => {
+                setMonth(next);
                 setFrom("");
                 setTo("");
               }}
@@ -266,21 +267,21 @@ export function RecordsPanel({
           <div id="records-extra-filters">
             <div className="filter-grid">
               <Field label="Từ ngày">
-                <input
-                  type="date"
+                <DateInput
                   value={from}
-                  onChange={(e) => {
-                    setFrom(e.target.value);
+                  max={to || undefined}
+                  onChange={(next) => {
+                    setFrom(next);
                     setMonth("");
                   }}
                 />
               </Field>
               <Field label="Đến ngày">
-                <input
-                  type="date"
+                <DateInput
                   value={to}
-                  onChange={(e) => {
-                    setTo(e.target.value);
+                  min={from || undefined}
+                  onChange={(next) => {
+                    setTo(next);
                     setMonth("");
                   }}
                 />

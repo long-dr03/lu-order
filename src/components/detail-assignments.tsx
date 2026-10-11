@@ -77,14 +77,14 @@ export function AssignmentForm({
     );
   return (
     <div className="stack">
-      <p>
+      <p className="desktop-hint">
         Chọn nhiều thợ cho công đoạn hoặc phần việc. Phân công không tự tạo sản
         lượng hay tiền công.
       </p>
       <ErrorNotice error={error} />
       {!!unassigned.length && order.status !== "completed" && (
         <div className="entry-guidance">
-          <p>
+          <p className="desktop-hint">
             Chưa có thợ: {unassigned.map((t) => t.label).join(", ")}. Phân công
             nhanh giao mọi thợ đang làm của từng bộ phận; phần đã phân công giữ
             nguyên, có thể bỏ bớt người sau.

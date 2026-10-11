@@ -442,7 +442,7 @@ async function main() {
   await openTab(page, "Ghi sản lượng");
   await until("worker tiles", () => page.$(".rate-stage-card"));
   await touch(page, ".rate-stage-card");
-  await touch(page, "button", "Điền tối đa còn lại");
+  await touch(page, "button", "Điền tối đa");
   await shot("cutting-filled");
   const blocked = await alerts(page);
   const submit = await until("submit button", () =>

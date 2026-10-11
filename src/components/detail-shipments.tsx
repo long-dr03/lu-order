@@ -14,6 +14,7 @@ import {
   keyFor,
   localDateTime,
 } from "./order-detail-shared";
+import { DateInput } from "./DateInput";
 
 export function ShipmentPanel({
   order,
@@ -53,7 +54,7 @@ export function ShipmentPanel({
   });
   return (
     <div className="stack">
-      <p>
+      <p className="desktop-hint">
         Một đợt gồm nhiều màu–size. Có thể giao phần đã đóng gói trong khi phần
         còn lại tiếp tục sản xuất.
       </p>
@@ -107,23 +108,14 @@ export function ShipmentPanel({
                 ))}
               </select>
             </Field>
-            <Field label="Ngày giờ giao thực tế (Việt Nam)">
-              <div className="inline-actions">
-                <input
-                  name="datetime"
-                  type="datetime-local"
-                  required
-                  value={when}
-                  onChange={(e) => setWhen(e.target.value)}
-                />
-                <Action
-                  type="button"
-                  tone="secondary"
-                  onClick={() => setWhen(localDateTime())}
-                >
-                  Bây giờ
-                </Action>
-              </div>
+            <Field label="Ngày giờ giao thực tế">
+              <DateInput
+                name="datetime"
+                mode="datetime"
+                required
+                value={when}
+                onChange={setWhen}
+              />
             </Field>
             <Field label="Số kiện đợt này">
               <input

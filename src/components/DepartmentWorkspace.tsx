@@ -58,6 +58,7 @@ import {
   useDetail,
   workStages,
 } from "./order-detail-shared";
+import { DateInput } from "./DateInput";
 
 /** Tabs and panels that are not the default view load on first use, so opening an order stays fast. */
 function Suspended<P extends object>(
@@ -172,6 +173,7 @@ export function ProductionForm({
   const [busy, setBusy] = useState(false);
   const [date, setDate] = useState(day());
   const [editDate, setEditDate] = useState(false);
+  const [incident, setIncident] = useState(false);
   const embedded = !!initialOrderId && orders.length === 1;
   const qty = (worker: string, key: string) => byWorker[worker]?.[key] || 0;
   const workerTotal = (worker: string) =>
@@ -278,6 +280,7 @@ export function ProductionForm({
           );
           setByWorker({});
           setEditDate(false);
+          setIncident(false);
           setDate(day());
           await onSaved(
             result.pay_status === "pending"
@@ -377,7 +380,7 @@ export function ProductionForm({
               </button>
             ))}
           </div>
-          <small>
+          <small className="desktop-hint">
             Chọn thợ rồi nhập số; chọn thợ khác để nhập tiếp. Một lần lưu ghi
             nhận cho tất cả thợ, mỗi thợ nhận công riêng.
           </small>
@@ -395,36 +398,35 @@ export function ProductionForm({
         </div>
       )}
       {stage === "Cắt" && (
-        <p className="muted">
-          Được nhập cắt dư so với đơn (tối đa +
-          {detail?.policy?.overcut_percent ?? 10}
-          %).{" "}
+        <p className="muted desktop-hint">
+          Được cắt dư tối đa +{detail?.policy?.overcut_percent ?? 10}%
           {detail?.policy?.overcut_paid === false
-            ? "Phần dư không tính công cắt. "
-            : "Phần dư vẫn tính công cắt. "}
-          May và các bước sau vẫn chỉ tính theo số lượng đặt.
+            ? ", phần dư không tính công."
+            : ", phần dư vẫn tính công."}
         </p>
       )}
-      <div className="panel-toolbar">
+      <div className="fill-row">
         <strong>
-          {departmentName(departmentFor(stage))} · Nhập nhiều màu và size
+          Số lượng theo màu / size
           {people.length > 1 &&
-            ` cho ${people.find((p) => p.id === person)?.name || ""}`}
+            ` · ${people.find((p) => p.id === person)?.name || ""}`}
         </strong>
-        <Action
-          type="button"
-          tone="secondary"
-          onClick={() =>
-            setAmounts(
-              Object.fromEntries(rows.map((v) => [keyFor(v), v.remaining])),
-            )
-          }
-        >
-          Điền tối đa còn lại
-        </Action>
-        <Action type="button" tone="secondary" onClick={() => setAmounts({})}>
-          Xóa số đã nhập
-        </Action>
+        <div className="fill-actions">
+          <Action
+            type="button"
+            tone="secondary"
+            onClick={() =>
+              setAmounts(
+                Object.fromEntries(rows.map((v) => [keyFor(v), v.remaining])),
+              )
+            }
+          >
+            Điền tối đa
+          </Action>
+          <Action type="button" tone="secondary" onClick={() => setAmounts({})}>
+            Xóa số
+          </Action>
+        </div>
       </div>
       <QuantityGrid rows={rows} amounts={amounts} onChange={setAmounts} />
       {canSeePrice && (
@@ -442,14 +444,14 @@ export function ProductionForm({
       <div className="field">
         <span>Ngày làm việc</span>
         {editDate ? (
-          <input
+          <DateInput
             name="date"
-            type="date"
+            label="Ngày làm việc"
             required
             max={day()}
             min={detail?.order_date}
             value={date}
-            onChange={(e) => setDate(e.target.value)}
+            onChange={setDate}
           />
         ) : (
           <div className="inline-actions">
@@ -465,16 +467,20 @@ export function ProductionForm({
         )}
       </div>
       <label className="check-label">
-        <input type="checkbox" name="incident" />
+        <input
+          type="checkbox"
+          name="incident"
+          checked={incident}
+          onChange={(e) => setIncident(e.target.checked)}
+        />
         Có sự cố cần giải trình
       </label>
-      <Field
-        label="Nguyên nhân / ghi chú sự cố"
-        hint="Bắt buộc nếu đánh dấu sự cố. Nhập từng phần bình thường không phải là sự cố."
-      >
-        <textarea name="reason" maxLength={2000} />
-      </Field>
-      <p className="muted">
+      {incident && (
+        <Field label="Nguyên nhân sự cố">
+          <textarea name="reason" maxLength={2000} required />
+        </Field>
+      )}
+      <p className="muted desktop-hint">
         Bạn ({session.user.name}) nhập thay cho thợ; thợ không cần đăng nhập.
       </p>
       <div className="modal-footer">
@@ -498,6 +504,7 @@ export function OrderDetail({
   api,
   employees,
   onChanged,
+  initialTab,
 }: {
   order: Order;
   session: SessionInfo;
@@ -505,6 +512,8 @@ export function OrderDetail({
   employees: Employee[];
   lines: Line[];
   onChanged: () => Promise<void>;
+  /** Tab to land on when the caller already knows what the person came to do. */
+  initialTab?: string;
 }) {
   const order = raw as Detail;
   const firstTab =
@@ -527,7 +536,7 @@ export function OrderDetail({
                   )
                 ? "work"
                 : "progress";
-  const [tab, setTab] = useState(firstTab);
+  const [tabValue, setTab] = useState(initialTab || firstTab);
   const [photos, setPhotos] = useState<PhotoDraft[]>(() =>
     photoDraftsFrom(order.photos, order.image_url),
   );
@@ -595,6 +604,7 @@ export function OrderDetail({
       (t) =>
         t.id !== "qc" || permits(session.user, "qc.manage", { stage: "QC" }),
     );
+  const tab = allTabs.some((t) => t.id === tabValue) ? tabValue : firstTab;
   // The tab a person works in most comes first, so it is the first thing they see.
   const tabs = [
     ...allTabs.filter((t) => t.id === firstTab),
@@ -689,8 +699,8 @@ export function OrderDetail({
             ))}
           </div>
           <p className="muted desktop-hint">
-            Các bộ phận xử lý song song theo lượng thực tế. Vị trí Kanban không
-            thay thế số lượng đã làm.
+            Các bộ phận xử lý song song theo lượng thực tế. Vị trí trên bảng
+            không thay thế số lượng đã làm.
           </p>
           <StageTimeline order={order} />
           <VariantTable
@@ -939,8 +949,7 @@ export function OrderDetail({
             />
           </Field>
           <Field label="Hạn giao">
-            <input
-              type="date"
+            <DateInput
               name="deadline"
               required
               defaultValue={order.deadline}
@@ -1443,6 +1452,14 @@ const ACTION_BY_DEPARTMENT: Record<string, string> = {
   quality: "Kiểm hàng",
   delivery: "Ghi giao hàng",
 };
+// The order detail tab where each department does that work.
+const TAB_BY_DEPARTMENT: Record<string, string> = {
+  cutting: "work",
+  sewing: "work",
+  packing: "work",
+  quality: "qc",
+  delivery: "shipments",
+};
 
 const daysLeft = (deadline: string) =>
   Math.round((Date.parse(deadline) - Date.parse(day())) / 86400000);
@@ -1455,7 +1472,7 @@ export function DepartmentsPanel({
 }: {
   orders: Order[];
   session: SessionInfo;
-  onOpen: (id: string) => void;
+  onOpen: (id: string, tab?: string) => void;
   initialDepartment?: DepartmentId;
 }) {
   const [department, setDepartment] = useState(
@@ -1491,7 +1508,7 @@ export function DepartmentsPanel({
   return (
     <section className="panel department-panel">
       <div className="panel-toolbar">
-        <Field label="Bộ phận">
+        <Field label="Chọn bộ phận" className="field-strong">
           <select
             value={department}
             onChange={(e) => {
@@ -1567,7 +1584,9 @@ export function DepartmentsPanel({
                   <td data-label="Thao tác">
                     <Action
                       tone={w.todo > 0 ? "primary" : "secondary"}
-                      onClick={() => onOpen(o.id)}
+                      onClick={() =>
+                        onOpen(o.id, TAB_BY_DEPARTMENT[department])
+                      }
                     >
                       <ClipboardList size={18} />
                       {action}

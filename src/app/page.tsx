@@ -1,6 +1,5 @@
 "use client";
 import {
-  ProductionForm,
   OrderDetail,
   DepartmentsPanel,
   StaffPanel,
@@ -21,7 +20,6 @@ import {
   DatabaseBackup,
   Menu,
   X,
-  Plus,
   RefreshCw,
   LogOut,
   UserRound,
@@ -154,8 +152,7 @@ export default function Page() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [create, setCreate] = useState(false);
-  const [production, setProduction] = useState(false);
-  const [productionOrder, setProductionOrder] = useState("");
+  const [selectedTab, setSelectedTab] = useState<string>();
   const [selected, setSelected] = useState<Order | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [adminMode, setAdminMode] = useState<"users" | "roles">("users");
@@ -165,7 +162,6 @@ export default function Page() {
     setData(null);
     setSelected(null);
     setCreate(false);
-    setProduction(false);
     setAccountOpen(false);
   }, []);
   const api = useMemo(
@@ -255,20 +251,13 @@ export default function Page() {
       )
     : [];
   const active = tabs.find((n) => n.id === tab) || tabs[0];
-  const quickProduction =
-    !!session &&
-    ["overview", "orders", "lines", "production", "payroll"].includes(
-      active?.id || "",
-    ) &&
-    ["Cắt", "May", "Sửa hàng", "Đóng gói"].some((stage) =>
-      permits(session.user, "production.create", { stage }),
-    );
-
   // Stable callbacks: the order list is memoised and must not re-render when a detail dialog opens.
   const openOrder = useCallback(
-    async (order: Order) => {
+    async (order: Order, tab?: string) => {
       try {
-        setSelected(await api<Order>(`/api/orders/${order.id}`));
+        const detail = await api<Order>(`/api/orders/${order.id}`);
+        setSelectedTab(tab);
+        setSelected(detail);
       } catch (e) {
         setError(message(e));
       }
@@ -429,9 +418,9 @@ export default function Page() {
       <DepartmentsPanel
         session={session}
         orders={data?.orders || []}
-        onOpen={(id) => {
+        onOpen={(id, tab) => {
           const order = data?.orders.find((o) => o.id === id);
-          if (order) void openOrder(order);
+          if (order) void openOrder(order, tab);
         }}
       />
     ) : active?.id === "production" || active?.id === "payroll" ? (
@@ -530,9 +519,7 @@ export default function Page() {
   }
   return (
     <MotionConfig reducedMotion="user">
-      <div
-        className={`app-shell${quickProduction ? " quick-production-enabled" : ""}`}
-      >
+      <div className="app-shell">
         <aside className="sidebar">
           <Logo />
           <nav aria-label="Điều hướng chính">{renderNavigation(false)}</nav>
@@ -595,9 +582,7 @@ export default function Page() {
               </Action>
             </div>
           )}
-          <main
-            className={quickProduction ? "with-production-shortcut" : undefined}
-          >
+          <main>
             <div className="page-heading">
               <div>
                 <h1>{title}</h1>
@@ -639,20 +624,6 @@ export default function Page() {
             </AnimatePresence>
           </main>
         </div>
-        {quickProduction && !sidebar && (
-          <Action
-            className="production-shortcut"
-            type="button"
-            aria-haspopup="dialog"
-            onClick={() => {
-              setProductionOrder("");
-              setProduction(true);
-            }}
-          >
-            <Plus size={20} aria-hidden="true" />
-            Nhập sản lượng
-          </Action>
-        )}
         <AnimatePresence>
           {notice && (
             <motion.div
@@ -693,32 +664,6 @@ export default function Page() {
           )}
         </Modal>
         <Modal
-          open={production}
-          onClose={() => setProduction(false)}
-          title="Nhập sản lượng"
-          description="Ghi nhận số lượng hoàn thành để tính tiền công."
-          wide
-        >
-          {data ? (
-            <ProductionForm
-              api={api}
-              onAssign={async (id) => {
-                setProduction(false);
-                const order = data.orders.find((o) => o.id === id);
-                if (order) await openOrder(order);
-              }}
-              initialOrderId={productionOrder}
-              orders={data.orders}
-              employees={data.employees}
-              rates={rates}
-              session={session}
-              onSaved={(notice) => saved(() => setProduction(false), notice)}
-            />
-          ) : (
-            <Empty>Chưa có dữ liệu nhập sản lượng.</Empty>
-          )}
-        </Modal>
-        <Modal
           open={!!selected}
           onClose={() => setSelected(null)}
           title={`Chi tiết đơn ${selected?.id || ""}`}
@@ -730,6 +675,7 @@ export default function Page() {
               <OrderDetail
                 key={selected.id}
                 order={selected}
+                initialTab={selectedTab}
                 session={session}
                 api={api}
                 lines={data?.lines || []}

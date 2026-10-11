@@ -24,6 +24,7 @@ import {
   uploadProductImage,
 } from "./ProductImage";
 import { Detail } from "./order-detail-shared";
+import { DateInput } from "./DateInput";
 
 export const PREPARATION_CHECKS = [
   { key: "kiem_npl", stage: "Kiểm NPL/Vải" },
@@ -1629,12 +1630,7 @@ export function PreparationCard({
                 </>
               )}
               <Field label="Ngày kiểm">
-                <input
-                  name="checked_on"
-                  type="date"
-                  defaultValue={day()}
-                  required
-                />
+                <DateInput name="checked_on" defaultValue={day()} required />
               </Field>
             </div>
           </div>

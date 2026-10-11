@@ -6,6 +6,7 @@ import { permits } from "@/lib/permissions";
 import { type Api, money, message, day } from "@/lib/client";
 import { Action, Field, Modal, ErrorNotice } from "./Primitives";
 import { Pagination } from "./Pagination";
+import { DateInput } from "./DateInput";
 export function PendingPackingPanel({
   api,
   session,
@@ -144,9 +145,8 @@ export function PendingPackingPanel({
               {selected.unit_price === null ? "" : money(selected.unit_price)}.
             </p>
             <Field label="Ngày hạch toán vào kỳ lương còn mở">
-              <input
+              <DateInput
                 name="pay_date"
-                type="date"
                 min={selected.work_date}
                 max={day()}
                 required

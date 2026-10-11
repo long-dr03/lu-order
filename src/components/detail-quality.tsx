@@ -7,6 +7,7 @@ import { remainingOperation } from "@/lib/workflow";
 import { Action, Field, ErrorNotice, Empty } from "./Primitives";
 import { ProductImagePicker, uploadProductImage } from "./ProductImage";
 import { Detail, keyFor } from "./order-detail-shared";
+import { DateInput, TimeInput } from "./DateInput";
 
 export function QualityForm({
   order,
@@ -95,7 +96,7 @@ export function QualityForm({
         }
       }}
     >
-      <p>
+      <p className="desktop-hint">
         Người kiểm: <strong>{session.user.name}</strong>. Sửa hàng do thợ may
         thực hiện và được ghi tại “Ghi sản lượng” bởi người phụ trách May; QC
         kiểm lại sau khi sửa.
@@ -116,9 +117,8 @@ export function QualityForm({
           </select>
         </Field>
         <Field label="Ngày kiểm">
-          <input
+          <DateInput
             name="date"
-            type="date"
             required
             max={day()}
             min={order.order_date}
@@ -126,16 +126,7 @@ export function QualityForm({
           />
         </Field>
         <Field label="Giờ kiểm">
-          <input
-            name="time"
-            type="time"
-            required
-            defaultValue={new Intl.DateTimeFormat("en-GB", {
-              timeZone: "Asia/Ho_Chi_Minh",
-              hour: "2-digit",
-              minute: "2-digit",
-            }).format(new Date())}
-          />
+          <TimeInput name="time" />
         </Field>
       </div>
       {rows.map((v) => (

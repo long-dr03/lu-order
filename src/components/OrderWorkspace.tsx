@@ -45,6 +45,7 @@ import {
 } from "@/lib/workflow";
 import { type Api, message, day } from "@/lib/client";
 import { Action, Field, Modal, ErrorNotice, Empty } from "./Primitives";
+import { DateInput } from "./DateInput";
 
 const viewPreference = createViewPreference(() => localStorage);
 function subscribeView(callback: () => void) {
@@ -187,7 +188,6 @@ function OrderWorkspaceView({
     () => "list" as const,
   );
   const setView = saveView;
-  const [exceptionEnabled, setExceptionEnabled] = useState(false);
   const [reason, setReason] = useState("");
   const [columnLimits, setColumnLimits] = useState<Record<string, number>>({});
 
@@ -196,6 +196,7 @@ function OrderWorkspaceView({
     order: Order;
     target: string;
     mode: "line" | "stage";
+    exception: boolean;
   } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -239,13 +240,15 @@ function OrderWorkspaceView({
       return "Khâu chuẩn bị và hoàn thành thuộc Quản lý.";
     const permissionProblem = transitionPermissionProblem(session.user, order);
     if (permissionProblem) return permissionProblem;
-    if (exceptionEnabled) {
-      if (!permits(session.user, "orders.override", { lineId: order.line_id }))
-        return "Bạn không có quyền chuyển bước ngoại lệ.";
-      return exceptionalTransitionProblem(order, target as StageKey);
-    }
-    return transitionProblem(order, target as StageKey);
+    const usual = transitionProblem(order, target as StageKey);
+    // Going back or skipping ahead is open to whoever may override; it only asks for a reason.
+    return usual && outOfOrder(order, target)
+      ? exceptionalTransitionProblem(order, target as StageKey)
+      : usual;
   }
+  const outOfOrder = (order: Order, target: string) =>
+    !!transitionProblem(order, target as StageKey) &&
+    permits(session.user, "orders.override", { lineId: order.line_id });
   function requestMove(order: Order, target: string, mode: "line" | "stage") {
     setError("");
     const issue = problem(order, target, mode);
@@ -254,7 +257,7 @@ function OrderWorkspaceView({
       return;
     }
     setReason("");
-    setMove({ order, target, mode });
+    setMove({ order, target, mode, exception: outOfOrder(order, target) });
   }
   function drop(event: DragEndEvent) {
     if (!event.over) return;
@@ -274,7 +277,7 @@ function OrderWorkspaceView({
         {
           version: move.order.version,
           stage: move.target,
-          ...(exceptionEnabled ? { exception: true, reason } : {}),
+          ...(move.exception ? { exception: true, reason } : {}),
         },
         "PATCH",
       );
@@ -309,7 +312,9 @@ function OrderWorkspaceView({
           {s.label}
           {problem(order, s.key, "stage")
             ? ` — ${problem(order, s.key, "stage")}`
-            : ""}
+            : outOfOrder(order, s.key)
+              ? " · cần ghi lý do"
+              : ""}
         </option>
       ))}
     </select>
@@ -433,30 +438,10 @@ function OrderWorkspaceView({
             onClick={() => setView("board")}
           >
             <Columns3 size={18} />
-            Kanban
+            Bảng theo bước
           </button>
         </div>
       </div>
-      {orders.some((o) =>
-        permits(session.user, "orders.override", { lineId: o.line_id }),
-      ) && (
-        <div className="padded order-exception-toggle">
-          <label className="check-label">
-            <input
-              type="checkbox"
-              checked={exceptionEnabled}
-              onChange={(e) => setExceptionEnabled(e.target.checked)}
-            />{" "}
-            Cho phép quay lại / nhảy bước (ngoại lệ)
-          </label>
-          {exceptionEnabled && (
-            <p className="muted">
-              Bắt buộc ghi lý do; giữ nguyên số lượng và tiền công. Hoàn thành
-              vẫn cần giao đủ.
-            </p>
-          )}
-        </div>
-      )}
       <ErrorNotice error={error} />
       {view === "board" ? (
         <>
@@ -466,7 +451,7 @@ function OrderWorkspaceView({
           {
             <p className="padded muted">
               QC đạt đến đâu được đóng gói đến đó. Các bộ phận ghi số lượng thực
-              tế song song; Kanban là bước điều phối chính.
+              tế song song; bảng này là bước điều phối chính.
             </p>
           }
           <DndContext
@@ -733,8 +718,11 @@ function OrderWorkspaceView({
             Dữ liệu sẽ được kiểm tra lại trước khi lưu. Thao tác được ghi vào
             nhật ký hệ thống.
           </p>
-          {move?.mode === "stage" && exceptionEnabled && (
-            <Field label="Lý do chuyển bước ngoại lệ">
+          {move?.mode === "stage" && move.exception && (
+            <Field
+              label="Lý do quay lại / nhảy bước"
+              hint="Số lượng và tiền công đã ghi được giữ nguyên."
+            >
               <textarea
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
@@ -758,7 +746,7 @@ function OrderWorkspaceView({
               busy={busy}
               disabled={
                 move?.mode === "stage" &&
-                exceptionEnabled &&
+                move.exception &&
                 reason.trim().length < 5
               }
               onClick={confirmMove}
@@ -1038,10 +1026,10 @@ export function CreateOrderForm({
           </select>
         </Field>
         <Field label="Ngày nhận">
-          <input type="date" name="order_date" required defaultValue={day()} />
+          <DateInput name="order_date" required defaultValue={day()} />
         </Field>
         <Field label="Hạn giao">
-          <input type="date" name="deadline" required />
+          <DateInput name="deadline" required />
         </Field>
       </div>
       <Field label="Ưu tiên">

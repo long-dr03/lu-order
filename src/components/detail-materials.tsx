@@ -5,6 +5,7 @@ import { type Api, day, message } from "@/lib/client";
 import { type SessionInfo, permits } from "@/lib/permissions";
 import { Action, Field, ErrorNotice, Empty } from "./Primitives";
 import { Detail, round2 } from "./order-detail-shared";
+import { DateInput } from "./DateInput";
 
 export const MATERIAL_UNITS = ["m", "kg", "cuộn", "cái", "bộ", "hộp"];
 
@@ -48,7 +49,7 @@ export function MaterialsPanel({
   }
   return (
     <div className="stack">
-      <p>
+      <p className="desktop-hint">
         Kiểm NPL/Vải: khai báo vải và phụ liệu cần cho đơn, rồi ghi số nhận về,
         số lỗi, số đã dùng để biết thiếu vải hay lỗi vải khi đơn bị thiếu hàng.
       </p>
@@ -210,9 +211,8 @@ export function MaterialsPanel({
               />
             </Field>
             <Field label="Ngày">
-              <input
+              <DateInput
                 name="date"
-                type="date"
                 required
                 max={day()}
                 min={order.order_date}

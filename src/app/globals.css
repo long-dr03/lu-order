@@ -2964,3 +2964,46 @@ th.sticky-col {
 .rates-row { display: grid; gap: 6px; font-weight: 600; }
 .rates-row small { font-weight: 400; color: var(--muted); }
 .rates-row .money-input { width: 100%; }
+
+/* Vietnamese date / month / time pickers (DateInput.tsx) */
+.date-input { position: relative; width: 100%; min-width: 0; }
+.date-trigger { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid #d4d4d8; border-radius: 8px; background: #fff; color: #27272a; text-align: left; font-weight: 400; }
+.date-trigger span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.date-trigger .date-empty { color: #a1a1aa; }
+.date-trigger svg { color: #71717a; }
+input.date-proxy { position: absolute; left: 0; bottom: 0; width: 100%; height: 1px; min-height: 0; padding: 0; border: 0; opacity: 0; pointer-events: none; }
+.date-popover { position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; width: 304px; max-width: calc(100vw - 32px); display: grid; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: #fff; box-shadow: 0 8px 28px rgb(0 0 0 / 14%); font-weight: 400; color: #27272a; }
+.date-popover.align-right { left: auto; right: 0; }
+.date-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.date-nav button { width: 40px; height: 40px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: inherit; }
+.date-nav button:hover { background: #f4f4f5; }
+.date-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.date-weekday { padding: 4px 0; text-align: center; font-size: 12px; color: var(--muted); }
+.date-grid button { min-height: 38px; border: 0; border-radius: 8px; background: transparent; color: inherit; font-size: 14px; }
+.date-months { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.date-months button { min-height: 44px; border: 0; border-radius: 8px; background: transparent; color: inherit; font-size: 14px; }
+.date-grid button:hover:not(:disabled), .date-months button:hover { background: #f4f4f5; }
+.date-grid button.today, .date-months button.today { box-shadow: inset 0 0 0 1px #a1a1aa; }
+.date-grid button[aria-pressed="true"], .date-months button[aria-pressed="true"] { background: #18181b; color: #fff; }
+.date-time { display: flex; align-items: center; gap: 8px; }
+.date-time svg { color: #71717a; }
+.date-footer { display: flex; flex-wrap: wrap; gap: 8px; }
+.date-footer button { min-height: 40px; padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: inherit; font-weight: 500; }
+.date-footer button.primary { margin-left: auto; border-color: #18181b; background: #18181b; color: #fff; }
+.time-input { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.panel:has(.date-popover) { overflow: visible; }
+@media (max-width: 767px) {
+  /* In the flow of the form: nothing can clip it and the days stay thumb-sized. */
+  .date-popover { position: static; width: 100%; max-width: none; margin-top: 6px; box-shadow: none; }
+  .field:has(.date-popover) { grid-column: 1 / -1; }
+}
+
+.field-strong > span { font-size: 15px; font-weight: 700; color: #18181b; }
+.fill-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding-top: 4px; }
+.fill-actions { display: flex; gap: 8px; }
+.fill-actions .action { min-height: 40px; padding: 8px 14px; white-space: nowrap; }
+@media (max-width: 767px) {
+  .fill-row { display: grid; }
+  .fill-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.fill-actions .action { width: 100%; }
