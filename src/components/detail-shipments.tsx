@@ -56,10 +56,6 @@ export function ShipmentPanel({
   });
   return (
     <div className="stack">
-      <p className="desktop-hint">
-        Một đợt gồm nhiều màu–size. Có thể giao phần đã đóng gói trong khi phần
-        còn lại tiếp tục sản xuất.
-      </p>
       <ErrorNotice error={error} />
       {canWrite && (
         <form

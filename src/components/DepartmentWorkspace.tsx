@@ -582,10 +582,6 @@ export function ProductionForm({
               )}
             </div>
           )}
-          <small className="desktop-hint">
-            Chọn thợ rồi nhập số; chọn thợ khác để nhập tiếp. Một lần lưu ghi
-            nhận cho tất cả thợ, mỗi thợ nhận công riêng.
-          </small>
         </div>
       )}
       {problem && (
@@ -696,9 +692,6 @@ export function ProductionForm({
           <textarea name="reason" maxLength={2000} required />
         </Field>
       )}
-      <p className="muted desktop-hint">
-        Bạn ({session.user.name}) nhập thay cho thợ; thợ không cần đăng nhập.
-      </p>
       <div className="modal-footer">
         <strong>
           {total === 0
@@ -1407,9 +1400,8 @@ function PrepareCallout({
         </>
       ) : (
         <p>
-          <strong>{name} đã đạt.</strong> Ghi kết quả không tự chuyển bước (có
-          thể cần kiểm thêm lượt khác). Khi đã sẵn sàng cắt, bấm nút dưới đây —
-          đơn đang ở bước {here}.
+          <strong>{name} đã đạt.</strong> Khi sẵn sàng cắt, bấm nút dưới đây để
+          chuyển đơn sang Cắt.
         </p>
       )}
       <Action
@@ -1587,10 +1579,6 @@ function StageTimeline({ order }: { order: Detail }) {
   });
   return (
     <div className="stack">
-      <p className="muted">
-        Tiến trình theo công đoạn; các bộ phận làm song song theo số lượng thực
-        tế.
-      </p>
       <div className="table-scroll">
         <table>
           <thead>
@@ -1938,10 +1926,6 @@ export function StaffPanel({
         </Action>
       </div>
       <ErrorNotice error={error} />
-      <p className="padded muted">
-        Thợ không cần tài khoản. Hồ sơ chưa phân loại phải được Admin gán bộ
-        phận trước khi phân công.
-      </p>
       <div className="table-scroll">
         <table>
           <thead>

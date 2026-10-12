@@ -448,12 +448,6 @@ function OrderWorkspaceView({
           <div className="board-heading">
             <span>Kéo tay nắm để chuyển đơn, hoặc dùng “Chuyển đến…”</span>
           </div>
-          {
-            <p className="padded muted">
-              QC đạt đến đâu được đóng gói đến đó. Các bộ phận ghi số lượng thực
-              tế song song; bảng này là bước điều phối chính.
-            </p>
-          }
           <DndContext
             sensors={sensors}
             onDragEnd={drop}
@@ -714,10 +708,6 @@ function OrderWorkspaceView({
         }
       >
         <div className="stack">
-          <p>
-            Dữ liệu sẽ được kiểm tra lại trước khi lưu. Thao tác được ghi vào
-            nhật ký hệ thống.
-          </p>
           {move?.mode === "stage" && move.exception && (
             <Field
               label="Lý do quay lại / nhảy bước"

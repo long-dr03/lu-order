@@ -96,10 +96,8 @@ export function QualityForm({
         }
       }}
     >
-      <p className="desktop-hint">
-        Người kiểm: <strong>{session.user.name}</strong>. Sửa hàng do thợ may
-        thực hiện và được ghi tại “Ghi sản lượng” bởi người phụ trách May; QC
-        kiểm lại sau khi sửa.
+      <p className="muted">
+        Người kiểm: <strong>{session.user.name}</strong>
       </p>
       <ErrorNotice error={error} />
       <div className="form-grid">

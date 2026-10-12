@@ -114,10 +114,6 @@ export function AssignmentForm({
   }
   return (
     <div className="stack assignments">
-      <p className="desktop-hint">
-        Chạm vào công đoạn để chọn thợ. Phân công không tự tạo sản lượng hay
-        tiền công.
-      </p>
       {!openKey && <ErrorNotice error={error} />}
       {!!empty.length && order.status !== "completed" && (
         <Action

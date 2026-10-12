@@ -177,11 +177,11 @@ export function RecordsPanel({
     <section className="records-workspace">
       <div className="records-actions">
         <div>
-          <p className="muted">
-            {mode === "payroll" && payroll?.isLocked
-              ? `Đã chốt bởi ${payroll.lockedBy} · ${payroll.lockedAt}`
-              : "Dữ liệu theo quyền và phạm vi của bạn"}
-          </p>
+          {mode === "payroll" && payroll?.isLocked && (
+            <p className="muted">
+              Đã chốt bởi {payroll.lockedBy} · {payroll.lockedAt}
+            </p>
+          )}
         </div>
         <div className="inline-actions">
           {hasPermission(session.user, "export.data") && (

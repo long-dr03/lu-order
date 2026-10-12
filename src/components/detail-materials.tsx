@@ -49,10 +49,6 @@ export function MaterialsPanel({
   }
   return (
     <div className="stack">
-      <p className="desktop-hint">
-        Kiểm NPL/Vải: khai báo vải và phụ liệu cần cho đơn, rồi ghi số nhận về,
-        số lỗi, số đã dùng để biết thiếu vải hay lỗi vải khi đơn bị thiếu hàng.
-      </p>
       <ErrorNotice error={error} />
       <div className="table-scroll">
         <table>

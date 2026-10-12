@@ -156,10 +156,6 @@ export function PreparationCheck({
   const check = PREPARATION_CHECKS.find((c) => c.stage === stage)!;
   return (
     <section className="prep-checks">
-      <p className="muted desktop-hint">
-        Ghi kết quả kiểm để giữ lịch sử. Kết quả không chặn việc cắt; quản lý
-        vẫn bấm Hoàn tất chuẩn bị khi sẵn sàng.
-      </p>
       {check.key === "kiem_rap" && (
         <PatternSpecSheet
           order={order}
