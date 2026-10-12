@@ -4,7 +4,6 @@ import { type Api, message, money } from "@/lib/client";
 import { type SessionInfo, permits } from "@/lib/permissions";
 import type { Rate } from "@/lib/server/business";
 import { Action, ErrorNotice } from "./Primitives";
-import { MoneyInput } from "./SmartInputs";
 import type { Detail } from "./order-detail-shared";
 
 const PAY_STAGES = ["Cắt", "May", "QC", "Sửa hàng", "Đóng gói"] as const;
@@ -74,7 +73,7 @@ export function RatesSetup({
     permits(session.user, "rates.manage", { stage: s }),
   );
   const [draft, setDraft] = useState<Record<string, number>>({});
-  const [fill, setFill] = useState(0);
+  const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
@@ -90,6 +89,7 @@ export function RatesSetup({
         (r) => r.order_id !== order.id && r.stage === stage && !r.work_item_id,
       )?.unit_price;
   const shown = (stage: string) => draft[stage] ?? current(stage);
+  const priceable = stages.filter((s) => !split(s));
   const missing = stages.filter((s) => !split(s) && !rates.priced(s));
   if (!rates.ready || !stages.length) return null;
   const pending = Object.entries(draft).filter(
@@ -110,70 +110,116 @@ export function RatesSetup({
           unit_price: price,
         });
       setDraft({});
+      setEditing(false);
       await rates.reload();
       await onChanged();
-      setSaved("Đã lưu đơn giá.");
+      setSaved("Đã lưu.");
     } catch (e) {
       setError(message(e));
     } finally {
       setBusy(false);
     }
   }
+  // Once every stage has a price the section folds into one line; it opens again to change one.
+  if (!missing.length && !editing)
+    return (
+      <section className="rates-setup done" aria-label="Đơn giá công đoạn">
+        <div className="rates-head">
+          <h3>Đơn giá công đoạn</h3>
+          <button
+            type="button"
+            className="rates-link"
+            onClick={() => {
+              setSaved("");
+              setEditing(true);
+            }}
+          >
+            Sửa
+          </button>
+        </div>
+        <p className="rates-summary">
+          {stages.map((stage) => (
+            <span key={stage}>
+              {stage}{" "}
+              <strong>
+                {split(stage) ? "theo phần việc" : money(current(stage) ?? 0)}
+              </strong>
+            </span>
+          ))}
+          {saved && <em>{saved}</em>}
+        </p>
+      </section>
+    );
   return (
     <section className="rates-setup" aria-label="Đơn giá công đoạn">
-      <h3>Đơn giá công đoạn</h3>
-      <p className="muted desktop-hint">
-        Chốt đơn giá trước khi sản xuất; khi ghi sản lượng hệ thống tự lấy giá
-        này để tính công.
-      </p>
+      <div className="rates-head">
+        <h3>
+          Đơn giá công đoạn <small>đ / sản phẩm</small>
+        </h3>
+        {copyable && (
+          <button
+            type="button"
+            className="rates-link"
+            onClick={() =>
+              setDraft((d) => ({
+                ...Object.fromEntries(
+                  priceable
+                    .filter((s) => !rates.priced(s))
+                    .flatMap((s) =>
+                      previous(s) === undefined ? [] : [[s, previous(s)!]],
+                    ),
+                ),
+                ...d,
+              }))
+            }
+          >
+            Lấy giá đơn trước
+          </button>
+        )}
+      </div>
       <ErrorNotice error={error} />
-      {copyable && (
-        <Action
-          type="button"
-          tone="secondary"
-          onClick={() => {
-            setDraft((d) => ({
-              ...Object.fromEntries(
-                stages
-                  .filter((s) => !split(s) && !rates.priced(s))
-                  .flatMap((s) =>
-                    previous(s) === undefined ? [] : [[s, previous(s)!]],
-                  ),
-              ),
-              ...d,
-            }));
-            setFill((n) => n + 1);
-          }}
-        >
-          Điền theo đơn trước
-        </Action>
-      )}
       <div className="rates-grid">
         {stages.map((stage) => (
-          <label key={`${stage}-${fill}`} className="rates-row">
-            <span>
-              {stage}
-              {split(stage) && (
-                <small> · chia phần việc, đặt giá ở trang Đơn giá</small>
-              )}
-            </span>
+          <label key={stage} className="rates-cell">
+            <span>{stage}</span>
             {split(stage) ? (
-              <strong>Theo phần việc</strong>
+              <em>Theo phần việc</em>
             ) : (
-              <MoneyInput
-                aria-label={`Đơn giá ${stage}`}
-                placeholder="đ / sản phẩm"
-                defaultValue={shown(stage) ?? ""}
-                onValueChange={(v) => setDraft((d) => ({ ...d, [stage]: v }))}
+              <PriceInput
+                label={`Đơn giá ${stage}`}
+                value={shown(stage)}
+                missing={!rates.priced(stage) && draft[stage] === undefined}
+                onChange={(v) =>
+                  setDraft((d) => {
+                    const next = { ...d };
+                    if (v === undefined) delete next[stage];
+                    else next[stage] = v;
+                    return next;
+                  })
+                }
               />
-            )}
-            {!split(stage) && current(stage) !== undefined && (
-              <small>Đang áp dụng: {money(current(stage)!)}</small>
             )}
           </label>
         ))}
       </div>
-      <div className="inline-actions">
+      <div className="rates-foot">
+        {!!missing.length && (
+          <span className="muted">
+            Còn {missing.length} công đoạn chưa có giá
+          </span>
+        )}
+        {editing && (
+          <button
+            type="button"
+            className="rates-link"
+            onClick={() => {
+              setDraft({});
+              setEditing(false);
+            }}
+          >
+            Hủy
+          </button>
+        )}
         <Action
           type="button"
           busy={busy}
@@ -182,11 +228,36 @@ export function RatesSetup({
         >
           Lưu đơn giá
         </Action>
-        {saved && <span className="muted">{saved}</span>}
-        {!!missing.length && !saved && (
-          <span className="muted">Chưa có giá: {missing.join(", ")}</span>
-        )}
       </div>
     </section>
+  );
+}
+
+/** Whole đồng with a dot every three digits and the unit inside the field. */
+function PriceInput({
+  label,
+  value,
+  missing,
+  onChange,
+}: {
+  label: string;
+  value: number | undefined;
+  missing: boolean;
+  onChange: (value: number | undefined) => void;
+}) {
+  return (
+    <span className={`price-input${missing ? " missing" : ""}`}>
+      <input
+        aria-label={label}
+        inputMode="numeric"
+        placeholder="Chưa có"
+        value={value === undefined ? "" : value.toLocaleString("vi-VN")}
+        onChange={(e) => {
+          const digits = e.target.value.replace(/\D/g, "").slice(0, 12);
+          onChange(digits ? Number(digits) : undefined);
+        }}
+      />
+      <span aria-hidden="true">đ</span>
+    </span>
   );
 }

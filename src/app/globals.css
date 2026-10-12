@@ -2958,12 +2958,31 @@ th.sticky-col {
   .desktop-hint { display: none; }
 }
 
-.rates-setup { display: grid; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
-.rates-setup h3 { margin: 0; }
-.rates-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-.rates-row { display: grid; gap: 6px; font-weight: 600; }
-.rates-row small { font-weight: 400; color: var(--muted); }
-.rates-row .money-input { width: 100%; }
+.rates-setup { display: grid; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+.rates-setup.done { gap: 6px; padding-block: 10px; }
+.rates-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.rates-head h3 { margin: 0; font-size: 16px; }
+.rates-head h3 small { margin-left: 6px; font-size: 13px; font-weight: 400; color: var(--muted); }
+.rates-link { padding: 4px 0; border: 0; background: none; color: #3f3f46; font-size: 14px; font-weight: 500; text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; }
+.rates-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); }
+.rates-cell { display: grid; gap: 5px; min-width: 0; font-size: 14px; font-weight: 600; }
+.rates-cell em { display: flex; align-items: center; min-height: 44px; font-style: normal; font-weight: 400; color: var(--muted); }
+.price-input { display: flex; align-items: center; min-height: 44px; border: 1px solid #d4d4d8; border-radius: 8px; background: #fff; }
+.price-input:focus-within { outline: 2px solid #71717a; outline-offset: 2px; }
+.price-input.missing { border-color: #f59e0b; background: #fffbeb; }
+.price-input input { flex: 1; min-width: 0; min-height: 42px; padding: 8px 4px 8px 12px; border: 0; background: transparent; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.price-input input:focus-visible { outline: none; }
+.price-input input::placeholder { font-weight: 400; }
+.price-input > span { padding: 0 12px 0 2px; color: var(--muted); font-weight: 400; }
+.rates-foot { display: flex; align-items: center; justify-content: flex-end; gap: 14px; }
+.rates-foot .muted { margin-right: auto; font-size: 14px; }
+.rates-foot .action { min-height: 40px; padding: 8px 18px; }
+.rates-summary { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; font-size: 14px; color: var(--muted); }
+.rates-summary strong { color: #18181b; font-variant-numeric: tabular-nums; }
+.rates-summary em { font-style: normal; color: #15803d; }
+@media (max-width: 767px) {
+  .rates-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 /* Vietnamese date / month / time pickers (DateInput.tsx) */
 .date-input { position: relative; width: 100%; min-width: 0; }

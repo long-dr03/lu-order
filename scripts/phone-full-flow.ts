@@ -413,7 +413,8 @@ async function main() {
   );
   await shot("rates-setup");
   await touch(page, ".rates-setup button", "Lưu đơn giá");
-  await until("rate saved", () => locate(page, ".rates-setup", "Đang áp dụng"));
+  // Saved when nothing is left to save: the button goes back to disabled.
+  await until("rate saved", () => page.$(".rates-foot .action:disabled"));
   record("Set the Cắt rate on the Tiến độ tab", true, "");
   await openTab(page, "Kiểm rập");
   const offered = await locate(
