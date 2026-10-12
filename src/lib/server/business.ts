@@ -888,10 +888,15 @@ export async function moveOrder(
         ? null
         : o.responsible_id || null
       : input.responsible_id;
+  // Only a newly chosen coordinator must be in Management. One picked earlier may have moved
+  // department since; that must not block every later change to the order (stage moves included).
+  const kept = responsible === (o.responsible_id || null);
   const person = responsible
     ? ((await db
         .prepare(
-          "SELECT e.name FROM employees e JOIN employee_departments d ON d.employee_id=e.id WHERE e.id=? AND d.department_id='management'",
+          kept
+            ? "SELECT name FROM employees WHERE id=?"
+            : "SELECT e.name FROM employees e JOIN employee_departments d ON d.employee_id=e.id WHERE e.id=? AND d.department_id='management'",
         )
         .get(responsible)) as { name: string } | undefined)
     : undefined;

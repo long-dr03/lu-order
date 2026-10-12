@@ -2553,6 +2553,42 @@ test("Several workers save in one atomic entry, each with own logs and wages", a
     { [a]: [10, 10000], [b]: [10, 10000] },
   );
 });
+test("A coordinator who has since left Management does not block later changes to the order", async () => {
+  const id = await order(
+    [{ color: "Đen", size: "M", quantity: 5 }],
+    "nhan_don",
+  );
+  const outsider = (
+    (await db
+      .prepare(
+        "SELECT employee_id FROM employee_departments WHERE department_id='cutting' AND employee_id NOT IN (SELECT employee_id FROM employee_departments WHERE department_id='management') LIMIT 1",
+      )
+      .get()) as { employee_id: string }
+  ).employee_id;
+  const patch = async (input: Record<string, unknown>) =>
+    detailApi.PATCH(
+      req(
+        `/api/orders/${id}`,
+        "management",
+        { version: (await current(id)).version, ...input },
+        { method: "PATCH" },
+      ),
+      params("id", id),
+    );
+  assert.equal(
+    (await patch({ responsible_id: outsider })).status,
+    422,
+    "a new coordinator must be in Management",
+  );
+  // Picked while in Management, moved to another department afterwards.
+  await db
+    .prepare("UPDATE orders SET responsible_id=? WHERE id=?")
+    .run(outsider, id);
+  await result(await patch({ stage: "kiem_npl" }));
+  const moved = await current(id);
+  assert.equal(moved.current_stage, "kiem_npl");
+  assert.equal(moved.responsible_id, outsider);
+});
 test("Management prepares an order in one step and keeps every stage transition", async () => {
   const id = await order(
     [{ color: "Đen", size: "M", quantity: 5 }],
