@@ -1,14 +1,20 @@
 "use client";
 import { useState } from "react";
-import { Users } from "lucide-react";
+import { ChevronDown, Users } from "lucide-react";
 import { type Api, message } from "@/lib/client";
 import { type SessionInfo, permits } from "@/lib/permissions";
-import { departmentFor, departmentName } from "@/lib/departments";
+import { departmentFor } from "@/lib/departments";
 import { type Employee } from "@/lib/types";
-import { Action, Field, ErrorNotice, Empty } from "./Primitives";
-import { Pagination } from "./Pagination";
+import { Action, ErrorNotice } from "./Primitives";
 import { Detail, assignmentStages } from "./order-detail-shared";
 
+/** Above this many workers in a department, a search box is worth its space. */
+const SEARCH_FROM = 12;
+
+/**
+ * One row per stage (or work part) showing who is assigned; tapping a row opens it in place
+ * to pick workers. The list is the overview, so there is no separate table to scroll to.
+ */
 export function AssignmentForm({
   order,
   session,
@@ -22,259 +28,196 @@ export function AssignmentForm({
   api: Api;
   onChanged: () => Promise<void>;
 }) {
-  const stages = assignmentStages.filter((s) =>
-    permits(session.user, "production.assign", { stage: s }),
-  );
-  const [stageValue, setStage] = useState(stages[0] || "");
-  const stage = stages.includes(stageValue) ? stageValue : stages[0] || "";
-  const parts = order.work_items?.filter((p) => p.stage === stage) || [];
-  const [partValue, setPart] = useState(0);
-  const part = parts.some((p) => p.id === partValue) ? partValue : parts[0]?.id;
-  const ids =
-    order.assignments
-      ?.filter(
+  const tasks = assignmentStages.flatMap((stage) => {
+    const parts = order.work_items?.filter((p) => p.stage === stage) || [];
+    const editable = permits(session.user, "production.assign", { stage });
+    return (parts.length ? parts : [null]).map((p) => {
+      const part = p?.id || 0;
+      const assigned = (order.assignments || []).filter(
         (a) =>
-          a.active === 1 &&
-          a.stage === stage &&
-          (a.work_item_id || 0) === (part || 0),
-      )
-      .map((a) => a.employee_id) || [];
+          a.active === 1 && a.stage === stage && (a.work_item_id || 0) === part,
+      );
+      return {
+        key: `${stage}:${part}`,
+        stage,
+        part,
+        label: p ? `${stage} · ${p.name}` : stage,
+        editable,
+        ids: assigned.map((a) => a.employee_id),
+        names: assigned.map((a) => a.employee_name),
+        staff: employees.filter(
+          (e) =>
+            e.active !== 0 && e.department_ids?.includes(departmentFor(stage)),
+        ),
+      };
+    });
+  });
+  // Someone who cannot assign a stage still sees who works on it.
+  const shown = tasks.filter((t) => t.editable || t.ids.length);
+  const [openKey, setOpenKey] = useState("");
   const [chosen, setChosen] = useState<string[] | null>(null);
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const people = employees.filter(
-    (e) =>
-      e.active !== 0 &&
-      e.department_ids?.includes(departmentFor(stage)) &&
-      e.name.toLocaleLowerCase("vi").includes(search.toLocaleLowerCase("vi")),
+  const empty = tasks.filter(
+    (t) => t.editable && !t.ids.length && t.staff.length,
   );
-  const [page, setPage] = useState(1);
-  const currentPage = Math.min(
-    page,
-    Math.max(1, Math.ceil(people.length / 20)),
-  );
-  const unassigned = stages
-    .flatMap((st) => {
-      const ps = order.work_items?.filter((p) => p.stage === st) || [];
-      return ps.length
-        ? ps.map((p) => ({ stage: st, part: p.id, label: `${st} · ${p.name}` }))
-        : [{ stage: st, part: 0, label: st }];
-    })
-    .filter(
-      (t) =>
-        !order.assignments?.some(
-          (a) =>
-            a.active === 1 &&
-            a.stage === t.stage &&
-            (a.work_item_id || 0) === t.part,
-        ) &&
-        employees.some(
-          (e) =>
-            e.active !== 0 &&
-            e.department_ids?.includes(departmentFor(t.stage)),
-        ),
-    );
+  const toggle = (key: string) => {
+    setOpenKey(openKey === key ? "" : key);
+    setChosen(null);
+    setSearch("");
+    setError("");
+  };
+  async function send(body: Record<string, unknown>) {
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/api/orders/${encodeURIComponent(order.id)}/assignments`, {
+        version: order.version,
+        ...body,
+      });
+      setChosen(null);
+      await onChanged();
+      return true;
+    } catch (e) {
+      setError(message(e));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
-    <div className="stack">
+    <div className="stack assignments">
       <p className="desktop-hint">
-        Chọn nhiều thợ cho công đoạn hoặc phần việc. Phân công không tự tạo sản
-        lượng hay tiền công.
+        Chạm vào công đoạn để chọn thợ. Phân công không tự tạo sản lượng hay
+        tiền công.
       </p>
-      <ErrorNotice error={error} />
-      {!!unassigned.length && order.status !== "completed" && (
-        <div className="entry-guidance">
-          <p className="desktop-hint">
-            Chưa có thợ: {unassigned.map((t) => t.label).join(", ")}. Phân công
-            nhanh giao mọi thợ đang làm của từng bộ phận; phần đã phân công giữ
-            nguyên, có thể bỏ bớt người sau.
-          </p>
-          <Action
-            type="button"
-            tone="secondary"
-            busy={busy}
-            onClick={async () => {
-              setBusy(true);
-              setError("");
-              try {
-                await api(
-                  `/api/orders/${encodeURIComponent(order.id)}/assignments`,
-                  { version: order.version, quick: true },
-                );
-                setChosen(null);
-                await onChanged();
-              } catch (e) {
-                setError(message(e));
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            <Users size={18} />
-            Phân công nhanh cả bộ phận
-          </Action>
-        </div>
+      {!openKey && <ErrorNotice error={error} />}
+      {!!empty.length && order.status !== "completed" && (
+        <Action
+          type="button"
+          tone="secondary"
+          busy={busy}
+          onClick={() => void send({ quick: true })}
+        >
+          <Users size={18} />
+          Phân công nhanh cả bộ phận
+        </Action>
       )}
-      {!!stages.length && (
-        <>
-          <div className="form-grid">
-            <Field label="Công đoạn">
-              <select
-                value={stage}
-                onChange={(e) => {
-                  setStage(e.target.value);
-                  setPart(0);
-                  setChosen(null);
-                  setPage(1);
-                }}
+      <ul className="assign-list">
+        {shown.map((t) => {
+          const open = openKey === t.key && t.editable;
+          const picked = open ? chosen || t.ids : t.ids;
+          const people = t.staff.filter((e) =>
+            e.name
+              .toLocaleLowerCase("vi")
+              .includes(search.toLocaleLowerCase("vi")),
+          );
+          const changed =
+            open &&
+            !!chosen &&
+            (chosen.length !== t.ids.length ||
+              chosen.some((id) => !t.ids.includes(id)));
+          return (
+            <li key={t.key} className={open ? "open" : undefined}>
+              <button
+                type="button"
+                className="assign-row"
+                aria-expanded={t.editable ? open : undefined}
+                disabled={!t.editable}
+                onClick={() => toggle(t.key)}
               >
-                {stages.map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </select>
-            </Field>
-            {!!parts.length && (
-              <Field label="Phần việc">
-                <select
-                  value={part}
-                  onChange={(e) => {
-                    setPart(Number(e.target.value));
-                    setChosen(null);
-                  }}
-                >
-                  {parts.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            )}
-          </div>
-          <Field
-            label={`Tìm thợ bộ phận ${departmentName(departmentFor(stage))}`}
-          >
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(1);
-              }}
-            />
-          </Field>
-          <fieldset>
-            <legend>Thợ được giao ({(chosen || ids).length})</legend>
-            {people.length > 1 && (
-              <div className="inline-actions">
-                <Action
-                  type="button"
-                  tone="secondary"
-                  onClick={() =>
-                    setChosen([
-                      ...new Set([
-                        ...(chosen || ids),
-                        ...people.map((e) => e.id),
-                      ]),
-                    ])
-                  }
-                >
-                  Chọn tất cả {people.length} thợ
-                </Action>
-                <Action
-                  type="button"
-                  tone="secondary"
-                  onClick={() => setChosen([])}
-                >
-                  Bỏ chọn
-                </Action>
-              </div>
-            )}
-            {people.slice((currentPage - 1) * 20, currentPage * 20).map((e) => (
-              <label className="check-label" key={e.id}>
-                <input
-                  type="checkbox"
-                  checked={(chosen || ids).includes(e.id)}
-                  onChange={(ev) =>
-                    setChosen(
-                      ev.target.checked
-                        ? [...(chosen || ids), e.id]
-                        : (chosen || ids).filter((id) => id !== e.id),
-                    )
-                  }
-                />
-                {e.name}
-              </label>
-            ))}
-            {!people.length && (
-              <Empty>
-                Chưa có thợ đang hoạt động thuộc bộ phận này. Khai báo tại Danh
-                sách thợ.
-              </Empty>
-            )}
-          </fieldset>
-          <Pagination
-            page={currentPage}
-            total={people.length}
-            pageSize={20}
-            onChange={setPage}
-          />
-          <Action
-            busy={busy}
-            onClick={async () => {
-              setBusy(true);
-              setError("");
-              try {
-                await api(
-                  `/api/orders/${encodeURIComponent(order.id)}/assignments`,
-                  {
-                    version: order.version,
-                    stage,
-                    work_item_id: part,
-                    employee_ids: chosen || ids,
-                  },
-                );
-                setChosen(null);
-                await onChanged();
-              } catch (e) {
-                setError(message(e));
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            <Users size={18} />
-            Lưu phân công
-          </Action>
-        </>
-      )}
-      <div className="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Công đoạn</th>
-              <th>Thợ</th>
-              <th>Phân công</th>
-            </tr>
-          </thead>
-          <tbody>
-            {order.assignments
-              ?.filter((a) => a.active === 1)
-              .map((a) => (
-                <tr key={a.id}>
-                  <td>
-                    {a.stage}
-                    {a.work_item_id
-                      ? ` · ${order.work_items?.find((w) => w.id === a.work_item_id)?.name || "Phần việc"}`
-                      : ""}
-                  </td>
-                  <td>{a.employee_name}</td>
-                  <td>{departmentName(a.department_id)}</td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
-      </div>
+                <strong>{t.label}</strong>
+                <span className={t.names.length ? undefined : "assign-none"}>
+                  {t.names.length ? t.names.join(", ") : "Chưa giao"}
+                </span>
+                {t.editable && <ChevronDown size={18} aria-hidden="true" />}
+              </button>
+              {open && (
+                <div className="assign-edit">
+                  <ErrorNotice error={error} />
+                  {t.staff.length >= SEARCH_FROM && (
+                    <input
+                      type="search"
+                      aria-label={`Tìm thợ cho ${t.label}`}
+                      placeholder="Tìm tên thợ…"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                    />
+                  )}
+                  {t.staff.length ? (
+                    <div
+                      className="size-chips"
+                      role="group"
+                      aria-label={`Thợ cho ${t.label}`}
+                    >
+                      {people.map((e) => (
+                        <button
+                          type="button"
+                          key={e.id}
+                          aria-pressed={picked.includes(e.id)}
+                          onClick={() =>
+                            setChosen(
+                              picked.includes(e.id)
+                                ? picked.filter((id) => id !== e.id)
+                                : [...picked, e.id],
+                            )
+                          }
+                        >
+                          {e.name}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="muted">
+                      Bộ phận này chưa có thợ đang làm. Khai báo ở Danh sách
+                      thợ.
+                    </p>
+                  )}
+                  {!!t.staff.length && (
+                    <div className="assign-actions">
+                      {t.staff.length > 1 && (
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() =>
+                            setChosen(
+                              picked.length === t.staff.length
+                                ? []
+                                : t.staff.map((e) => e.id),
+                            )
+                          }
+                        >
+                          {picked.length === t.staff.length
+                            ? "Bỏ chọn hết"
+                            : `Chọn cả ${t.staff.length} thợ`}
+                        </button>
+                      )}
+                      <Action
+                        type="button"
+                        busy={busy}
+                        disabled={!changed}
+                        onClick={async () => {
+                          if (
+                            await send({
+                              stage: t.stage,
+                              work_item_id: t.part || undefined,
+                              employee_ids: picked,
+                            })
+                          )
+                            setOpenKey("");
+                        }}
+                      >
+                        Lưu ({picked.length})
+                      </Action>
+                    </div>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
