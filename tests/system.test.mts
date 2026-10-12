@@ -42,6 +42,7 @@ const ratesApi = await import("../src/app/api/rates/route");
 const shortageApi = await import("../src/app/api/orders/[id]/shortages/route");
 const payrollApi = await import("../src/app/api/payroll/route");
 const exportApi = await import("../src/app/api/export/excel/route");
+const trackingApi = await import("../src/app/api/export/tracking/route");
 const { today } = await import("../src/lib/server/validation");
 const { DEPARTMENTS } = await import("../src/lib/departments");
 const password = "Disposable-Test-Password-42!";
@@ -1255,6 +1256,82 @@ test("Excel round trip preserves literal customer names, shipment totals, time, 
       quantity += Number(r.getCell(5).value);
   });
   assert.equal(quantity, 100);
+});
+test("Tracking export lays each customer's orders out like the workshop's own sheet", async () => {
+  const { trackingWorkbook } =
+    await import("../src/lib/server/tracking-export");
+  const book = trackingWorkbook([
+    {
+      id: "GLAM260501",
+      customer: "GLAMDOLL",
+      product_name: "Đầm thử",
+      order_date: "2026-05-01",
+      deadline: "2026-06-01",
+      notes: "",
+      completed: false,
+      variants: [
+        {
+          color: "Trắng",
+          size: "M",
+          quantity: 10,
+          cut_qty: 10,
+          delivered_qty: 6,
+        },
+        {
+          color: "Trắng",
+          size: "S",
+          quantity: 5,
+          cut_qty: 5,
+          delivered_qty: 5,
+        },
+      ],
+      // 2 M were delivered before deliveries were logged: they still have to add up.
+      deliveries: [
+        {
+          date: "2026-05-20",
+          items: [
+            { color: "Trắng", size: "S", quantity: 5 },
+            { color: "Trắng", size: "M", quantity: 4 },
+          ],
+        },
+      ],
+      sewing: [
+        {
+          date: "2026-05-10",
+          items: [{ color: "Trắng", size: "M", quantity: 8 }],
+        },
+      ],
+      cutDone: "2026-05-05",
+      sewingStart: "2026-05-06",
+      sewers: ["Thợ A", "Thợ B"],
+    },
+  ]);
+  const ws = book.getWorksheet("GLAMDOLL")!;
+  assert.equal(ws.getCell("A1").value, "HÌNH SẢN PHẨM");
+  assert.deepEqual(
+    ["I2", "J2", "K2", "L2", "M2"].map((c) => ws.getCell(c).value),
+    ["XS", "S", "M", "L", "XL"],
+  );
+  // Sizes in order down the block, then the total row.
+  assert.deepEqual(
+    ["E3", "E4", "E5"].map((c) => ws.getCell(c).value),
+    ["S", "M", "TỔNG"],
+  );
+  assert.deepEqual(ws.getCell("G4").value, {
+    formula: "SUM(K3:K7)",
+    result: 6,
+  });
+  assert.deepEqual(ws.getCell("H4").value, { formula: "D4-G4", result: 4 });
+  assert.equal(ws.getCell("N3").value, "Trước đây");
+  assert.equal(ws.getCell("K3").value, 2);
+  assert.equal(ws.getCell("K4").value, 4);
+  assert.equal(ws.getCell("R3").value, "Thợ A, Thợ B");
+  assert.equal(ws.getCell("V3").value, 8);
+  const response = await trackingApi.GET(req("/api/export/tracking", "admin"));
+  assert.equal(response.status, 200);
+  const loaded = new ExcelJS.Workbook();
+  await loaded.xlsx.load(Buffer.from(await response.arrayBuffer()) as never);
+  assert(loaded.worksheets.length >= 1);
 });
 test("Excel delivery and assignment sheets honor worker, color and size filters together", async () => {
   const response = await exportApi.GET(

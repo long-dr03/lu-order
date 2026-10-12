@@ -55,3 +55,6 @@ skills-lock.json
 # PostgreSQL full backups
 *.pg.json.gz
 *.dump
+
+# Exported workbooks contain customer data
+/exports/

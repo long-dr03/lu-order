@@ -352,6 +352,19 @@ function OrderWorkspaceView({
               Excel
             </a>
           )}
+          {(permits(session.user, "export.data", {}) ||
+            orders.some((o) =>
+              permits(session.user, "export.data", { lineId: o.line_id }),
+            )) && (
+            <a
+              className="action secondary"
+              href={`/api/export/tracking?${exportParams}`}
+              title="File theo dõi đơn hàng theo mẫu của xưởng: mỗi khách một sheet, số giao theo ngày và size"
+            >
+              <Download size={18} />
+              Mẫu theo dõi
+            </a>
+          )}
           {hasPermission(session.user, "orders.create") && (
             <Action onClick={onCreate}>
               <Plus size={18} />

@@ -109,6 +109,7 @@ const sections: { title: string; paragraphs?: string[]; steps?: string[] }[] = [
       "Trang Lương sản phẩm: tiền công theo thợ trong tháng. Người có quyền được điều chỉnh một bản ghi (phải ghi lý do, hệ thống giữ lại số trước và sau) và chốt lương tháng.",
       "Tháng đã chốt thì không ghi công mới vào tháng đó. Riêng đóng gói vẫn ghi được, tiền công nằm ở mục chờ đối chiếu.",
       "Nút Xuất Excel tải dữ liệu theo đúng bộ lọc đang chọn.",
+      "Ở trang Đơn hàng, nút “Mẫu theo dõi” tải file theo dõi đơn hàng theo mẫu của xưởng: mỗi khách một sheet, mỗi sản phẩm một khối gồm hình, số đặt theo size, số cắt, từng lần giao theo ngày, số còn lại, ghi chú, ngày cắt xong, nhóm may và số may theo ngày.",
     ],
   },
   {
