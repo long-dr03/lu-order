@@ -3053,3 +3053,8 @@ input.date-proxy { position: absolute; left: 0; bottom: 0; width: 100%; height: 
 .delivery-table .owed { color: #b91c1c; font-weight: 700; }
 .delivery-table tbody tr:not(.delivery-ordered) th { background: transparent; color: #3f3f46; }
 .prepare-callout .rates-setup { width: 100%; justify-self: stretch; }
+
+/* Output form: where the chosen order stands, so the numbers below can be related to it. */
+.order-context { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; padding: 10px 12px; border-radius: 8px; background: #f4f4f5; font-size: 14px; color: #52525b; }
+.order-context strong, .order-context b { color: #18181b; font-variant-numeric: tabular-nums; }
+.order-context strong { margin-right: 4px; }

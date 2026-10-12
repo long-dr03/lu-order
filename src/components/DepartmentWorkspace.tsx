@@ -126,9 +126,17 @@ export function ProductionForm({
   rates: Rate[];
   onAssign?: (id: string) => void;
 }) {
-  const [id, setId] = useState(
-    initialOrderId || orders.find((o) => o.status !== "completed")?.id || "",
-  );
+  // Start on an order that still has output to record; one in preparation cannot take any.
+  const [id, setId] = useState(() => {
+    const open = orders.filter((o) => o.status !== "completed");
+    const ready = open.filter(prepared);
+    const pending = ready.find((o) =>
+      workStages.some((s) =>
+        (o.variants || []).some((v) => recordable(v, s, o as Detail) > 0),
+      ),
+    );
+    return initialOrderId || (pending || ready[0] || open[0])?.id || "";
+  });
   const loaded = useDetail(api, id, orders.find((o) => o.id === id)?.version);
   const detail = loaded.data;
   const stages = workStages.filter(
@@ -136,12 +144,39 @@ export function ProductionForm({
       permits(session.user, "production.create", { stage: s }) &&
       departmentAccess(session.user, departmentFor(s)),
   );
+  // What each stage can still take on this order, so the form follows the order's real progress.
+  const stageLeft = (s: string) => {
+    if (!detail) return 0;
+    const stageParts = detail.work_items?.filter((p) => p.stage === s) || [];
+    const left = (partId?: number) =>
+      (detail.variants || []).reduce(
+        (n, v) => n + recordable(v, s, detail, partId),
+        0,
+      );
+    return stageParts.length
+      ? Math.max(...stageParts.map((p) => left(p.id)))
+      : left();
+  };
+  // "Nothing to record" means two different things: the stage is finished, or its input has not arrived.
+  const stageNote = (s: string) => {
+    const left = stageLeft(s);
+    if (left > 0) return `còn ${left}`;
+    if (s === "Sửa hàng") return "không có hàng cần sửa";
+    const field =
+      s === "Cắt" ? "cut_qty" : s === "May" ? "sewn_qty" : "packed_qty";
+    const done = (detail?.variants || []).every((v) => v[field] >= v.quantity);
+    return done ? "đã đủ" : "chưa có hàng tới";
+  };
   const [stageValue, setStage] = useState("");
+  const here = stages.find(
+    (s) => departmentFor(s) === departmentFor(detail?.current_stage || ""),
+  );
+  // Default to the order's current stage, or failing that the first stage with work left.
   const stage = stages.includes(stageValue as (typeof workStages)[number])
     ? stageValue
-    : stages.find(
-        (s) => departmentFor(s) === departmentFor(detail?.current_stage || ""),
-      ) ||
+    : (here && stageLeft(here) > 0 ? here : undefined) ||
+      stages.find((s) => stageLeft(s) > 0) ||
+      here ||
       stages[0] ||
       "";
   const parts = detail?.work_items?.filter((p) => p.stage === stage) || [];
@@ -306,6 +341,8 @@ export function ProductionForm({
               value={id}
               onChange={(e) => {
                 setId(e.target.value);
+                // A stage picked for the previous order says nothing about this one.
+                setStage("");
                 setByWorker({});
                 setPart(0);
                 setPerson("");
@@ -314,8 +351,12 @@ export function ProductionForm({
               {orders
                 .filter((o) => o.status !== "completed")
                 .map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.id} · {o.product_name}
+                  <option key={o.id} value={o.id} disabled={!prepared(o)}>
+                    {o.id} · {o.product_name} —{" "}
+                    {prepared(o)
+                      ? LUUTA_STAGES.find((s) => s.key === o.current_stage)
+                          ?.label
+                      : "đang chuẩn bị"}
                   </option>
                 ))}
             </select>
@@ -324,7 +365,10 @@ export function ProductionForm({
         {stages.length === 1 ? (
           <div className="field">
             <span>Công đoạn</span>
-            <strong>{stage}</strong>
+            <strong>
+              {stage}
+              {detail && ` · ${stageNote(stage)}`}
+            </strong>
           </div>
         ) : (
           <Field label="Công đoạn">
@@ -338,10 +382,38 @@ export function ProductionForm({
               }}
             >
               {stages.map((s) => (
-                <option key={s}>{s}</option>
+                <option key={s} value={s}>
+                  {s}
+                  {detail && ` · ${stageNote(s)}`}
+                </option>
               ))}
             </select>
           </Field>
+        )}
+        {!embedded && detail && (
+          <p className="order-context">
+            Đơn đang ở bước{" "}
+            <strong>
+              {LUUTA_STAGES.find((s) => s.key === detail.current_stage)?.label}
+            </strong>
+            {(
+              [
+                ["Cắt", "cut_qty"],
+                ["May", "sewn_qty"],
+                ["QC đạt", "qc_passed_qty"],
+                ["Đóng gói", "packed_qty"],
+                ["Đã giao", "delivered_qty"],
+              ] as const
+            ).map(([label, field]) => (
+              <span key={field}>
+                {label}{" "}
+                <b>
+                  {(detail.variants || []).reduce((n, v) => n + v[field], 0)}/
+                  {detail.total_quantity}
+                </b>
+              </span>
+            ))}
+          </p>
         )}
         {!!parts.length && (
           <Field label="Phần việc">
