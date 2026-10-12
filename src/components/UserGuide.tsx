@@ -68,7 +68,7 @@ const sections: { title: string; paragraphs?: string[]; steps?: string[] }[] = [
   {
     title: "Bước 6 · QC, sửa hàng và kiểm lại",
     steps: [
-      "Mở chi tiết đơn → tab Kiểm QC. Chọn Kiểm lần đầu hoặc Kiểm lại sau sửa, nhập ngày giờ, số kiểm và số đạt cho từng màu–size.",
+      "Mở chi tiết đơn → tab Kiểm QC. Chọn Kiểm lần đầu hoặc Kiểm lại sau sửa, nhập ngày giờ, số kiểm và số lỗi cho từng màu–size. Không có lỗi thì để trống ô Số lỗi; số đạt tự tính bằng số kiểm trừ số lỗi.",
       "Có hàng lỗi thì có thể chọn thợ gây lỗi (May hoặc Cắt) và số lỗi của từng người; không bắt buộc.",
       "Hàng lỗi do thợ May sửa: nhập ở Nhập sản lượng → Sửa hàng. Sửa xong, QC ghi Kiểm lại.",
       "Chỉ số QC đạt mới được đóng gói.",

@@ -23,7 +23,10 @@ export function QualityForm({
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [action, setAction] = useState<"qc" | "reinspect">("qc");
   const [qty, setQty] = useState<Record<string, number>>({});
-  const [passed, setPassed] = useState<Record<string, number>>({});
+  // Inspectors count defects, not passes: "kiểm 10, lỗi 2" is how the floor reports it.
+  const [defects, setDefects] = useState<Record<string, number>>({});
+  const defectsOf = (key: string) => Math.min(defects[key] || 0, qty[key] || 0);
+  const passedOf = (key: string) => (qty[key] || 0) - defectsOf(key);
   // Defects can be attributed to the sewers/cutters who made the pieces.
   const [blame, setBlame] = useState<
     Record<string, { who: string; quantity: number }[]>
@@ -49,7 +52,7 @@ export function QualityForm({
       color: v.color,
       size: v.size,
       quantity: qty[keyFor(v)],
-      passed: passed[keyFor(v)] ?? qty[keyFor(v)],
+      passed: passedOf(keyFor(v)),
       ...(action === "qc" && (blame[keyFor(v)] || []).some((b) => b.who)
         ? {
             blame: (blame[keyFor(v)] || [])
@@ -85,7 +88,7 @@ export function QualityForm({
             entries,
           });
           setQty({});
-          setPassed({});
+          setDefects({});
           setBlame({});
           setImageFile(null);
           await onChanged();
@@ -107,7 +110,7 @@ export function QualityForm({
             onChange={(e) => {
               setAction(e.target.value as "qc" | "reinspect");
               setQty({});
-              setPassed({});
+              setDefects({});
             }}
           >
             <option value="qc">Kiểm lần đầu</option>
@@ -145,118 +148,120 @@ export function QualityForm({
               }
             />
           </Field>
-          <Field label="Số đạt">
+          <Field
+            label="Số lỗi"
+            hint={
+              qty[keyFor(v)]
+                ? `Đạt ${passedOf(keyFor(v))} / ${qty[keyFor(v)]}`
+                : undefined
+            }
+          >
             <input
               type="number"
               inputMode="numeric"
               min={0}
               max={qty[keyFor(v)] || 0}
-              value={passed[keyFor(v)] ?? qty[keyFor(v)] ?? ""}
+              value={defects[keyFor(v)] || ""}
+              placeholder="0"
               onChange={(e) =>
-                setPassed({ ...passed, [keyFor(v)]: Number(e.target.value) })
+                setDefects({ ...defects, [keyFor(v)]: Number(e.target.value) })
               }
             />
           </Field>
-          {action === "qc" &&
-            (qty[keyFor(v)] || 0) - (passed[keyFor(v)] ?? qty[keyFor(v)] ?? 0) >
-              0 && (
-              <div className="stack">
+          {action === "qc" && defectsOf(keyFor(v)) > 0 && (
+            <div className="stack">
+              <span className="muted">
+                {defectsOf(keyFor(v))} sản phẩm lỗi. Thợ nào gây lỗi? (không bắt
+                buộc)
+              </span>
+              {(blame[keyFor(v)] || []).map((b, i) => (
+                <div className="inline-actions" key={i}>
+                  <select
+                    aria-label="Thợ gây lỗi"
+                    value={b.who}
+                    onChange={(e) =>
+                      setBlame({
+                        ...blame,
+                        [keyFor(v)]: blame[keyFor(v)].map((x, n) =>
+                          n === i ? { ...x, who: e.target.value } : x,
+                        ),
+                      })
+                    }
+                  >
+                    <option value="">Chọn thợ</option>
+                    {culprits.map((c) => (
+                      <option key={c.key} value={c.key}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    aria-label="Số sản phẩm lỗi của thợ này"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    value={b.quantity || ""}
+                    onChange={(e) =>
+                      setBlame({
+                        ...blame,
+                        [keyFor(v)]: blame[keyFor(v)].map((x, n) =>
+                          n === i
+                            ? { ...x, quantity: Number(e.target.value) }
+                            : x,
+                        ),
+                      })
+                    }
+                  />
+                  <Action
+                    type="button"
+                    tone="secondary"
+                    onClick={() =>
+                      setBlame({
+                        ...blame,
+                        [keyFor(v)]: blame[keyFor(v)].filter((_, n) => n !== i),
+                      })
+                    }
+                  >
+                    Bỏ
+                  </Action>
+                </div>
+              ))}
+              <Action
+                type="button"
+                tone="secondary"
+                disabled={!culprits.length}
+                onClick={() =>
+                  setBlame({
+                    ...blame,
+                    [keyFor(v)]: [
+                      ...(blame[keyFor(v)] || []),
+                      {
+                        who: "",
+                        quantity: Math.max(
+                          1,
+                          defectsOf(keyFor(v)) -
+                            (blame[keyFor(v)] || []).reduce(
+                              (n, x) => n + (x.quantity || 0),
+                              0,
+                            ),
+                        ),
+                      },
+                    ],
+                  })
+                }
+              >
+                <Plus size={18} />
+                {(blame[keyFor(v)] || []).length
+                  ? "Thêm thợ khác"
+                  : "Chọn thợ gây lỗi"}
+              </Action>
+              {!culprits.length && (
                 <span className="muted">
-                  {(qty[keyFor(v)] || 0) -
-                    (passed[keyFor(v)] ?? qty[keyFor(v)] ?? 0)}{" "}
-                  sản phẩm lỗi. Thợ nào gây lỗi? (không bắt buộc)
+                  Chưa phân công thợ May/Cắt nên chưa quy lỗi được.
                 </span>
-                {(blame[keyFor(v)] || []).map((b, i) => (
-                  <div className="inline-actions" key={i}>
-                    <select
-                      aria-label="Thợ gây lỗi"
-                      value={b.who}
-                      onChange={(e) =>
-                        setBlame({
-                          ...blame,
-                          [keyFor(v)]: blame[keyFor(v)].map((x, n) =>
-                            n === i ? { ...x, who: e.target.value } : x,
-                          ),
-                        })
-                      }
-                    >
-                      <option value="">Chọn thợ</option>
-                      {culprits.map((c) => (
-                        <option key={c.key} value={c.key}>
-                          {c.label}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      aria-label="Số sản phẩm lỗi của thợ này"
-                      type="number"
-                      inputMode="numeric"
-                      min={1}
-                      value={b.quantity || ""}
-                      onChange={(e) =>
-                        setBlame({
-                          ...blame,
-                          [keyFor(v)]: blame[keyFor(v)].map((x, n) =>
-                            n === i
-                              ? { ...x, quantity: Number(e.target.value) }
-                              : x,
-                          ),
-                        })
-                      }
-                    />
-                    <Action
-                      type="button"
-                      tone="secondary"
-                      onClick={() =>
-                        setBlame({
-                          ...blame,
-                          [keyFor(v)]: blame[keyFor(v)].filter(
-                            (_, n) => n !== i,
-                          ),
-                        })
-                      }
-                    >
-                      Bỏ
-                    </Action>
-                  </div>
-                ))}
-                <Action
-                  type="button"
-                  tone="secondary"
-                  disabled={!culprits.length}
-                  onClick={() =>
-                    setBlame({
-                      ...blame,
-                      [keyFor(v)]: [
-                        ...(blame[keyFor(v)] || []),
-                        {
-                          who: "",
-                          quantity: Math.max(
-                            1,
-                            (qty[keyFor(v)] || 0) -
-                              (passed[keyFor(v)] ?? qty[keyFor(v)] ?? 0) -
-                              (blame[keyFor(v)] || []).reduce(
-                                (n, x) => n + (x.quantity || 0),
-                                0,
-                              ),
-                          ),
-                        },
-                      ],
-                    })
-                  }
-                >
-                  <Plus size={18} />
-                  {(blame[keyFor(v)] || []).length
-                    ? "Thêm thợ khác"
-                    : "Chọn thợ gây lỗi"}
-                </Action>
-                {!culprits.length && (
-                  <span className="muted">
-                    Chưa phân công thợ May/Cắt nên chưa quy lỗi được.
-                  </span>
-                )}
-              </div>
-            )}
+              )}
+            </div>
+          )}
         </div>
       ))}
       {!rows.length && (
