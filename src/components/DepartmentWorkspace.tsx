@@ -62,6 +62,8 @@ import {
   DeliveryTable,
   outputStages,
   OUTPUT_STAGE_OF,
+  scopeLabel,
+  inScope,
 } from "./order-detail-shared";
 import { DateInput } from "./DateInput";
 
@@ -266,6 +268,15 @@ export function ProductionForm({
     remaining: Math.max(0, v.available - others(v)),
     limit: Math.max(0, v.ceiling - others(v)),
   }));
+  // A worker given certain colours or sizes sees just those lines, unless asked for the rest.
+  const scopeFor = (employeeId: string) =>
+    assigned.find((a) => a.employee_id === employeeId);
+  const [allLines, setAllLines] = useState(false);
+  const scoped = !!scopeLabel(scopeFor(person));
+  const lines =
+    scoped && !allLines
+      ? rows.filter((v) => inScope(scopeFor(person), v))
+      : rows;
   const workers = people
     .map((p) => ({
       employee_id: p.id,
@@ -505,7 +516,12 @@ export function ProductionForm({
                 aria-pressed={p.id === person}
                 onClick={() => setPerson(p.id)}
               >
-                <span>{p.name}</span>
+                <span>
+                  {p.name}
+                  {scopeLabel(scopeFor(p.id)) && (
+                    <small> · {scopeLabel(scopeFor(p.id))}</small>
+                  )}
+                </span>
                 <strong>
                   {workerTotal(p.id)
                     ? `${workerTotal(p.id).toLocaleString("vi-VN")} sản phẩm`
@@ -596,6 +612,17 @@ export function ProductionForm({
           Số lượng theo màu / size
           {people.length > 1 &&
             ` · ${people.find((p) => p.id === person)?.name || ""}`}
+          {scoped && (
+            <button
+              type="button"
+              className="link-button lines-toggle"
+              onClick={() => setAllLines(!allLines)}
+            >
+              {allLines
+                ? `Chỉ phần được giao (${scopeLabel(scopeFor(person))})`
+                : "Hiện cả màu / size khác"}
+            </button>
+          )}
         </strong>
         <div className="fill-actions">
           <Action
@@ -603,7 +630,7 @@ export function ProductionForm({
             tone="secondary"
             onClick={() =>
               setAmounts(
-                Object.fromEntries(rows.map((v) => [keyFor(v), v.remaining])),
+                Object.fromEntries(lines.map((v) => [keyFor(v), v.remaining])),
               )
             }
           >
@@ -614,7 +641,7 @@ export function ProductionForm({
           </Action>
         </div>
       </div>
-      <QuantityGrid rows={rows} amounts={amounts} onChange={setAmounts} />
+      <QuantityGrid rows={lines} amounts={amounts} onChange={setAmounts} />
       {canSeePrice && (
         <div className="pay-preview">
           {rate ? (

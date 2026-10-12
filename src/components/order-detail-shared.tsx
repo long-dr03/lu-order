@@ -20,7 +20,24 @@ export type Assignment = {
   employee_name: string;
   active: number;
   department_id: DepartmentId;
+  /** Colours and sizes of the order this worker takes; empty means all of them. */
+  colors?: string[];
+  sizes?: string[];
 };
+
+export type AssignmentScope = { colors: string[]; sizes: string[] };
+/** "Đỏ, Xanh · M" for a worker given part of the order, "" for one who takes all of it. */
+export const scopeLabel = (scope?: Partial<AssignmentScope>) =>
+  [scope?.colors?.join(", "), scope?.sizes?.join(", ")]
+    .filter(Boolean)
+    .join(" · ");
+/** Whether a colour–size line of the order falls within what the worker was given. */
+export const inScope = (
+  scope: Partial<AssignmentScope> | undefined,
+  v: { color: string; size: string },
+) =>
+  (!scope?.colors?.length || scope.colors.includes(v.color)) &&
+  (!scope?.sizes?.length || scope.sizes.includes(v.size));
 
 export type Total = {
   stage: string;

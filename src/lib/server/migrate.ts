@@ -396,6 +396,7 @@ export function initializeDatabase() {
       await preparation.migrateCheckPhase();
       await preparation.migrateCheckAttachments();
       await preparation.migrateCheckPointCounts();
+      await (await import("./assignment-migration")).migrateAssignmentScope();
     })()
     .catch((error) => {
       initialization = undefined;

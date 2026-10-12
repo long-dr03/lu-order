@@ -6,7 +6,12 @@ import { type SessionInfo, permits } from "@/lib/permissions";
 import { departmentFor } from "@/lib/departments";
 import { type Employee } from "@/lib/types";
 import { Action, ErrorNotice } from "./Primitives";
-import { Detail, assignmentStages } from "./order-detail-shared";
+import {
+  type AssignmentScope,
+  Detail,
+  assignmentStages,
+  scopeLabel,
+} from "./order-detail-shared";
 
 /** Above this many workers in a department, a search box is worth its space. */
 const SEARCH_FROM = 12;
@@ -44,7 +49,16 @@ export function AssignmentForm({
         label: p ? `${stage} · ${p.name}` : stage,
         editable,
         ids: assigned.map((a) => a.employee_id),
-        names: assigned.map((a) => a.employee_name),
+        names: assigned.map((a) => {
+          const part = scopeLabel(a);
+          return part ? `${a.employee_name} (${part})` : a.employee_name;
+        }),
+        scopes: Object.fromEntries(
+          assigned.map((a) => [
+            a.employee_id,
+            { colors: a.colors || [], sizes: a.sizes || [] },
+          ]),
+        ) as Record<string, AssignmentScope>,
         // The department's people, plus anyone lent to this stage from elsewhere.
         staff: employees.filter(
           (e) =>
@@ -59,6 +73,13 @@ export function AssignmentForm({
   const shown = tasks.filter((t) => t.editable || t.ids.length);
   const [openKey, setOpenKey] = useState("");
   const [chosen, setChosen] = useState<string[] | null>(null);
+  // Colours and sizes per worker while a row is open; null until something is changed.
+  const [scopeDraft, setScopeDraft] = useState<Record<
+    string,
+    AssignmentScope
+  > | null>(null);
+  const colors = [...new Set((order.variants || []).map((v) => v.color))];
+  const sizes = [...new Set((order.variants || []).map((v) => v.size))];
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -68,6 +89,7 @@ export function AssignmentForm({
   const toggle = (key: string) => {
     setOpenKey(openKey === key ? "" : key);
     setChosen(null);
+    setScopeDraft(null);
     setSearch("");
     setError("");
   };
@@ -80,6 +102,7 @@ export function AssignmentForm({
         ...body,
       });
       setChosen(null);
+      setScopeDraft(null);
       await onChanged();
       return true;
     } catch (e) {
@@ -118,9 +141,40 @@ export function AssignmentForm({
           );
           const changed =
             open &&
-            !!chosen &&
-            (chosen.length !== t.ids.length ||
-              chosen.some((id) => !t.ids.includes(id)));
+            (!!scopeDraft ||
+              (!!chosen &&
+                (chosen.length !== t.ids.length ||
+                  chosen.some((id) => !t.ids.includes(id)))));
+          const scopeOf = (id: string): AssignmentScope =>
+            scopeDraft?.[id] || t.scopes[id] || { colors: [], sizes: [] };
+          const setScope = (id: string, next: AssignmentScope) =>
+            setScopeDraft({
+              ...Object.fromEntries(picked.map((p) => [p, scopeOf(p)])),
+              [id]: next,
+            });
+          const flip = (values: string[], value: string) =>
+            values.includes(value)
+              ? values.filter((v) => v !== value)
+              : [...values, value];
+          // One colour (or size) per worker in turn: three colours, three sewers, one tap.
+          const dealOut = (field: "colors" | "sizes") => {
+            const values = field === "colors" ? colors : sizes;
+            setScopeDraft(
+              Object.fromEntries(
+                picked.map((id, i) => [
+                  id,
+                  {
+                    ...scopeOf(id),
+                    // More workers than colours: go round again rather than leave someone with "all".
+                    [field]:
+                      values.length >= picked.length
+                        ? values.filter((_, n) => n % picked.length === i)
+                        : [values[i % values.length]],
+                  },
+                ]),
+              ),
+            );
+          };
           return (
             <li key={t.key} className={open ? "open" : undefined}>
               <button
@@ -177,6 +231,83 @@ export function AssignmentForm({
                       thợ.
                     </p>
                   )}
+                  {!!picked.length &&
+                    (colors.length > 1 || sizes.length > 1) && (
+                      <div className="assign-scope">
+                        <div className="assign-scope-head">
+                          <strong>Chia màu / size</strong>
+                          <small>Không chọn gì = làm tất cả</small>
+                          {picked.length > 1 && colors.length > 1 && (
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() => dealOut("colors")}
+                            >
+                              Mỗi thợ một màu
+                            </button>
+                          )}
+                          {picked.length > 1 && sizes.length > 1 && (
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() => dealOut("sizes")}
+                            >
+                              Mỗi thợ một size
+                            </button>
+                          )}
+                        </div>
+                        {picked.map((id) => {
+                          const scope = scopeOf(id);
+                          const name =
+                            employees.find((e) => e.id === id)?.name || id;
+                          return (
+                            <div
+                              className="assign-scope-row"
+                              key={id}
+                              role="group"
+                              aria-label={`Màu và size của ${name}`}
+                            >
+                              <span>{name}</span>
+                              <div className="scope-chips">
+                                {colors.length > 1 &&
+                                  colors.map((c) => (
+                                    <button
+                                      type="button"
+                                      key={`c-${c}`}
+                                      aria-pressed={scope.colors.includes(c)}
+                                      onClick={() =>
+                                        setScope(id, {
+                                          ...scope,
+                                          colors: flip(scope.colors, c),
+                                        })
+                                      }
+                                    >
+                                      {c}
+                                    </button>
+                                  ))}
+                                {sizes.length > 1 &&
+                                  sizes.map((z) => (
+                                    <button
+                                      type="button"
+                                      key={`s-${z}`}
+                                      className="size"
+                                      aria-pressed={scope.sizes.includes(z)}
+                                      onClick={() =>
+                                        setScope(id, {
+                                          ...scope,
+                                          sizes: flip(scope.sizes, z),
+                                        })
+                                      }
+                                    >
+                                      {z}
+                                    </button>
+                                  ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   {!!t.staff.length && (
                     <div className="assign-actions">
                       {t.staff.length > 1 && (
@@ -206,6 +337,9 @@ export function AssignmentForm({
                               stage: t.stage,
                               work_item_id: t.part || undefined,
                               employee_ids: picked,
+                              scopes: Object.fromEntries(
+                                picked.map((id) => [id, scopeOf(id)]),
+                              ),
                             })
                           )
                             setOpenKey("");

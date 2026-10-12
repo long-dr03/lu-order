@@ -276,7 +276,7 @@ test("Six stable departments; startup is repeatable and does not reinstate remov
         .prepare("SELECT MAX(version) n FROM schema_migrations")
         .get()) as { n: number }
     ).n,
-    22,
+    23,
   );
 });
 test("Passwords use distinct salts and verify without plaintext", () => {
@@ -2259,6 +2259,69 @@ test("Repair is recorded by the sewing department; QC keeps inspection and re-in
     )
     .get(id)) as { department_id: string };
   assert.equal(op.department_id, "sewing");
+});
+test("Assignments can give each worker certain colours or sizes, and keep them when the list is saved again", async () => {
+  const id = await order([
+    { color: "Đen", size: "M", quantity: 10 },
+    { color: "Trắng", size: "M", quantity: 10 },
+    { color: "Trắng", size: "L", quantity: 10 },
+  ]);
+  const post = async (input: Record<string, unknown>) =>
+    assignmentApi.POST(
+      req(`/api/orders/${id}/assignments`, "admin", {
+        version: (await current(id)).version,
+        stage: "May",
+        ...input,
+      }),
+      params("id", id),
+    );
+  assert.equal(
+    (
+      await post({
+        employee_ids: [workers.sewing[0]],
+        scopes: { [workers.sewing[0]]: { colors: ["Đỏ"], sizes: [] } },
+      })
+    ).status,
+    422,
+    "a colour the order does not have",
+  );
+  await result(
+    await post({
+      employee_ids: workers.sewing,
+      scopes: {
+        [workers.sewing[0]]: { colors: ["Đen"], sizes: [] },
+        [workers.sewing[1]]: { colors: ["Trắng"], sizes: ["L"] },
+      },
+    }),
+  );
+  const { assignmentsFor } = await import("../src/lib/server/departments");
+  const scopes = async () =>
+    Object.fromEntries(
+      (
+        (await assignmentsFor(id)) as unknown as {
+          active: number;
+          stage: string;
+          employee_id: string;
+          colors: string[];
+          sizes: string[];
+        }[]
+      )
+        .filter((a) => a.active === 1 && a.stage === "May")
+        .map((a) => [a.employee_id, [a.colors, a.sizes]]),
+    );
+  assert.deepEqual(await scopes(), {
+    [workers.sewing[0]]: [["Đen"], []],
+    [workers.sewing[1]]: [["Trắng"], ["L"]],
+  });
+  // Adding a helper sends only the list of people: nobody loses what they were given.
+  await result(
+    await post({ employee_ids: [...workers.sewing, workers.cutting[0]] }),
+  );
+  assert.deepEqual(await scopes(), {
+    [workers.sewing[0]]: [["Đen"], []],
+    [workers.sewing[1]]: [["Trắng"], ["L"]],
+    [workers.cutting[0]]: [[], []],
+  });
 });
 test("Management lends a worker from another department and the helper is credited for the stage", async () => {
   const id = await order([{ color: "Đen", size: "M", quantity: 10 }]);

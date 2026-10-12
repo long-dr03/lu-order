@@ -179,14 +179,39 @@ export const assignmentSchema = z
     ]),
     work_item_id: z.number().int().positive().optional(),
     employee_ids: z.array(text).max(200),
+    // Per worker: the colours and sizes they take. Left out, a worker keeps what they had.
+    scopes: z
+      .record(
+        z.string(),
+        z
+          .object({
+            colors: z.array(z.string().min(1).max(100)).max(100).default([]),
+            sizes: z.array(z.string().min(1).max(40)).max(100).default([]),
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .strict();
+const list = (json: unknown) => {
+  try {
+    const value = JSON.parse(String(json || "[]"));
+    return Array.isArray(value) ? value.map(String) : [];
+  } catch {
+    return [];
+  }
+};
 export async function assignmentsFor(orderId: string) {
-  return db
+  const rows = (await db
     .prepare(
       "SELECT w.*,e.name employee_name FROM work_assignments w JOIN employees e ON e.id=w.employee_id WHERE w.order_id=? ORDER BY w.created_at,w.id",
     )
-    .all(orderId);
+    .all(orderId)) as Record<string, unknown>[];
+  return rows.map((r) => ({
+    ...r,
+    colors: list(r.colors),
+    sizes: list(r.sizes),
+  }));
 }
 export async function saveAssignments(
   ctx: Context,
@@ -235,15 +260,46 @@ export async function saveAssignments(
           ? "Thợ phải đang hoạt động."
           : "Thợ phải đang hoạt động và thuộc bộ phận của công đoạn.",
       );
+    const colors = new Set((o.variants || []).map((v) => v.color));
+    const sizes = new Set((o.variants || []).map((v) => v.size));
+    for (const scope of Object.values(input.scopes || {}))
+      ensure(
+        scope.colors.every((c) => colors.has(c)) &&
+          scope.sizes.every((s) => sizes.has(s)),
+        422,
+        "Màu hoặc size được giao không thuộc đơn hàng.",
+      );
+    // Saving replaces the stage's rows, so carry over what each worker was given before.
+    const before = new Map(
+      (
+        (await assignmentsFor(orderId)) as unknown as {
+          active: number;
+          stage: string;
+          work_item_id: number | null;
+          employee_id: string;
+          colors: string[];
+          sizes: string[];
+        }[]
+      )
+        .filter(
+          (a) =>
+            a.active === 1 &&
+            a.stage === input.stage &&
+            (a.work_item_id || 0) === (input.work_item_id || 0),
+        )
+        .map((a) => [a.employee_id, { colors: a.colors, sizes: a.sizes }]),
+    );
     await db
       .prepare(
         "UPDATE work_assignments SET active=0 WHERE order_id=? AND stage=? AND COALESCE(work_item_id,0)=?",
       )
       .run(orderId, input.stage, input.work_item_id || 0);
-    for (const employee of input.employee_ids)
+    for (const employee of input.employee_ids) {
+      const scope = input.scopes?.[employee] ||
+        before.get(employee) || { colors: [], sizes: [] };
       await db
         .prepare(
-          "INSERT INTO work_assignments(id,order_id,stage,work_item_id,employee_id,department_id,actor_id) VALUES (?,?,?,?,?,?,?)",
+          "INSERT INTO work_assignments(id,order_id,stage,work_item_id,employee_id,department_id,actor_id,colors,sizes) VALUES (?,?,?,?,?,?,?,?,?)",
         )
         .run(
           randomUUID(),
@@ -253,7 +309,10 @@ export async function saveAssignments(
           employee,
           department,
           ctx.actor.id,
+          JSON.stringify([...new Set(scope.colors)]),
+          JSON.stringify([...new Set(scope.sizes)]),
         );
+    }
     await db
       .prepare("UPDATE orders SET version=version+1 WHERE id=?")
       .run(orderId);
@@ -287,7 +346,7 @@ export async function quickAssign(
       "Đơn đã thay đổi. Tải lại trước khi phân công.",
     );
     const people = await getEmployees();
-    const current = (await assignmentsFor(orderId)) as {
+    const current = (await assignmentsFor(orderId)) as unknown as {
       stage: string;
       work_item_id: number | null;
       active: number;

@@ -3066,3 +3066,20 @@ input.date-proxy { position: absolute; left: 0; bottom: 0; width: 100%; height: 
 .helper-picker { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: #fafafa; }
 .helper-picker .size-chips button { min-width: 0; min-height: 40px; }
 .helper-picker .size-chips small { color: var(--muted); font-weight: 400; }
+
+/* Phân công: which colours / sizes each worker takes. */
+.assign-scope { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+.assign-scope-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; font-size: 14px; }
+.assign-scope-head small { color: var(--muted); margin-right: auto; }
+.assign-scope-head .link-button { padding: 2px 0; border: 0; background: none; color: #3f3f46; font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
+.assign-scope-row { display: grid; grid-template-columns: minmax(90px, 160px) minmax(0, 1fr); align-items: center; gap: 10px; font-size: 14px; }
+.assign-scope-row > span { font-weight: 600; overflow-wrap: anywhere; }
+.scope-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.scope-chips button { min-height: 36px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px; background: #fff; color: inherit; font-size: 14px; }
+.scope-chips button.size { border-radius: 8px; min-width: 40px; }
+.scope-chips button[aria-pressed="true"] { background: #18181b; border-color: #18181b; color: #fff; font-weight: 600; }
+@media (max-width: 767px) {
+  .assign-scope-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+}
+.lines-toggle { margin-left: 10px; padding: 0; border: 0; background: none; color: #3f3f46; font-size: 14px; font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
+.rate-stage-card span small { font-weight: 400; color: var(--muted); }
