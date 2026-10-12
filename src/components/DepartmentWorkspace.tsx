@@ -57,6 +57,7 @@ import {
   stageTime,
   useDetail,
   workStages,
+  unrecordedDelivered,
 } from "./order-detail-shared";
 import { DateInput } from "./DateInput";
 
@@ -719,7 +720,13 @@ export function OrderDetail({
               {s.reason ? ` — ${s.reason}` : ""}
             </p>
           ))}
-          {!order.shipments?.length && (
+          {unrecordedDelivered(order) > 0 && (
+            <p className="muted">
+              {unrecordedDelivered(order)} sản phẩm đã giao được nhập từ trước,
+              không có phiếu giao kèm theo.
+            </p>
+          )}
+          {!order.shipments?.length && !unrecordedDelivered(order) && (
             <Empty>Chưa có đợt giao. Ghi tại tab Đợt giao.</Empty>
           )}
           {(order.shipments?.length || 0) > 5 && (

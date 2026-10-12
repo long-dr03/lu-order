@@ -937,6 +937,36 @@ test("Packing uses its production permission through both current and legacy API
   assert.equal((await current(id)).variants![0].packed_qty, 2);
   assert.equal((await ship(id, 1, {}, "packingonly")).status, 403);
 });
+test("A delivery recorded before shipment batches existed still shows in the delivery history", async () => {
+  const id = await order(
+    [{ color: "Đen", size: "M", quantity: 3 }],
+    "giao_hang",
+  );
+  await db
+    .prepare(
+      "UPDATE order_variants SET cut_qty=3,sewn_qty=3,qc_passed_qty=3,packed_qty=3,delivered_qty=3 WHERE order_id=?",
+    )
+    .run(id);
+  await db
+    .prepare(
+      "INSERT INTO operation_records(order_id,action,color,size,quantity,packages,operation_date,created_at,actor_id) VALUES (?,'deliver','Đen','M',3,0,'2026-10-06','2026-10-06 09:39:33',?)",
+    )
+    .run(id, (await ctx("admin")).user.id);
+  const { shipmentsFor } = await import("../src/lib/server/shipments");
+  const history = (await shipmentsFor(id)) as unknown as {
+    code: string;
+    delivered_at: string;
+    worker_name: string;
+    items: { color: string; size: string; quantity: number }[];
+  }[];
+  assert.equal(history.length, 1);
+  assert.equal(history[0].code, "Giao trước đây");
+  assert.equal(history[0].delivered_at, "2026-10-06T09:39:33+07:00");
+  assert.equal(history[0].worker_name, "Chưa ghi");
+  assert.deepEqual(history[0].items, [
+    { color: "Đen", size: "M", quantity: 3 },
+  ]);
+});
 test("Shipment has multi-line items, exact actual time, one package count and retry protection", async () => {
   const id = await order([
     { color: "Đen", size: "M", quantity: 5 },

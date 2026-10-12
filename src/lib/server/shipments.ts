@@ -30,8 +30,8 @@ export async function shipmentsFor(id: string) {
     .prepare(
       "SELECT s.*,e.name worker_name,a.name actor_name FROM shipments s JOIN employees e ON e.id=s.worker_id JOIN accounts a ON a.id=s.actor_id WHERE s.order_id=? ORDER BY s.delivered_at DESC,s.created_at DESC",
     )
-    .all(id)) as { id: string }[];
-  return Promise.all(
+    .all(id)) as { id: string; delivered_at: string | Date }[];
+  const batches = await Promise.all(
     shipments.map(async (s) => ({
       ...s,
       items: await db
@@ -41,6 +41,46 @@ export async function shipmentsFor(id: string) {
         .all(s.id),
     })),
   );
+  // Deliveries recorded before shipment batches existed live only as operation records.
+  // They are shown as batches too, so a delivered order never looks undelivered.
+  const earlier = (await db
+    .prepare(
+      "SELECT r.id,r.color,r.size,r.quantity,r.packages,r.operation_date,r.operation_time,r.created_at,r.reason,r.notes,e.name worker_name,a.name actor_name FROM operation_records r LEFT JOIN employees e ON e.id=r.worker_id LEFT JOIN accounts a ON a.id=r.actor_id WHERE r.order_id=? AND r.action='deliver' AND r.shipment_id IS NULL ORDER BY r.id DESC",
+    )
+    .all(id)) as {
+    id: number;
+    color: string;
+    size: string;
+    quantity: number;
+    packages: number | null;
+    operation_date: string;
+    operation_time: string | null;
+    created_at: string | null;
+    reason: string | null;
+    notes: string | null;
+    worker_name: string | null;
+    actor_name: string | null;
+  }[];
+  const time = (value: string | Date) => new Date(value).getTime();
+  return [
+    ...batches,
+    ...earlier.map((r) => ({
+      id: `earlier-${r.id}`,
+      code: "Giao trước đây",
+      worker_name: r.worker_name || "Chưa ghi",
+      actor_name: r.actor_name || "Chưa ghi",
+      // Stored as Vietnam local date and time; older rows have only the time they were entered.
+      delivered_at: r.operation_time
+        ? `${r.operation_date}T${r.operation_time}:00+07:00`
+        : r.created_at?.startsWith(r.operation_date)
+          ? `${r.created_at.replace(" ", "T")}+07:00`
+          : `${r.operation_date}T00:00:00+07:00`,
+      packages: Number(r.packages || 0),
+      reason: r.reason,
+      notes: r.notes || "",
+      items: [{ color: r.color, size: r.size, quantity: Number(r.quantity) }],
+    })),
+  ].sort((a, b) => time(b.delivered_at) - time(a.delivered_at));
 }
 export async function createShipment(
   ctx: Context,

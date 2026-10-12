@@ -13,6 +13,7 @@ import {
   formatDateTime,
   keyFor,
   localDateTime,
+  unrecordedDelivered,
 } from "./order-detail-shared";
 import { DateInput } from "./DateInput";
 
@@ -214,11 +215,14 @@ export function ShipmentPanel({
           </div>
         </details>
       ))}
-      {!order.shipments?.length && (
-        <Empty>
-          Chưa có đợt giao mới. Các lần giao trước chuyển đổi vẫn được giữ trong
-          Lịch sử.
-        </Empty>
+      {unrecordedDelivered(order) > 0 && (
+        <p className="muted">
+          {unrecordedDelivered(order)} sản phẩm đã giao được nhập từ trước,
+          không có phiếu giao kèm theo.
+        </p>
+      )}
+      {!order.shipments?.length && !unrecordedDelivered(order) && (
+        <Empty>Chưa có đợt giao.</Empty>
       )}
       <Pagination
         page={page}

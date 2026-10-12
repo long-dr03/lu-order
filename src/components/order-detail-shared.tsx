@@ -195,6 +195,17 @@ export const localDateTime = () =>
     .format(new Date())
     .replace(" ", "T");
 
+/** Pieces counted as delivered that no delivery record explains (entered before deliveries were logged). */
+export const unrecordedDelivered = (o: Detail) =>
+  Math.max(
+    0,
+    (o.variants || []).reduce((n, v) => n + v.delivered_qty, 0) -
+      (o.shipments || []).reduce(
+        (n, s) => n + s.items.reduce((m, r) => m + r.quantity, 0),
+        0,
+      ),
+  );
+
 export const formatDateTime = (v: string) =>
   new Intl.DateTimeFormat("vi-VN", {
     timeZone: "Asia/Ho_Chi_Minh",
