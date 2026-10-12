@@ -278,3 +278,160 @@ export const ACTION_LABELS: Record<string, string> = {
   deliver: "Giao hàng",
   shortage: "Giải trình thiếu",
 };
+
+const SIZE_ORDER = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "2XL", "3XL"];
+const sizeRank = (size: string) => {
+  const at = SIZE_ORDER.indexOf(size.trim().toUpperCase());
+  return at < 0 ? SIZE_ORDER.length : at;
+};
+const dayMonthYear = new Intl.DateTimeFormat("vi-VN", {
+  timeZone: "Asia/Ho_Chi_Minh",
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+});
+const hourMinute = new Intl.DateTimeFormat("vi-VN", {
+  timeZone: "Asia/Ho_Chi_Minh",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+/**
+ * Delivery ledger the way workshops keep it on paper or in Excel: per colour, the ordered
+ * quantities, then one line per delivery with the quantity of each size, the date, and what is
+ * still owed after it.
+ */
+export function DeliveryTable({ order }: { order: Detail }) {
+  const variants = order.variants || [];
+  const sizes = [...new Set(variants.map((v) => v.size))].sort(
+    (a, b) => sizeRank(a) - sizeRank(b) || a.localeCompare(b, "vi"),
+  );
+  const colors = [...new Set(variants.map((v) => v.color))];
+  const shipments = [...(order.shipments || [])].sort(
+    (a, b) => Date.parse(a.delivered_at) - Date.parse(b.delivered_at),
+  );
+  const sum = (bySize: Record<string, number>) =>
+    Object.values(bySize).reduce((n, q) => n + q, 0);
+  const blocks = colors.map((color) => {
+    const ordered: Record<string, number> = {};
+    const recorded: Record<string, number> = {};
+    for (const v of variants.filter((v) => v.color === color))
+      ordered[v.size] = (ordered[v.size] || 0) + v.quantity;
+    const lines = shipments.flatMap((s) => {
+      const bySize: Record<string, number> = {};
+      for (const r of s.items.filter((r) => r.color === color)) {
+        bySize[r.size] = (bySize[r.size] || 0) + r.quantity;
+        recorded[r.size] = (recorded[r.size] || 0) + r.quantity;
+      }
+      return sum(bySize)
+        ? [
+            {
+              key: s.id,
+              date: dayMonthYear.format(new Date(s.delivered_at)),
+              time: hourMinute.format(new Date(s.delivered_at)),
+              who: s.worker_name,
+              note: s.reason || "",
+              bySize,
+            },
+          ]
+        : [];
+    });
+    // Delivered pieces no record explains were entered before deliveries were logged.
+    const before: Record<string, number> = {};
+    for (const v of variants.filter((v) => v.color === color)) {
+      const gap = v.delivered_qty - (recorded[v.size] || 0);
+      if (gap > 0) before[v.size] = (before[v.size] || 0) + gap;
+    }
+    const all = [
+      ...(sum(before)
+        ? [
+            {
+              key: "before",
+              date: "Trước đây",
+              time: "",
+              who: "Không có phiếu",
+              note: "",
+              bySize: before,
+            },
+          ]
+        : []),
+      ...lines,
+    ];
+    let left = sum(ordered);
+    return {
+      color,
+      ordered,
+      lines: all.map((line) => {
+        left -= sum(line.bySize);
+        return { ...line, total: sum(line.bySize), left };
+      }),
+      left,
+    };
+  });
+  if (!blocks.some((b) => b.lines.length)) return null;
+  return (
+    <div className="table-scroll">
+      <table className="delivery-table">
+        <thead>
+          <tr>
+            <th>Ngày giao</th>
+            {sizes.map((s) => (
+              <th key={s} className="num">
+                {s}
+              </th>
+            ))}
+            <th className="num">Tổng</th>
+            <th className="num">Còn lại</th>
+            <th>Người giao</th>
+          </tr>
+        </thead>
+        {blocks.map((b) => (
+          <tbody key={b.color}>
+            <tr className="delivery-ordered">
+              <th scope="row">{b.color} · Đặt</th>
+              {sizes.map((s) => (
+                <td key={s} className="num">
+                  {b.ordered[s] || ""}
+                </td>
+              ))}
+              <td className="num">{sum(b.ordered)}</td>
+              <td className="num">{sum(b.ordered)}</td>
+              <td />
+            </tr>
+            {b.lines.map((line) => (
+              <tr key={line.key}>
+                <th scope="row">
+                  {line.date}
+                  {line.time && <small> {line.time}</small>}
+                </th>
+                {sizes.map((s) => (
+                  <td key={s} className="num">
+                    {line.bySize[s] || ""}
+                  </td>
+                ))}
+                <td className="num">
+                  <strong>{line.total}</strong>
+                </td>
+                <td className={`num${line.left > 0 ? " owed" : ""}`}>
+                  {line.left}
+                </td>
+                <td>
+                  {line.who}
+                  {line.note && <small> · {line.note}</small>}
+                </td>
+              </tr>
+            ))}
+            {!b.lines.length && (
+              <tr>
+                <td colSpan={sizes.length + 4} className="muted">
+                  Chưa giao
+                </td>
+              </tr>
+            )}
+          </tbody>
+        ))}
+      </table>
+    </div>
+  );
+}

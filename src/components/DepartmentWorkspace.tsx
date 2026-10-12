@@ -49,7 +49,6 @@ import {
   QuantityGrid,
   STAGE_ASSIGNMENT,
   assignmentStages,
-  formatDateTime,
   keyFor,
   preparationStages,
   prepared,
@@ -58,6 +57,7 @@ import {
   useDetail,
   workStages,
   unrecordedDelivered,
+  DeliveryTable,
 } from "./order-detail-shared";
 import { DateInput } from "./DateInput";
 
@@ -710,27 +710,10 @@ export function OrderDetail({
             api={api}
             onChanged={onChanged}
           />
-          <h3>Lịch sử giao hàng ({order.shipments?.length || 0})</h3>
-          {order.shipments?.slice(0, 5).map((s) => (
-            <p key={s.id}>
-              <strong>{formatDateTime(s.delivered_at)}</strong> ·{" "}
-              {s.items
-                .map((r) => `${r.color}/${r.size} ×${r.quantity}`)
-                .join(", ")}
-              {s.reason ? ` — ${s.reason}` : ""}
-            </p>
-          ))}
-          {unrecordedDelivered(order) > 0 && (
-            <p className="muted">
-              {unrecordedDelivered(order)} sản phẩm đã giao được nhập từ trước,
-              không có phiếu giao kèm theo.
-            </p>
-          )}
+          <h3>Lịch sử giao hàng ({order.shipments?.length || 0} đợt)</h3>
+          <DeliveryTable order={order} />
           {!order.shipments?.length && !unrecordedDelivered(order) && (
             <Empty>Chưa có đợt giao. Ghi tại tab Đợt giao.</Empty>
-          )}
-          {(order.shipments?.length || 0) > 5 && (
-            <p className="muted">Xem đầy đủ ở tab Đợt giao.</p>
           )}
           <StageMover
             order={order}

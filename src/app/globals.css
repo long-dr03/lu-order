@@ -3024,3 +3024,12 @@ input.date-proxy { position: absolute; left: 0; bottom: 0; width: 100%; height: 
 .assign-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .assign-actions .action { margin-left: auto; min-height: 40px; padding: 8px 18px; }
 .assign-actions .link-button { padding: 8px 0; border: 0; background: none; color: #3f3f46; font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
+
+/* Delivery ledger: sizes across, one line per delivery, like the workshop's Excel sheet. */
+.delivery-table th, .delivery-table td { padding: 8px 10px; white-space: nowrap; }
+.delivery-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.delivery-table tbody th { font-weight: 500; text-align: left; }
+.delivery-table tbody th small, .delivery-table td small { color: var(--muted); font-weight: 400; }
+.delivery-table .delivery-ordered th, .delivery-table .delivery-ordered td { background: #f4f4f5; font-weight: 700; border-top: 2px solid #d4d4d8; }
+.delivery-table .owed { color: #b91c1c; font-weight: 700; }
+.delivery-table tbody tr:not(.delivery-ordered) th { background: transparent; color: #3f3f46; }

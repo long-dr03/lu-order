@@ -14,6 +14,7 @@ import {
   keyFor,
   localDateTime,
   unrecordedDelivered,
+  DeliveryTable,
 } from "./order-detail-shared";
 import { DateInput } from "./DateInput";
 
@@ -194,6 +195,7 @@ export function ShipmentPanel({
         </form>
       )}
       <h3>Lịch sử đợt giao ({order.shipments?.length || 0})</h3>
+      <DeliveryTable order={order} />
       {order.shipments?.slice((page - 1) * 10, page * 10).map((s) => (
         <details className="record-disclosure" key={s.id}>
           <summary>
@@ -215,12 +217,6 @@ export function ShipmentPanel({
           </div>
         </details>
       ))}
-      {unrecordedDelivered(order) > 0 && (
-        <p className="muted">
-          {unrecordedDelivered(order)} sản phẩm đã giao được nhập từ trước,
-          không có phiếu giao kèm theo.
-        </p>
-      )}
       {!order.shipments?.length && !unrecordedDelivered(order) && (
         <Empty>Chưa có đợt giao.</Empty>
       )}
