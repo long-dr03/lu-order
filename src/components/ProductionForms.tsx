@@ -5,6 +5,7 @@ import { Plus, X } from "lucide-react";
 import type { Order } from "@/lib/types";
 import { type Api, type ViewLog, money, message } from "@/lib/client";
 import type { Rate } from "@/lib/server/business";
+import { OUTPUT_STAGES } from "@/lib/workflow";
 import { Action, Field, ErrorNotice, Empty } from "./Primitives";
 import { DEFAULT_POLICY, type Policy } from "@/lib/policy";
 export { ProductionForm, OrderDetail } from "./DepartmentWorkspace";
@@ -26,7 +27,7 @@ export function RatesPanel({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState("");
-  const stages = ["Cắt", "May", "QC", "Sửa hàng", "Đóng gói"];
+  const stages: string[] = [...OUTPUT_STAGES];
   const selectedOrder = orders.find((o) => o.id === id);
   const parts = (selectedOrder?.work_items || []).filter(
     (p) => p.stage === stage,

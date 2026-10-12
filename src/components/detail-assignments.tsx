@@ -45,9 +45,12 @@ export function AssignmentForm({
         editable,
         ids: assigned.map((a) => a.employee_id),
         names: assigned.map((a) => a.employee_name),
+        // The department's people, plus anyone lent to this stage from elsewhere.
         staff: employees.filter(
           (e) =>
-            e.active !== 0 && e.department_ids?.includes(departmentFor(stage)),
+            e.active !== 0 &&
+            (e.department_ids?.includes(departmentFor(stage)) ||
+              assigned.some((a) => a.employee_id === e.id)),
         ),
       };
     });

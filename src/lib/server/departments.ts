@@ -172,6 +172,7 @@ export const assignmentSchema = z
       "Kiểm rập",
       "Cắt",
       "May",
+      "QC",
       "Sửa hàng",
       "Đóng gói",
       "Giao hàng",
@@ -219,16 +220,20 @@ export async function saveAssignments(
       422,
       "Thợ bị chọn trùng.",
     );
+    // Management may lend a stage anyone who is working; others assign within the department.
+    const anyone = isManagement(ctx.user);
     for (const id of input.employee_ids)
       ensure(
         people.some(
           (e) =>
             e.id === id &&
             e.active !== 0 &&
-            e.department_ids?.includes(department),
+            (anyone || e.department_ids?.includes(department)),
         ),
         422,
-        "Thợ phải đang hoạt động và thuộc bộ phận của công đoạn.",
+        anyone
+          ? "Thợ phải đang hoạt động."
+          : "Thợ phải đang hoạt động và thuộc bộ phận của công đoạn.",
       );
     await db
       .prepare(
@@ -340,11 +345,8 @@ export async function requireAssignment(
 ) {
   const people = await getEmployees();
   const e = people.find((e) => e.id === employeeId);
-  ensure(
-    e?.active !== 0 && e?.department_ids?.includes(departmentFor(stage)),
-    422,
-    "Thợ không thuộc bộ phận của công đoạn hoặc đã ngừng làm.",
-  );
+  // Assignment is the gate; a helper lent from another department is assigned like anyone else.
+  ensure(e && e.active !== 0, 422, "Thợ không tồn tại hoặc đã ngừng làm.");
   ensure(
     await db
       .prepare(

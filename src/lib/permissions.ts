@@ -142,10 +142,10 @@ export function canRecordProduction(
   stage?: string,
 ) {
   void order;
+  // The worker's own department is not checked here: being assigned to the order's stage is
+  // what entitles them, so someone lending a hand from another department can be credited.
   return (
     employee.active !== 0 &&
-    !!employee.department_ids?.length &&
-    (stage ? employee.department_ids.includes(departmentFor(stage)) : true) &&
     permits(user, "production.create", {
       employeeId: employee.id,
       ...(stage ? { stage } : {}),

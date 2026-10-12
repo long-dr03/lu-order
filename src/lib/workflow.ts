@@ -8,6 +8,38 @@ interface Variant extends OrderVariant {
   reinspected_qty: number;
   repassed_qty: number;
 }
+/** Every stage whose work can be recorded and paid per piece, in the order the work happens. */
+export const OUTPUT_STAGES = [
+  "Kiểm NPL/Vải",
+  "Kiểm rập",
+  "Cắt",
+  "May",
+  "QC",
+  "Sửa hàng",
+  "Đóng gói",
+  "Giao hàng",
+] as const;
+
+/**
+ * Stages that move no counter of their own: output is credited against what the order already
+ * shows (pieces ordered, inspected or delivered). Returns that ceiling, or null for other stages.
+ */
+export function creditedStageBase(
+  stage: string,
+  v: {
+    quantity: number;
+    delivered_qty: number;
+    qc_inspected_qty?: number;
+    reinspected_qty?: number;
+  },
+) {
+  if (stage === "Kiểm NPL/Vải" || stage === "Kiểm rập") return v.quantity;
+  if (stage === "QC")
+    return Number(v.qc_inspected_qty || 0) + Number(v.reinspected_qty || 0);
+  if (stage === "Giao hàng") return v.delivered_qty;
+  return null;
+}
+
 const nextStages: Record<Order["current_stage"], Order["current_stage"][]> = {
   nhan_don: ["kiem_npl"],
   kiem_npl: ["kiem_rap"],

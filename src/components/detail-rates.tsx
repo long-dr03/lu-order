@@ -5,8 +5,9 @@ import { type SessionInfo, permits } from "@/lib/permissions";
 import type { Rate } from "@/lib/server/business";
 import { Action, ErrorNotice } from "./Primitives";
 import type { Detail } from "./order-detail-shared";
+import { OUTPUT_STAGES } from "@/lib/workflow";
 
-const PAY_STAGES = ["Cắt", "May", "QC", "Sửa hàng", "Đóng gói"] as const;
+const PAY_STAGES = OUTPUT_STAGES;
 
 /** Piece rates of this order, for a manager who may price at least one stage. */
 export function useOrderRates(

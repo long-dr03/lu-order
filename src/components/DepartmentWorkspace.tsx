@@ -33,6 +33,7 @@ import {
   transitionProblem,
   transitionPermissionProblem,
   sewLimit,
+  creditedStageBase,
 } from "@/lib/workflow";
 import { Action, Field, ErrorNotice, Empty, Modal } from "./Primitives";
 import { Pagination } from "./Pagination";
@@ -59,6 +60,8 @@ import {
   workStages,
   unrecordedDelivered,
   DeliveryTable,
+  outputStages,
+  OUTPUT_STAGE_OF,
 } from "./order-detail-shared";
 import { DateInput } from "./DateInput";
 
@@ -131,15 +134,22 @@ export function ProductionForm({
     const open = orders.filter((o) => o.status !== "completed");
     const ready = open.filter(prepared);
     const pending = ready.find((o) =>
-      workStages.some((s) =>
+      outputStages.some((s) =>
         (o.variants || []).some((v) => recordable(v, s, o as Detail) > 0),
       ),
     );
     return initialOrderId || (pending || ready[0] || open[0])?.id || "";
   });
-  const loaded = useDetail(api, id, orders.find((o) => o.id === id)?.version);
+  // Bumped after adding a helper, so the order is read again with its new assignment.
+  const [reload, setReload] = useState(0);
+  const loaded = useDetail(
+    api,
+    id,
+    orders.find((o) => o.id === id)?.version,
+    reload,
+  );
   const detail = loaded.data;
-  const stages = workStages.filter(
+  const stages = outputStages.filter(
     (s) =>
       permits(session.user, "production.create", { stage: s }) &&
       departmentAccess(session.user, departmentFor(s)),
@@ -162,6 +172,14 @@ export function ProductionForm({
     const left = stageLeft(s);
     if (left > 0) return `còn ${left}`;
     if (s === "Sửa hàng") return "không có hàng cần sửa";
+    const sample = detail?.variants || [];
+    if (s === "Kiểm NPL/Vải" || s === "Kiểm rập") return "đã ghi đủ";
+    if (s === "QC" || s === "Giao hàng")
+      return sample.some((v) => (creditedStageBase(s, v) || 0) > 0)
+        ? "đã ghi đủ"
+        : s === "QC"
+          ? "chưa kiểm cái nào"
+          : "chưa giao cái nào";
     const field =
       s === "Cắt" ? "cut_qty" : s === "May" ? "sewn_qty" : "packed_qty";
     const done = (detail?.variants || []).every((v) => v[field] >= v.quantity);
@@ -169,10 +187,10 @@ export function ProductionForm({
   };
   const [stageValue, setStage] = useState("");
   const here = stages.find(
-    (s) => departmentFor(s) === departmentFor(detail?.current_stage || ""),
+    (s) => s === OUTPUT_STAGE_OF[detail?.current_stage || ""],
   );
   // Default to the order's current stage, or failing that the first stage with work left.
-  const stage = stages.includes(stageValue as (typeof workStages)[number])
+  const stage = stages.includes(stageValue)
     ? stageValue
     : (here && stageLeft(here) > 0 ? here : undefined) ||
       stages.find((s) => stageLeft(s) > 0) ||
@@ -189,12 +207,31 @@ export function ProductionForm({
         a.stage === stage &&
         (a.work_item_id || 0) === (part || 0),
     ) || [];
+  // Whoever is assigned, their own department aside: a helper lent to the stage counts too.
   const people = employees.filter(
-    (e) =>
-      e.active !== 0 &&
-      e.department_ids?.includes(departmentFor(stage)) &&
-      assigned.some((a) => a.employee_id === e.id),
+    (e) => e.active !== 0 && assigned.some((a) => a.employee_id === e.id),
   );
+  const canAssign =
+    !!stage && permits(session.user, "production.assign", { stage });
+  const [adding, setAdding] = useState(false);
+  const [helperSearch, setHelperSearch] = useState("");
+  // Department first, then (for Management) everyone else who could lend a hand.
+  const candidates = employees
+    .filter(
+      (e) =>
+        e.active !== 0 &&
+        !assigned.some((a) => a.employee_id === e.id) &&
+        (isManagement(session.user) ||
+          e.department_ids?.includes(departmentFor(stage))) &&
+        e.name
+          .toLocaleLowerCase("vi")
+          .includes(helperSearch.toLocaleLowerCase("vi")),
+    )
+    .sort(
+      (a, b) =>
+        Number(!!b.department_ids?.includes(departmentFor(stage))) -
+        Number(!!a.department_ids?.includes(departmentFor(stage))),
+    );
   const [personValue, setPerson] = useState("");
   const person = people.some((e) => e.id === personValue)
     ? personValue
@@ -281,15 +318,38 @@ export function ProductionForm({
     ? "Đang tải số lượng và phân công…"
     : !stage
       ? "Bạn không được nhập sản lượng ở bộ phận này."
-      : !prepared(detail)
+      : !prepared(detail) && !preparationStages.includes(stage)
         ? "Quản lý cần hoàn tất chuẩn bị đơn trước khi sản xuất."
         : !person
-          ? "Chưa có thợ được phân công cho công đoạn/phần việc này."
+          ? canAssign
+            ? "Chưa có thợ cho công đoạn này. Bấm “Thêm thợ” để chọn người làm."
+            : "Chưa có thợ được phân công cho công đoạn/phần việc này."
           : missingRate
             ? `Chưa có đơn giá ${stage}. Quản lý đặt ở tab Tiến độ → Đơn giá công đoạn rồi mới ghi sản lượng.`
             : invalid
               ? "Có số lượng vượt mức còn lại hoặc không phải số nguyên."
               : "";
+  /** Assigns one more worker to this stage of the order and selects them for entry. */
+  async function addHelper(employeeId: string) {
+    if (!detail) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/api/orders/${encodeURIComponent(id)}/assignments`, {
+        version: detail.version,
+        stage,
+        work_item_id: part || undefined,
+        employee_ids: [...assigned.map((a) => a.employee_id), employeeId],
+      });
+      setAdding(false);
+      setPerson(employeeId);
+      setReload((n) => n + 1);
+    } catch (err) {
+      setError(message(err));
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <form
       className="stack department-form"
@@ -351,7 +411,7 @@ export function ProductionForm({
               {orders
                 .filter((o) => o.status !== "completed")
                 .map((o) => (
-                  <option key={o.id} value={o.id} disabled={!prepared(o)}>
+                  <option key={o.id} value={o.id}>
                     {o.id} · {o.product_name} —{" "}
                     {prepared(o)
                       ? LUUTA_STAGES.find((s) => s.key === o.current_stage)
@@ -433,7 +493,7 @@ export function ProductionForm({
           </Field>
         )}
       </div>
-      {!!people.length && (
+      {detail && !!stage && (!!people.length || canAssign) && (
         <div className="field" role="group" aria-label="Thợ thực hiện">
           <span>Thợ thực hiện</span>
           <div className="rate-stage-grid">
@@ -453,7 +513,59 @@ export function ProductionForm({
                 </strong>
               </button>
             ))}
+            {canAssign && (
+              <button
+                type="button"
+                className="rate-stage-card add-helper"
+                aria-expanded={adding}
+                onClick={() => {
+                  setAdding(!adding);
+                  setHelperSearch("");
+                }}
+              >
+                <span>
+                  <Plus size={18} aria-hidden="true" /> Thêm thợ
+                </span>
+                <strong>
+                  {people.length ? "người phụ thêm" : "chưa có ai"}
+                </strong>
+              </button>
+            )}
           </div>
+          {adding && (
+            <div className="helper-picker">
+              <input
+                type="search"
+                aria-label="Tìm thợ để thêm"
+                placeholder="Tìm tên thợ…"
+                value={helperSearch}
+                onChange={(e) => setHelperSearch(e.target.value)}
+              />
+              <div className="size-chips">
+                {candidates.slice(0, 40).map((e) => (
+                  <button
+                    type="button"
+                    key={e.id}
+                    disabled={busy}
+                    onClick={() => void addHelper(e.id)}
+                  >
+                    {e.name}
+                    {!e.department_ids?.includes(departmentFor(stage)) && (
+                      <small>
+                        {" · "}
+                        {e.department_ids?.length
+                          ? departmentName(e.department_ids[0])
+                          : "chưa có bộ phận"}
+                      </small>
+                    )}
+                  </button>
+                ))}
+              </div>
+              {!candidates.length && (
+                <p className="muted">Không còn thợ nào để thêm.</p>
+              )}
+            </div>
+          )}
           <small className="desktop-hint">
             Chọn thợ rồi nhập số; chọn thợ khác để nhập tiếp. Một lần lưu ghi
             nhận cho tất cả thợ, mỗi thợ nhận công riêng.
@@ -463,7 +575,7 @@ export function ProductionForm({
       {problem && (
         <div className="entry-guidance">
           <p>{problem}</p>
-          {!person && detail && onAssign && (
+          {!person && detail && onAssign && !canAssign && (
             <Action type="button" tone="secondary" onClick={() => onAssign(id)}>
               <Users size={18} />
               Mở đơn để phân công

@@ -1,7 +1,7 @@
 import { departmentFor } from "../departments";
 import { requireDepartment } from "./departments";
 import { completedWork, refreshWorkCompletion } from "./work-items";
-import { transitionPermissionProblem } from "../workflow";
+import { transitionPermissionProblem, creditedStageBase } from "../workflow";
 import { z } from "zod";
 import { db, getOrderById } from "../db";
 import { LUUTA_STAGES, type ProductionLog } from "../types";
@@ -220,19 +220,13 @@ export async function adjustProduction(
       .run(next, v.id);
   } else {
     const processed =
-      old.stage === "QC"
-        ? Number(
-            (
-              v as unknown as {
-                qc_inspected_qty: number;
-                reinspected_qty: number;
-              }
-            ).qc_inspected_qty,
-          ) +
-          Number((v as unknown as { reinspected_qty: number }).reinspected_qty)
-        : old.stage === "Sửa hàng"
-          ? Number((v as unknown as { reworked_qty: number }).reworked_qty)
-          : v.packed_qty;
+      creditedStageBase(
+        old.stage,
+        v as unknown as Parameters<typeof creditedStageBase>[1],
+      ) ??
+      (old.stage === "Sửa hàng"
+        ? Number((v as unknown as { reworked_qty: number }).reworked_qty)
+        : v.packed_qty);
     const paid = (
       (await db
         .prepare(

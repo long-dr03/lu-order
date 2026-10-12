@@ -18,6 +18,8 @@ import {
   transitionPermissionProblem,
   cutLimit,
   sewLimit,
+  OUTPUT_STAGES,
+  creditedStageBase,
 } from "../workflow";
 import { z } from "zod";
 import {
@@ -50,7 +52,7 @@ import {
 } from "./auth";
 import { text, quantity, date, line, today } from "./validation";
 
-export const STAGES = ["Cắt", "May", "QC", "Sửa hàng", "Đóng gói"] as const;
+export const STAGES = OUTPUT_STAGES;
 export const stageSchema = z.enum(
   LUUTA_STAGES.map((s) => s.key) as [
     Order["current_stage"],
@@ -1258,8 +1260,7 @@ async function recordProductionSingle(
   ensure(emp, 422, "Nhân viên không hợp lệ.");
   requirePermission(ctx, "production.create", { stage: input.stage });
   requireDepartment(ctx, input.stage);
-  if (input.stage !== "QC")
-    await requireAssignment(ctx, o.id, input.stage, emp.id, input.work_item_id);
+  await requireAssignment(ctx, o.id, input.stage, emp.id, input.work_item_id);
   ensure(
     canRecordProduction(ctx.user, emp, o, input.stage),
     403,
@@ -1421,13 +1422,27 @@ async function recordProductionSingle(
         "UPDATE operation_records SET department_id='packing',reason=?,operation_time=to_char(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh','HH24:MI') WHERE id=?",
       )
       .run(input.reason || null, packingOperationId);
+  } else if (creditedStageBase(input.stage, v) !== null) {
+    // Checks, inspection and delivery: credit whoever is assigned, up to what the order shows.
+    const base = creditedStageBase(input.stage, v)!;
+    const credited = (
+      (await db
+        .prepare(
+          "SELECT COALESCE(SUM(quantity),0) n FROM production_logs WHERE order_id=? AND color=? AND size=? AND stage=?",
+        )
+        .get(o.id, v.color, v.size, input.stage)) as { n: number }
+    ).n;
+    const left = Math.max(0, base - credited);
+    ensure(
+      credited + input.quantity <= base,
+      422,
+      input.stage === "QC"
+        ? `Đã kiểm ${base}, đã ghi công ${credited}; còn ${left} sản phẩm có thể ghi công QC. Ghi kết quả ở tab Kiểm QC trước.`
+        : input.stage === "Giao hàng"
+          ? `Đã giao ${base}, đã ghi công ${credited}; còn ${left} sản phẩm có thể ghi công Giao hàng. Ghi đợt giao ở tab Đợt giao trước.`
+          : `${input.stage}: đơn đặt ${base}, đã ghi công ${credited}; còn ${left} sản phẩm có thể ghi.`,
+    );
   } else {
-    if (input.stage === "QC" && !isManagement(ctx.user))
-      ensure(
-        emp.id === ctx.user.employee_id,
-        403,
-        "Công kiểm QC phải thuộc người kiểm đang đăng nhập.",
-      );
     const processed = (
       (await db
         .prepare(
@@ -1438,11 +1453,7 @@ async function recordProductionSingle(
           v.color,
           v.size,
           emp.id,
-          input.stage === "QC"
-            ? ["qc", "reinspect"]
-            : input.stage === "Sửa hàng"
-              ? ["rework"]
-              : ["pack"],
+          input.stage === "Sửa hàng" ? ["rework"] : ["pack"],
         )) as { n: number }
     ).n;
     const paid = (

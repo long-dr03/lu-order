@@ -3,7 +3,13 @@ import { useEffect, useState } from "react";
 import { type Api, message } from "@/lib/client";
 import { type DepartmentId } from "@/lib/departments";
 import { type Order, type OrderVariant } from "@/lib/types";
-import { remainingOperation, cutLimit, sewLimit } from "@/lib/workflow";
+import {
+  remainingOperation,
+  cutLimit,
+  sewLimit,
+  OUTPUT_STAGES,
+  creditedStageBase,
+} from "@/lib/workflow";
 import { Policy } from "@/lib/policy";
 
 export type Assignment = {
@@ -97,11 +103,22 @@ export const workStages = ["Cắt", "May", "Sửa hàng", "Đóng gói"] as cons
 
 export const preparationStages = ["Kiểm NPL/Vải", "Kiểm rập"];
 
-export const assignmentStages = [
-  ...preparationStages,
-  ...workStages,
-  "Giao hàng",
-];
+/** Every stage of an order takes workers and output, checks and delivery included. */
+export const outputStages: readonly string[] = OUTPUT_STAGES;
+export const assignmentStages = [...OUTPUT_STAGES];
+
+/** The output stage an order's current step corresponds to. */
+export const OUTPUT_STAGE_OF: Record<string, string> = {
+  kiem_npl: "Kiểm NPL/Vải",
+  kiem_rap: "Kiểm rập",
+  cat: "Cắt",
+  may: "May",
+  qc: "QC",
+  sua_hang: "Sửa hàng",
+  qc_lai: "QC",
+  dong_goi: "Đóng gói",
+  giao_hang: "Giao hàng",
+};
 
 export const prepared = (o: Order) =>
   !["nhan_don", "kiem_npl", "kiem_rap", "hoan_thanh"].includes(o.current_stage);
@@ -123,6 +140,12 @@ export function recordable(
           r.size === v.size,
       )
       .reduce((n, r) => n + r.quantity, 0) || 0;
+  // Checks, QC and delivery: what the order shows, less what has already been credited.
+  const base = creditedStageBase(
+    stage,
+    v as Parameters<typeof creditedStageBase>[1],
+  );
+  if (base !== null) return Math.max(0, base - paid);
   if (stage === "Cắt")
     return Math.max(
       0,
@@ -136,7 +159,13 @@ export function recordable(
   return remainingOperation(v, "pack");
 }
 
-export function useDetail(api: Api, id: string, version?: number) {
+export function useDetail(
+  api: Api,
+  id: string,
+  version?: number,
+  /** Change to read the order again when its list version has not caught up yet. */
+  reload = 0,
+) {
   const [state, setState] = useState<{
     id: string;
     version?: number;
@@ -156,7 +185,7 @@ export function useDetail(api: Api, id: string, version?: number) {
     return () => {
       live = false;
     };
-  }, [api, id, version]);
+  }, [api, id, version, reload]);
   return state.id === id && state.version === version
     ? state
     : { id, data: null, error: "" };

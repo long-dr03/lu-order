@@ -445,7 +445,8 @@ test("Assignment rejects wrong-department, inactive, duplicate workers and stale
     assert.equal(
       (
         await assignmentApi.POST(
-          req(`/api/orders/${id}/assignments`, "admin", {
+          // A department lead assigns within the department; only Management lends across.
+          req(`/api/orders/${id}/assignments`, "sewing", {
             ...common,
             employee_ids,
           }),
@@ -2223,12 +2224,12 @@ test("Repair is recorded by the sewing department; QC keeps inspection and re-in
       "UPDATE order_variants SET cut_qty=1,sewn_qty=1,qc_inspected_qty=1,defect_qty=1 WHERE order_id=?",
     )
     .run(id);
-  // Sewers are eligible repairers; QC workers are not.
+  // Sewers are eligible repairers; a sewing lead cannot bring in QC workers.
   await assign(id, "Sửa hàng", workers.sewing);
   assert.equal(
     (
       await assignmentApi.POST(
-        req(`/api/orders/${id}/assignments`, "admin", {
+        req(`/api/orders/${id}/assignments`, "sewing", {
           version: (await current(id)).version,
           stage: "Sửa hàng",
           employee_ids: workers.quality,
@@ -2258,6 +2259,81 @@ test("Repair is recorded by the sewing department; QC keeps inspection and re-in
     )
     .get(id)) as { department_id: string };
   assert.equal(op.department_id, "sewing");
+});
+test("Management lends a worker from another department and the helper is credited for the stage", async () => {
+  const id = await order([{ color: "Đen", size: "M", quantity: 10 }]);
+  // Assigned to cut at first: one cutter. A sewer comes over to help.
+  await assign(id, "Cắt", [workers.cutting[0]]);
+  await assign(id, "Cắt", [workers.cutting[0], workers.sewing[0]]);
+  await result(await record(id, "Cắt", workers.cutting[0], 6), 201);
+  await result(await record(id, "Cắt", workers.sewing[0], 4), 201);
+  const logs = (await db
+    .prepare(
+      "SELECT employee_id,quantity,department_id FROM production_logs WHERE order_id=? AND stage='Cắt' ORDER BY id",
+    )
+    .all(id)) as {
+    employee_id: string;
+    quantity: number;
+    department_id: string;
+  }[];
+  assert.deepEqual(
+    logs.map((l) => [l.employee_id, Number(l.quantity), l.department_id]),
+    [
+      [workers.cutting[0], 6, "cutting"],
+      [workers.sewing[0], 4, "cutting"],
+    ],
+  );
+  // Not assigned means not credited, whatever the department.
+  assert.equal((await record(id, "May", workers.cutting[1], 1)).status, 422);
+});
+test("Checks, QC and delivery are credited to assigned workers up to what the order shows", async () => {
+  const id = await order([{ color: "Đen", size: "M", quantity: 10 }]);
+  for (const stage of ["Kiểm NPL/Vải", "Kiểm rập", "Giao hàng"])
+    await db.prepare("INSERT INTO order_rates VALUES (?,?,500)").run(id, stage);
+  // Pattern check: up to the ordered quantity, shared between whoever is assigned.
+  assert.equal(
+    (await record(id, "Kiểm rập", workers.cutting[0], 1)).status,
+    422,
+    "an unassigned worker is not credited",
+  );
+  await assign(id, "Kiểm rập", workers.cutting);
+  await result(await record(id, "Kiểm rập", workers.cutting[0], 6), 201);
+  assert.equal(
+    (await record(id, "Kiểm rập", workers.cutting[1], 5)).status,
+    422,
+    "more than the order holds",
+  );
+  await result(await record(id, "Kiểm rập", workers.cutting[1], 4), 201);
+  // QC: only what has been inspected, and the inspector no longer has to be the one logged in.
+  await db
+    .prepare(
+      "UPDATE order_variants SET cut_qty=10,sewn_qty=10,qc_inspected_qty=5,qc_passed_qty=5 WHERE order_id=?",
+    )
+    .run(id);
+  await assign(id, "QC", [workers.quality[0]]);
+  assert.equal((await record(id, "QC", workers.quality[0], 6)).status, 422);
+  await result(await record(id, "QC", workers.quality[0], 5), 201);
+  // Delivery: nothing delivered yet, nothing to credit.
+  await assign(id, "Giao hàng", [workers.delivery[0]]);
+  assert.equal(
+    (await record(id, "Giao hàng", workers.delivery[0], 1)).status,
+    422,
+  );
+  await db
+    .prepare(
+      "UPDATE order_variants SET packed_qty=5,delivered_qty=3 WHERE order_id=?",
+    )
+    .run(id);
+  await result(await record(id, "Giao hàng", workers.delivery[0], 3), 201);
+  const paid = (await db
+    .prepare(
+      "SELECT stage,SUM(quantity) q,SUM(total_pay) p FROM production_logs WHERE order_id=? GROUP BY stage ORDER BY stage",
+    )
+    .all(id)) as { stage: string; q: number; p: number }[];
+  assert.deepEqual(
+    Object.fromEntries(paid.map((r) => [r.stage, [Number(r.q), Number(r.p)]])),
+    { "Giao hàng": [3, 1500], "Kiểm rập": [10, 5000], QC: [5, 5000] },
+  );
 });
 test("A worker cannot be credited for someone else's repair or QC inspection", async () => {
   const id = await order();
@@ -2707,6 +2783,7 @@ test("Quick assignment fills only unassigned tasks with each department's active
   for (const stage of [
     "Kiểm NPL/Vải",
     "Kiểm rập",
+    "QC",
     "Sửa hàng",
     "Đóng gói",
     "Giao hàng",
@@ -2732,6 +2809,7 @@ test("Quick assignment fills only unassigned tasks with each department's active
               "Kiểm NPL/Vải": "quality",
               Cắt: "cutting",
               May: "sewing",
+              QC: "quality",
               "Sửa hàng": "sewing",
               "Đóng gói": "packing",
               "Giao hàng": "delivery",

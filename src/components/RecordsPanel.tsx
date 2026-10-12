@@ -1,5 +1,6 @@
 "use client";
 import { PendingPackingPanel } from "./PendingPackingPanel";
+import { OUTPUT_STAGES } from "@/lib/workflow";
 import { Pagination } from "./Pagination";
 import { DEPARTMENTS, departmentName } from "@/lib/departments";
 import { useEffect, useState } from "react";
@@ -221,7 +222,7 @@ export function RecordsPanel({
           <Field label="Công đoạn">
             <select value={stage} onChange={(e) => setStage(e.target.value)}>
               <option value="">Tất cả công đoạn</option>
-              {["Cắt", "May", "QC", "Sửa hàng", "Đóng gói"].map((s) => (
+              {OUTPUT_STAGES.map((s) => (
                 <option key={s}>{s}</option>
               ))}
             </select>
