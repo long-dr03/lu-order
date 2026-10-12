@@ -6,6 +6,7 @@ import {
   Suspense,
   ComponentType,
   LazyExoticComponent,
+  ReactNode,
 } from "react";
 import { Check, ClipboardList, Plus, Users, Pencil } from "lucide-react";
 import { type Api, day, message, money } from "@/lib/client";
@@ -551,6 +552,15 @@ export function OrderDetail({
     manager && rates.ready && rates.canPrice && !rates.cutPriced
       ? "Đặt đơn giá Cắt ở mục “Đơn giá công đoạn” (tab Tiến độ) trước khi hoàn tất chuẩn bị."
       : "";
+  const ratesPanel = (
+    <RatesSetup
+      order={order}
+      session={session}
+      api={api}
+      rates={rates}
+      onChanged={onChanged}
+    />
+  );
   async function move(change: { stage: string } | { prepare: true }) {
     setBusy(true);
     setError("");
@@ -672,13 +682,7 @@ export function OrderDetail({
                     : () => void move({ prepare: true })
                 }
               />
-              <RatesSetup
-                order={order}
-                session={session}
-                api={api}
-                rates={rates}
-                onChanged={onChanged}
-              />
+              {ratesPanel}
             </>
           )}
           <div className="department-metrics">
@@ -784,6 +788,7 @@ export function OrderDetail({
             session={session}
             busy={busy}
             rateBlock={rateBlock}
+            ratesPanel={ratesPanel}
             onPrepare={() => void move({ prepare: true })}
           />
           <MaterialsPanel
@@ -810,6 +815,7 @@ export function OrderDetail({
             session={session}
             busy={busy}
             rateBlock={rateBlock}
+            ratesPanel={ratesPanel}
             onPrepare={() => void move({ prepare: true })}
           />
         </div>
@@ -1144,6 +1150,7 @@ function PrepareCallout({
   session,
   busy,
   rateBlock,
+  ratesPanel,
   onPrepare,
 }: {
   stage: "kiem_npl" | "kiem_rap";
@@ -1151,6 +1158,8 @@ function PrepareCallout({
   session: SessionInfo;
   busy: boolean;
   rateBlock: string;
+  /** Shown in place while the cutting rate is missing, so the block can be cleared right here. */
+  ratesPanel?: ReactNode;
   onPrepare: () => void;
 }) {
   const last = lastCheck(order, stage);
@@ -1178,11 +1187,21 @@ function PrepareCallout({
     );
   return (
     <div className="entry-guidance prepare-callout" role="status">
-      <p>
-        <strong>{name} đã đạt.</strong> Ghi kết quả không tự chuyển bước (có thể
-        cần kiểm thêm lượt khác). Khi đã sẵn sàng cắt, bấm nút dưới đây — đơn
-        đang ở bước {here}.
-      </p>
+      {rateBlock ? (
+        <>
+          <p>
+            <strong>{name} đã đạt, nhưng đơn chưa có đơn giá Cắt.</strong> Nhập
+            đơn giá ngay dưới đây rồi bấm lưu; nút chuyển sang Cắt sẽ mở.
+          </p>
+          {ratesPanel}
+        </>
+      ) : (
+        <p>
+          <strong>{name} đã đạt.</strong> Ghi kết quả không tự chuyển bước (có
+          thể cần kiểm thêm lượt khác). Khi đã sẵn sàng cắt, bấm nút dưới đây —
+          đơn đang ở bước {here}.
+        </p>
+      )}
       <Action
         type="button"
         busy={busy}
@@ -1192,7 +1211,6 @@ function PrepareCallout({
         <Check size={18} />
         Hoàn tất chuẩn bị → Cắt
       </Action>
-      {rateBlock && <small>{rateBlock}</small>}
     </div>
   );
 }
@@ -1300,6 +1318,12 @@ function NextStep({
             </Action>
           )}
         </div>
+      )}
+      {prepare && onPrepare && rateBlock && (
+        <small>
+          Nút đang khóa vì đơn chưa có đơn giá Cắt — nhập ở ô “Đơn giá công
+          đoạn” ngay bên dưới.
+        </small>
       )}
     </div>
   );

@@ -3052,3 +3052,4 @@ input.date-proxy { position: absolute; left: 0; bottom: 0; width: 100%; height: 
 .delivery-table .delivery-ordered th, .delivery-table .delivery-ordered td { background: #f4f4f5; font-weight: 700; border-top: 2px solid #d4d4d8; }
 .delivery-table .owed { color: #b91c1c; font-weight: 700; }
 .delivery-table tbody tr:not(.delivery-ordered) th { background: transparent; color: #3f3f46; }
+.prepare-callout .rates-setup { width: 100%; justify-self: stretch; }

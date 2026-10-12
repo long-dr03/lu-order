@@ -403,20 +403,22 @@ async function main() {
         : "button is enabled without a rate"
       : "no button on the check tab",
   );
-  await openTab(page, "Tiến độ");
+  // The missing rate is asked for right in the callout, so there is no tab to hunt for.
   await typeText(
     page,
-    '.rates-setup input[aria-label="Đơn giá Cắt"]',
+    '.prepare-callout input[aria-label="Đơn giá Cắt"]',
     "1500",
     "Đơn giá Cắt",
     "1.500",
   );
   await shot("rates-setup");
-  await touch(page, ".rates-setup button", "Lưu đơn giá");
-  // Saved when nothing is left to save: the button goes back to disabled.
-  await until("rate saved", () => page.$(".rates-foot .action:disabled"));
-  record("Set the Cắt rate on the Tiến độ tab", true, "");
-  await openTab(page, "Kiểm rập");
+  await touch(page, ".prepare-callout .rates-foot button", "Lưu đơn giá");
+  // Once the rate is saved the price fields leave the callout.
+  await until(
+    "rate saved",
+    async () => !(await page.$(".prepare-callout .rates-setup")),
+  );
+  record("Set the Cắt rate next to the check result", true, "");
   const offered = await locate(
     page,
     ".prepare-callout button",
