@@ -931,6 +931,7 @@ export function CreateOrderForm({
     () => `SP-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
   );
   const [photos, setPhotos] = useState<PhotoDraft[]>([]);
+  const [received, setReceived] = useState(day());
   const [variants, setVariants] = useState([
     {
       color: "",
@@ -1026,10 +1027,16 @@ export function CreateOrderForm({
           </select>
         </Field>
         <Field label="Ngày nhận">
-          <DateInput name="order_date" required defaultValue={day()} />
+          <DateInput
+            name="order_date"
+            required
+            max={day()}
+            value={received}
+            onChange={setReceived}
+          />
         </Field>
         <Field label="Hạn giao">
-          <DateInput name="deadline" required />
+          <DateInput name="deadline" required min={received || undefined} />
         </Field>
       </div>
       <Field label="Ưu tiên">
@@ -1129,6 +1136,8 @@ export function CreateOrderForm({
               max={1000000}
               required
               value={v.quantity}
+              // Typing over the starting value instead of after it: "20", not "120".
+              onFocus={(e) => e.target.select()}
               onChange={(e) =>
                 setVariants(
                   variants.map((x, n) =>

@@ -650,7 +650,10 @@ export function ProductionForm({
               <strong>{money(rate.unit_price * total)}</strong>
             </>
           ) : (
-            <span>Chưa cấu hình đơn giá cho công đoạn/phần việc này.</span>
+            // The reason is already given above when it blocks the entry.
+            !missingRate && (
+              <span>Chưa cấu hình đơn giá cho công đoạn/phần việc này.</span>
+            )
           )}
         </div>
       )}
@@ -914,10 +917,6 @@ export function OrderDetail({
               </div>
             ))}
           </div>
-          <p className="muted desktop-hint">
-            Các bộ phận xử lý song song theo lượng thực tế. Vị trí trên bảng
-            không thay thế số lượng đã làm.
-          </p>
           <StageTimeline order={order} />
           <VariantTable
             order={order}
@@ -1440,8 +1439,24 @@ function NextStep({
   rateBlock?: string;
 }) {
   if (order.status === "completed") return null;
+  // A stage needs someone only while it still has work: nobody is chased for what is finished.
+  const done = (
+    field:
+      "cut_qty" | "sewn_qty" | "qc_passed_qty" | "packed_qty" | "delivered_qty",
+  ) => (order.variants || []).every((v) => v[field] >= v.quantity);
+  const finished: Record<string, boolean> = {
+    Cắt: done("cut_qty"),
+    May: done("sewn_qty"),
+    QC: done("qc_passed_qty"),
+    "Sửa hàng": !(order.variants || []).some(
+      (v) => remainingOperation(v, "rework") > 0,
+    ),
+    "Đóng gói": done("packed_qty"),
+    "Giao hàng": done("delivered_qty"),
+  };
   const unassigned = assignmentStages.filter(
     (st) =>
+      !finished[st] &&
       (!preparationStages.includes(st) || !prepared(order)) &&
       !(order.assignments || []).some(
         (a) => a.active === 1 && a.stage === st,

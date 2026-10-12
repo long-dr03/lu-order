@@ -627,19 +627,18 @@ export default function Page() {
               </div>
             </div>
             <ErrorNotice error={error} />
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={`${active?.id}-${session.user.id}`}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 0.16 }}
-              >
-                <ErrorBoundary label={`Màn hình ${active?.label || ""}`}>
-                  {panel}
-                </ErrorBoundary>
-              </motion.div>
-            </AnimatePresence>
+            {/* No exit animation: waiting for the old screen to leave showed it under the new
+                title, for seconds on a slow or backgrounded device. */}
+            <motion.div
+              key={`${active?.id}-${session.user.id}`}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.16 }}
+            >
+              <ErrorBoundary label={`Màn hình ${active?.label || ""}`}>
+                {panel}
+              </ErrorBoundary>
+            </motion.div>
           </main>
         </div>
         {quickProduction && !sidebar && (

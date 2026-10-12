@@ -8,6 +8,7 @@ import type { Detail } from "./order-detail-shared";
 import { OUTPUT_STAGES } from "@/lib/workflow";
 
 const PAY_STAGES = OUTPUT_STAGES;
+const OPTIONAL: readonly string[] = ["Kiểm NPL/Vải", "Kiểm rập", "Giao hàng"];
 
 /** Piece rates of this order, for a manager who may price at least one stage. */
 export function useOrderRates(
@@ -91,7 +92,11 @@ export function RatesSetup({
       )?.unit_price;
   const shown = (stage: string) => draft[stage] ?? current(stage);
   const priceable = stages.filter((s) => !split(s));
-  const missing = stages.filter((s) => !split(s) && !rates.priced(s));
+  // Production stages need a price to record output at all. Checks and delivery are priced only
+  // by workshops that pay them per piece, so they are never chased.
+  const missing = stages.filter(
+    (s) => !OPTIONAL.includes(s) && !split(s) && !rates.priced(s),
+  );
   if (!rates.ready || !stages.length) return null;
   const pending = Object.entries(draft).filter(
     ([stage, price]) => !split(stage) && price !== current(stage),
@@ -143,7 +148,11 @@ export function RatesSetup({
             <span key={stage}>
               {stage}{" "}
               <strong>
-                {split(stage) ? "theo phần việc" : money(current(stage) ?? 0)}
+                {split(stage)
+                  ? "theo phần việc"
+                  : current(stage) === undefined
+                    ? "chưa đặt"
+                    : money(current(stage)!)}
               </strong>
             </span>
           ))}
@@ -189,7 +198,14 @@ export function RatesSetup({
               <PriceInput
                 label={`Đơn giá ${stage}`}
                 value={shown(stage)}
-                missing={!rates.priced(stage) && draft[stage] === undefined}
+                missing={
+                  !OPTIONAL.includes(stage) &&
+                  !rates.priced(stage) &&
+                  draft[stage] === undefined
+                }
+                placeholder={
+                  OPTIONAL.includes(stage) ? "Không bắt buộc" : "Chưa có"
+                }
                 onChange={(v) =>
                   setDraft((d) => {
                     const next = { ...d };
@@ -239,11 +255,13 @@ function PriceInput({
   label,
   value,
   missing,
+  placeholder,
   onChange,
 }: {
   label: string;
   value: number | undefined;
   missing: boolean;
+  placeholder: string;
   onChange: (value: number | undefined) => void;
 }) {
   return (
@@ -251,7 +269,7 @@ function PriceInput({
       <input
         aria-label={label}
         inputMode="numeric"
-        placeholder="Chưa có"
+        placeholder={placeholder}
         value={value === undefined ? "" : value.toLocaleString("vi-VN")}
         onChange={(e) => {
           const digits = e.target.value.replace(/\D/g, "").slice(0, 12);
