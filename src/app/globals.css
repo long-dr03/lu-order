@@ -3286,3 +3286,23 @@ input.date-proxy { position: absolute; left: 0; bottom: 0; width: 100%; height: 
   .staff-toolbar .field:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
   .staff-toolbar .action { grid-column: 2; grid-row: 1; white-space: nowrap; }
 }
+
+/* ---- App-like on phones: camera buttons, install offer, safe areas when opened from the home screen ---- */
+.touch-only { display: none !important; }
+@media (hover: none) and (pointer: coarse) {
+  .touch-only { display: inline-flex !important; }
+  .photo-add.touch-only { display: flex !important; }
+}
+.install-app { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; margin-top: 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; background: #fafafa; color: #18181b; font-weight: 600; text-align: left; }
+.install-app-hint { margin: 12px 0 0; padding: 10px 14px; border-radius: 10px; background: #fafafa; color: var(--muted); font-size: 14px; text-wrap: pretty; }
+.install-app-hint strong { color: #18181b; font-weight: 600; }
+html { -webkit-tap-highlight-color: transparent; }
+button, a, select, label { touch-action: manipulation; }
+@media (max-width: 767px) {
+  .app-header { height: calc(52px + env(safe-area-inset-top, 0px)); padding-top: env(safe-area-inset-top, 0px); }
+}
+@media (display-mode: standalone) {
+  /* No browser chrome to pull against: keep the page from rubber-banding like a web page. */
+  html, body { overscroll-behavior-y: none; }
+  .bottom-bar button, .app-header { -webkit-user-select: none; user-select: none; }
+}

@@ -1,4 +1,5 @@
 "use client";
+import { InstallApp } from "@/components/InstallApp";
 import {
   ProductionForm,
   OrderDetail,
@@ -577,6 +578,7 @@ export default function Page() {
           drawer
         >
           <nav aria-label="Điều hướng điện thoại">{renderNavigation(true)}</nav>
+          <InstallApp />
         </Modal>
         <div className="app-main">
           <header className="app-header">

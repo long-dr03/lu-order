@@ -2,6 +2,7 @@
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import {
+  Camera,
   ChevronLeft,
   ChevronRight,
   ImagePlus,
@@ -168,6 +169,7 @@ export function ProductImagePicker({
   prompt?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
+  const camera = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -236,6 +238,14 @@ export function ProductImagePicker({
               <Upload size={18} />
               {url ? "Thay ảnh" : "Chọn ảnh"}
             </button>
+            <button
+              type="button"
+              className="action secondary touch-only"
+              onClick={() => camera.current?.click()}
+            >
+              <Camera size={18} />
+              Chụp ảnh
+            </button>
             {url && (
               <button
                 type="button"
@@ -256,6 +266,18 @@ export function ProductImagePicker({
           type="file"
           accept="image/jpeg,image/png,image/webp"
           aria-label={`Chọn ${label.toLowerCase()}`}
+          className="image-file-input"
+          onChange={(e) => {
+            select(e.target.files?.[0]);
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={camera}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          capture="environment"
+          aria-label={`Chụp ${label.toLowerCase()}`}
           className="image-file-input"
           onChange={(e) => {
             select(e.target.files?.[0]);
@@ -335,6 +357,7 @@ export function ProductPhotosField({
   max?: number;
 }) {
   const input = useRef<HTMLInputElement>(null);
+  const camera = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const names = Array.from(
@@ -441,6 +464,17 @@ export function ProductPhotosField({
             {busy ? "Đang nén ảnh…" : "Thêm ảnh"}
           </button>
         )}
+        {photos.length < max && (
+          <button
+            type="button"
+            className="photo-add touch-only"
+            disabled={busy}
+            onClick={() => camera.current?.click()}
+          >
+            <Camera size={22} />
+            Chụp ảnh
+          </button>
+        )}
       </div>
       <input
         ref={input}
@@ -448,6 +482,18 @@ export function ProductPhotosField({
         multiple
         accept="image/jpeg,image/png,image/webp"
         aria-label="Chọn ảnh mẫu"
+        className="image-file-input"
+        onChange={(e) => {
+          void add(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={camera}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        capture="environment"
+        aria-label="Chụp ảnh mẫu"
         className="image-file-input"
         onChange={(e) => {
           void add(e.target.files);
