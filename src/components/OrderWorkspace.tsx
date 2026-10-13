@@ -331,7 +331,7 @@ function OrderWorkspaceView({
           <Search size={20} />
           <input
             aria-label="Tìm đơn hàng"
-            placeholder="Mã đơn, khách hàng, sản phẩm…"
+            placeholder="Tìm đơn…"
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
@@ -339,31 +339,30 @@ function OrderWorkspaceView({
             }}
           />
         </div>
-        <div className="inline-actions">
+        <div className="inline-actions order-actions">
           {(permits(session.user, "export.data", {}) ||
             orders.some((o) =>
               permits(session.user, "export.data", { lineId: o.line_id }),
             )) && (
-            <a
-              className="action secondary"
-              href={`/api/export/excel?${exportParams}`}
-            >
-              <Download size={18} />
-              Xuất danh sách đơn
-            </a>
-          )}
-          {(permits(session.user, "export.data", {}) ||
-            orders.some((o) =>
-              permits(session.user, "export.data", { lineId: o.line_id }),
-            )) && (
-            <a
-              className="action secondary"
-              href={`/api/export/tracking?${exportParams}`}
-              title="File theo dõi đơn hàng theo mẫu của xưởng: mỗi khách một sheet, số giao theo ngày và size"
-            >
-              <Download size={18} />
-              Xuất bảng theo dõi giao hàng
-            </a>
+            // One "Xuất Excel" with the two files named for what they contain.
+            <details className="export-menu">
+              <summary className="action secondary">
+                <Download size={18} />
+                <span>Xuất Excel</span>
+              </summary>
+              <div className="export-options">
+                <a href={`/api/export/excel?${exportParams}`}>
+                  <strong>Danh sách đơn</strong>
+                  <small>Đơn, phân công và các đợt giao theo bộ lọc</small>
+                </a>
+                <a href={`/api/export/tracking?${exportParams}`}>
+                  <strong>Bảng theo dõi giao hàng</strong>
+                  <small>
+                    Mẫu của xưởng: mỗi khách một sheet, giao theo ngày
+                  </small>
+                </a>
+              </div>
+            </details>
           )}
           {hasPermission(session.user, "orders.create") && (
             <Action onClick={onCreate}>
@@ -373,7 +372,7 @@ function OrderWorkspaceView({
           )}
         </div>
       </div>
-      <div className="panel-toolbar">
+      <div className="panel-toolbar order-filters">
         <div className="inline-actions">
           <select
             aria-label="Trạng thái"
@@ -383,7 +382,7 @@ function OrderWorkspaceView({
               setPage(1);
             }}
           >
-            <option value="all">Tất cả trạng thái</option>
+            <option value="all">Mọi trạng thái</option>
             <option value="running">Đang sản xuất</option>
             <option value="needs_attention">Cần chú ý</option>
             <option value="on_track">Đúng tiến độ</option>
@@ -410,13 +409,13 @@ function OrderWorkspaceView({
               >
                 {(Object.keys(sortLabels) as OrderSortField[]).map((key) => (
                   <option key={key} value={key}>
-                    Sắp xếp: {sortLabels[key]}
+                    Theo {sortLabels[key].toLocaleLowerCase("vi")}
                   </option>
                 ))}
               </select>
               <button
                 type="button"
-                className="action secondary"
+                className="action secondary sort-dir"
                 aria-label={
                   sort.dir === "asc" ? "Đổi sang giảm dần" : "Đổi sang tăng dần"
                 }
@@ -433,7 +432,7 @@ function OrderWorkspaceView({
                 ) : (
                   <ArrowDown size={18} />
                 )}
-                {sort.dir === "asc" ? "Tăng dần" : "Giảm dần"}
+                <span>{sort.dir === "asc" ? "Tăng dần" : "Giảm dần"}</span>
               </button>
             </>
           )}

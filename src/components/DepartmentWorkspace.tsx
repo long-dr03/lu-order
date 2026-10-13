@@ -1760,12 +1760,12 @@ export function DepartmentsPanel({
               setSearch(e.target.value);
               setPage(1);
             }}
-            placeholder="Mã đơn, sản phẩm, khách hàng…"
+            placeholder="Tìm đơn…"
           />
         </Field>
       </div>
       <div className="table-scroll">
-        <table className="mobile-stack-table">
+        <table className="mobile-stack-table dept-table">
           <thead>
             <tr>
               <th>Đơn / sản phẩm</th>
@@ -1891,6 +1891,7 @@ export function StaffPanel({
         <Field label="Tìm hồ sơ">
           <input
             type="search"
+            placeholder="Tìm tên thợ…"
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
@@ -1906,7 +1907,7 @@ export function StaffPanel({
               setPage(1);
             }}
           >
-            <option value="">Tất cả</option>
+            <option value="">Mọi bộ phận</option>
             <option value="unclassified">Chưa phân loại</option>
             {DEPARTMENTS.map((d) => (
               <option key={d.id} value={d.id}>
@@ -1927,7 +1928,7 @@ export function StaffPanel({
       </div>
       <ErrorNotice error={error} />
       <div className="table-scroll">
-        <table>
+        <table className="mobile-stack-table staff-table">
           <thead>
             <tr>
               <th>Họ tên</th>
@@ -1940,7 +1941,9 @@ export function StaffPanel({
           <tbody>
             {rows.slice((current - 1) * 25, current * 25).map((e) => (
               <tr key={e.id}>
-                <td>{e.name}</td>
+                <td>
+                  <strong>{e.name}</strong>
+                </td>
                 <td>
                   {e.department_ids?.map(departmentName).join(", ") ||
                     "Chưa phân loại"}
@@ -1950,7 +1953,13 @@ export function StaffPanel({
                     ? "Có tài khoản quản lý / lịch sử"
                     : "Thợ gia công"}
                 </td>
-                <td>{e.active === 0 ? "Ngừng làm" : "Đang làm"}</td>
+                <td>
+                  <span
+                    className={`status ${e.active === 0 ? "" : "on_track"}`}
+                  >
+                    {e.active === 0 ? "Ngừng làm" : "Đang làm"}
+                  </span>
+                </td>
                 <td>
                   {(!e.has_account || isAdmin(session.user)) && (
                     <Action

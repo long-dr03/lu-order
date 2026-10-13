@@ -59,6 +59,12 @@ import { BackupPanel } from "@/components/BackupPanel";
 import { AdminPanel } from "@/components/AdminPanel";
 import { UserGuide } from "@/components/UserGuide";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+/** One short word under each icon of the phone bar; the full names stay in the menu. */
+const BAR_LABELS: Record<string, string> = {
+  payroll: "Lương",
+  employees: "Thợ",
+  accounts: "Tài khoản",
+};
 const navigation = [
   {
     id: "overview",
@@ -533,6 +539,28 @@ export default function Page() {
       );
     });
   }
+  // Three places beside the centre button, four without it; everything else lives under "Thêm".
+  // The bar keeps the same shape on every screen, so the centre button does not come and go.
+  const canRecord =
+    !!session &&
+    ["Cắt", "May", "Sửa hàng", "Đóng gói"].some((stage) =>
+      permits(session.user, "production.create", { stage }),
+    );
+  const barTabs = tabs.slice(0, canRecord ? 3 : 4);
+  const barButton = (item: (typeof tabs)[number]) => {
+    const Icon = item.icon;
+    return (
+      <button
+        type="button"
+        key={item.id}
+        aria-current={active?.id === item.id ? "page" : undefined}
+        onClick={() => setTab(item.id)}
+      >
+        <Icon size={22} aria-hidden="true" />
+        <span>{BAR_LABELS[item.id] || item.label}</span>
+      </button>
+    );
+  };
   return (
     <MotionConfig reducedMotion="user">
       <div
@@ -545,7 +573,7 @@ export default function Page() {
         <Modal
           open={sidebar}
           onClose={() => setSidebar(false)}
-          title="Điều hướng"
+          title="Tất cả mục"
           drawer
         >
           <nav aria-label="Điều hướng điện thoại">{renderNavigation(true)}</nav>
@@ -553,15 +581,6 @@ export default function Page() {
         <div className="app-main">
           <header className="app-header">
             <div className="inline-actions">
-              <button
-                className="icon-button mobile-menu"
-                aria-label="Mở điều hướng"
-                aria-expanded={sidebar}
-                aria-haspopup="dialog"
-                onClick={() => setSidebar(true)}
-              >
-                <Menu size={22} />
-              </button>
               <span className="mobile-brand">LUUTA</span>
             </div>
             <button
@@ -643,6 +662,37 @@ export default function Page() {
             </motion.div>
           </main>
         </div>
+        {/* Phones: the places a person goes all day sit under the thumb; the rest is one tap
+            away under "Thêm". Recording output is the centre button. */}
+        <nav className="bottom-bar" aria-label="Điều hướng nhanh">
+          {barTabs.slice(0, canRecord ? 2 : barTabs.length).map(barButton)}
+          {canRecord && (
+            <button
+              type="button"
+              className="bar-action"
+              aria-label="Nhập sản lượng"
+              aria-haspopup="dialog"
+              onClick={() => setProduction(true)}
+            >
+              <Plus size={24} aria-hidden="true" />
+            </button>
+          )}
+          {canRecord && barTabs.slice(2).map(barButton)}
+          {tabs.length > barTabs.length && (
+            <button
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={sidebar}
+              aria-current={
+                barTabs.some((t) => t.id === active?.id) ? undefined : "page"
+              }
+              onClick={() => setSidebar(true)}
+            >
+              <Menu size={22} aria-hidden="true" />
+              <span>Thêm</span>
+            </button>
+          )}
+        </nav>
         {quickProduction && !sidebar && (
           <Action
             className="production-shortcut"

@@ -221,7 +221,7 @@ export function RecordsPanel({
           </Field>
           <Field label="Công đoạn">
             <select value={stage} onChange={(e) => setStage(e.target.value)}>
-              <option value="">Tất cả công đoạn</option>
+              <option value="">Mọi công đoạn</option>
               {OUTPUT_STAGES.map((s) => (
                 <option key={s}>{s}</option>
               ))}
@@ -232,6 +232,8 @@ export function RecordsPanel({
             className="filter-product-field"
           >
             <input
+              type="search"
+              placeholder="Tìm sản phẩm, mã đơn, mã hàng…"
               value={product}
               onChange={(e) => setProduct(e.target.value)}
             />
@@ -242,7 +244,7 @@ export function RecordsPanel({
                 value={employee}
                 onChange={(e) => setEmployee(e.target.value)}
               >
-                <option value="">Trong phạm vi của tôi</option>
+                <option value="">Mọi nhân viên</option>
                 {allowedEmployees.map((e) => (
                   <option key={e.id} value={e.id}>
                     {e.name}

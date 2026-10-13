@@ -3113,3 +3113,171 @@ input.date-proxy { position: absolute; left: 0; bottom: 0; width: 100%; height: 
   .rate-copy { width: 100%; }
   .rate-copy select { flex: 1; max-width: none; }
 }
+
+/* ---- Phone shell: bottom bar, compact header, text that never spills or strands a word ---- */
+.bottom-bar { display: none; }
+@media (max-width: 767px) {
+  .bottom-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); align-items: center;
+    height: calc(60px + env(safe-area-inset-bottom, 0px));
+    padding: 0 6px env(safe-area-inset-bottom, 0px);
+    background: rgb(255 255 255 / 72%);
+    -webkit-backdrop-filter: blur(18px) saturate(1.6);
+    backdrop-filter: blur(18px) saturate(1.6);
+    border-top: 1px solid rgb(24 24 27 / 10%);
+  }
+  .bottom-bar button {
+    display: grid; justify-items: center; gap: 2px; min-width: 0; height: 52px; padding: 6px 2px;
+    border: 0; border-radius: 12px; background: transparent; color: #71717a;
+    font-size: 11px; font-weight: 500; line-height: 1.1;
+  }
+  .bottom-bar button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bottom-bar button[aria-current="page"] { color: #18181b; font-weight: 700; }
+  .bottom-bar .bar-action {
+    justify-self: center; align-content: center; width: 52px; height: 52px; padding: 0;
+    border-radius: 50%; background: #18181b; color: #fff;
+    box-shadow: 0 6px 16px rgb(0 0 0 / 22%); transform: translateY(-10px);
+  }
+  .production-shortcut { display: none; }
+  .app-main main, .app-main main.with-production-shortcut { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+  .toast, .quick-production-enabled .toast { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+
+  /* Header: brand and who is signed in; the role is in the account dialog. */
+  .app-header { height: 52px; }
+  .profile-button small { display: none; }
+  .profile-button > span:not(.avatar) { max-width: 40vw; overflow: hidden; text-overflow: ellipsis; font-size: 14px; font-weight: 500; }
+  .page-heading { margin-bottom: 12px; }
+  .page-heading h1 { font-size: 22px; }
+  /* "Làm mới" keeps its icon; the word is for wider screens. */
+  .page-heading > .inline-actions .action { width: 44px; min-width: 44px; padding: 0; font-size: 0; gap: 0; }
+
+  /* Text rules: headings balance their lines, running text never leaves one word alone,
+     long codes break instead of pushing the page sideways, and controls stay on one line. */
+  h1, h2, h3, legend, summary { text-wrap: balance; }
+  p, li, small, td, dd, .muted { text-wrap: pretty; }
+  body { overflow-wrap: anywhere; }
+  .action, .segmented button, .badge, .status, .rate-badge, .detail-tabs button { white-space: nowrap; }
+}
+
+/* Export menu: one button, two files named for what they hold. */
+.export-menu { position: relative; }
+.export-menu summary { list-style: none; cursor: pointer; }
+.export-menu summary::-webkit-details-marker { display: none; }
+.export-options { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; display: grid; width: min(320px, calc(100vw - 32px)); padding: 6px; border: 1px solid var(--border); border-radius: 12px; background: #fff; box-shadow: 0 8px 28px rgb(0 0 0 / 14%); }
+.export-options a { display: grid; gap: 2px; padding: 10px 12px; border-radius: 8px; }
+.export-options a:hover { background: #f4f4f5; }
+.export-options strong { font-size: 15px; }
+.export-options small { color: var(--muted); font-size: 13px; }
+
+@media (max-width: 767px) {
+  /* Đơn hàng: search and the main action on one line, filters on the next; orders start in view. */
+  .order-workspace .panel-toolbar { padding: 10px 12px; gap: 8px; }
+  .order-workspace .panel-toolbar:first-child { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; }
+  .order-workspace .order-actions { display: contents; }
+  .order-workspace .order-actions > .action { min-height: 44px; padding: 0 14px; }
+  /* Export is occasional on a phone: an icon beside the search, its menu spelled out. */
+  .order-workspace .export-menu summary { width: 44px; min-width: 44px; padding: 0; }
+  .order-workspace .export-menu summary span { display: none; }
+  .order-workspace .order-filters { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+  .order-workspace .order-filters .inline-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px; gap: 8px; grid-column: 1 / -1; width: 100%; }
+  .order-workspace .order-filters .inline-actions > select { flex-basis: auto; min-width: 0; }
+  .order-workspace .sort-dir { width: 44px; min-width: 44px; padding: 0; }
+  .order-workspace .sort-dir span { display: none; }
+  .order-workspace .order-filters .segmented { grid-column: 1; }
+  .order-workspace .order-filters .segmented button { padding: 8px 10px; }
+  .order-workspace .order-filters::after { content: ""; }
+}
+
+@media (max-width: 767px) {
+  /* Bộ phận: each order is a card — what it is, how urgent, what is left to do, one button. */
+  .department-panel .panel-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding: 12px; }
+  .dept-table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 12px; }
+  .dept-table td { display: block; padding: 0 !important; }
+  .dept-table td::before { content: none; }
+  .dept-table td:nth-child(1) strong { display: block; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dept-table td:nth-child(1) p { margin: 2px 0 0; color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dept-table td:nth-child(2) { text-align: right; color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .dept-table td:nth-child(2) p { margin: 4px 0 0; }
+  .dept-table td:nth-child(3) strong { font-size: 15px; }
+  .dept-table td:nth-child(3) p { margin: 2px 0 0; font-size: 13px; }
+  .dept-table td:nth-child(4) { align-self: end; text-align: right; color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .dept-table td:nth-child(5) { grid-column: 1 / -1; }
+  .dept-table td:nth-child(5) .action { width: 100%; min-height: 44px; }
+}
+
+.staff-table td strong { font-weight: 600; }
+@media (max-width: 767px) {
+  .dept-table td:nth-child(1) strong { font-weight: 700; }
+  .dept-table td:nth-child(3) strong { font-weight: 600; }
+
+  /* Thợ: name and status on one line, department under it, one button. */
+  .staff-table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 12px; }
+  .staff-table td { display: block; padding: 0 !important; }
+  .staff-table td::before { content: none; }
+  .staff-table td:nth-child(1) { grid-column: 1; grid-row: 1; }
+  .staff-table td:nth-child(1) strong { display: block; font-size: 16px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .staff-table td:nth-child(4) { grid-column: 2; grid-row: 1; }
+  .staff-table td:nth-child(2) { grid-column: 1; grid-row: 2; color: #3f3f46; font-size: 14px; }
+  .staff-table td:nth-child(3) { grid-column: 1; grid-row: 3; color: var(--muted); font-size: 13px; }
+  .staff-table td:nth-child(5) { grid-column: 2; grid-row: 2 / span 2; align-self: center; }
+  .staff-table td:nth-child(5) .action { min-height: 40px; padding: 8px 12px; }
+
+  /* Chi tiết đơn: the picture is a reference, not the page — a thumbnail beside the facts. */
+  .department-detail .order-detail-heading { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: start; gap: 12px; }
+  .department-detail .order-detail-heading .photo-carousel { width: 96px; }
+  .department-detail .order-detail-heading .photo-carousel .product-photo,
+  .department-detail .order-detail-heading > .product-photo { width: 96px; height: 128px; max-width: none; }
+  .department-detail .order-detail-heading .photo-carousel figcaption { display: none; }
+  .department-detail .order-detail-heading .photo-carousel-nav { width: 28px; height: 28px; }
+  .department-detail .order-detail-heading h3 { font-size: 17px; margin: 0 0 2px; }
+  .department-detail .order-detail-heading p { margin: 2px 0 0; font-size: 14px; }
+  .department-detail .detail-tabs { gap: 4px; }
+  .department-detail .detail-tabs button { min-height: 40px; padding: 6px 8px; }
+
+  /* Tổng quan: number first; the caption stays on one line. */
+  .kpi-grid { gap: 8px; }
+  .kpi-card { padding: 12px; gap: 2px; }
+  .kpi-card > span { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kpi-card > strong { font-size: 24px; }
+  .kpi-card > p { margin: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Selects and search boxes show their whole text. */
+  .order-workspace .order-filters select { font-size: 15px; padding-left: 10px; padding-right: 22px; }
+  .order-workspace .search-input input { min-width: 0; }
+
+  /* Sản lượng / Lương: export beside the heading size, filters two across. */
+  .records-actions > .inline-actions { width: auto; margin-left: auto; }
+  .records-actions > .inline-actions > * { flex: 0 0 auto; min-height: 40px; padding: 8px 12px; }
+}
+@media (max-width: 767px) {
+  .order-workspace .order-filters select, .records-filter-panel select { font-size: 14px; padding-left: 10px; padding-right: 20px; }
+  /* Tabs in an even grid: no tab left alone on the last line. */
+  .department-detail .detail-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .department-detail .detail-tabs button { overflow: hidden; text-overflow: ellipsis; }
+}
+@media (max-width: 767px) {
+  /* Filters say what they are by their own text, so the labels only stay for screen readers. */
+  .records-filter-panel .record-primary-filters .field > span,
+  .staff-toolbar .field > span {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+  .records-filter-panel .record-primary-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 12px; }
+  .records-filter-panel .record-primary-filters .field { position: relative; }
+  .records-filter-panel .record-primary-filters > :nth-child(4) { grid-column: 1; }
+  .records-filter-panel .record-primary-filters.personal-filters .extra-filter-toggle { grid-column: 1 / -1; }
+  .records-filter-panel .extra-filter-toggle { grid-column: auto; white-space: nowrap; }
+  /* Three figures as three lines: name on the left, number on the right. */
+  .records-kpis { gap: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface, #fff); overflow: hidden; }
+  .records-kpi { padding: 10px 14px; border: 0; border-radius: 0; box-shadow: none; }
+  .records-kpi + .records-kpi { border-top: 1px solid var(--border); }
+  .records-kpi-icon, .records-kpi small { display: none; }
+  .records-kpi > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; width: 100%; }
+  .records-kpi p { margin: 0; white-space: nowrap; }
+  .records-kpi strong { font-size: 17px; white-space: nowrap; }
+  .staff-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 12px; }
+  .staff-toolbar .field { position: relative; }
+  .staff-toolbar .field:nth-child(1) { grid-column: 1; grid-row: 1; }
+  .staff-toolbar .field:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+  .staff-toolbar .action { grid-column: 2; grid-row: 1; white-space: nowrap; }
+}
