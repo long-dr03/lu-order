@@ -1,7 +1,30 @@
+import sharp from "sharp";
 import { db } from "@/lib/db";
 import { authenticate, ensure, failure } from "@/lib/server/auth";
 import { permits } from "@/lib/permissions";
 import { initializeDatabase } from "@/lib/server/migrate";
+
+// Lists show a postage stamp, not the 1400 px original: a small copy is made once and kept.
+const WIDTHS = [160, 480];
+const thumbs = new Map<string, Buffer>();
+const KEEP = 400;
+async function sized(id: string, data: Buffer, width: number) {
+  const key = `${id}:${width}`;
+  const hit = thumbs.get(key);
+  if (hit) return hit;
+  const small = await sharp(data)
+    .resize({
+      width,
+      height: width * 2,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .jpeg({ quality: 78 })
+    .toBuffer();
+  if (thumbs.size >= KEEP) thumbs.delete(thumbs.keys().next().value!);
+  thumbs.set(key, small);
+  return small;
+}
 
 export async function GET(
   request: Request,
@@ -41,10 +64,16 @@ export async function GET(
       403,
       "Bạn không có quyền xem ảnh sản phẩm này.",
     );
-    return new Response(new Uint8Array(image.data), {
+    const width = Number(new URL(request.url).searchParams.get("w"));
+    const body = WIDTHS.includes(width)
+      ? await sized(id, image.data, width).catch(() => image.data)
+      : image.data;
+    return new Response(new Uint8Array(body), {
       headers: {
         "Content-Type": "image/jpeg",
-        "Cache-Control": "private, no-store",
+        // A picture never changes under its id, so the browser may keep it for the day
+        // instead of downloading it again each time a list or a dialog shows it.
+        "Cache-Control": "private, max-age=86400, immutable",
         "X-Content-Type-Options": "nosniff",
         "Content-Disposition": "inline; filename=product.jpg",
       },

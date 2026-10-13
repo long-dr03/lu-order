@@ -293,14 +293,16 @@ export default function Page() {
     [data, session, api, openOrder, startCreate, refresh],
   );
   async function reloadDetail() {
-    await refresh();
+    // The open dialog is what the person is looking at: refresh it first and let the
+    // list behind it catch up on its own, instead of waiting for both in turn.
+    const list = refresh();
     if (selected) {
       try {
         setSelected(await api<Order>(`/api/orders/${selected.id}`));
       } catch (e) {
         setError(message(e));
       }
-    }
+    } else await list;
   }
   async function saved(close: () => void, message = "Đã lưu dữ liệu.") {
     close();

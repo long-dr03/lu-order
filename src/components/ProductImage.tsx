@@ -76,20 +76,35 @@ export async function uploadProductImage(
     throw new Error(result.error || "Không thể tải ảnh sản phẩm.");
   return result.data.url;
 }
+/** Stored pictures come in list (160) and card (480) sizes; local previews are used as they are. */
+export const sizedPhoto = (url: string, width: 160 | 480) =>
+  url.startsWith("/api/product-images/") ? `${url}?w=${width}` : url;
+
 export function ProductPhoto({
   url,
   name,
   large = false,
   interactive = true,
+  crisp = false,
 }: {
   url?: string | null;
   name: string;
   large?: boolean;
   interactive?: boolean;
+  /** Shown bigger than a list thumbnail (the order detail): load the card-sized copy. */
+  crisp?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const content = url ? (
-    <Image src={url} alt={`Ảnh ${name}`} width={420} height={560} unoptimized />
+    <Image
+      src={sizedPhoto(url, large || crisp ? 480 : 160)}
+      alt={`Ảnh ${name}`}
+      width={420}
+      height={560}
+      loading="lazy"
+      decoding="async"
+      unoptimized
+    />
   ) : (
     <span className="photo-placeholder">
       <ImageOff size={large ? 30 : 22} />
@@ -482,6 +497,7 @@ export function ProductPhotoGallery({
       }}
     >
       <ProductPhoto
+        crisp
         key={photo.key}
         url={photo.url}
         name={photo.color ? `${name} · ${photo.color}` : name}
