@@ -3102,7 +3102,7 @@ input.date-proxy { position: absolute; left: 0; bottom: 0; width: 100%; height: 
 .rate-badge.done { background: #f4f4f5; color: #52525b; font-weight: 500; }
 .rate-order-row svg { color: #71717a; transition: transform 0.15s; }
 .rate-orders li.open .rate-order-row svg { transform: rotate(180deg); }
-.rate-order-edit { display: grid; gap: 14px; padding: 4px 22px 18px; }
+.rate-order-edit { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 4px 22px 18px; }
 .rate-order-edit .rates-foot { flex-wrap: wrap; }
 .rate-copy { display: flex; gap: 8px; margin-right: auto; min-width: 0; }
 .rate-copy select { width: auto; max-width: 260px; min-height: 40px; }
@@ -3111,7 +3111,10 @@ input.date-proxy { position: absolute; left: 0; bottom: 0; width: 100%; height: 
   .rate-order-row { padding: 12px 14px; }
   .rate-order-edit { padding: 4px 14px 16px; }
   .rate-copy { width: 100%; }
-  .rate-copy select { flex: 1; max-width: none; }
+  .rate-copy select { flex: 1; min-width: 0; max-width: none; }
+  .rate-order-edit .rates-foot .action:last-child { width: 100%; justify-content: center; }
+  .rate-order-edit .price-input input { padding-left: 6px; }
+  .rate-order-edit .price-input input::placeholder { font-size: 14px; }
 }
 
 /* ---- Phone shell: bottom bar, compact header, text that never spills or strands a word ---- */
@@ -3122,9 +3125,9 @@ input.date-proxy { position: absolute; left: 0; bottom: 0; width: 100%; height: 
     display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); align-items: center;
     height: calc(60px + env(safe-area-inset-bottom, 0px));
     padding: 0 6px env(safe-area-inset-bottom, 0px);
-    background: rgb(255 255 255 / 72%);
-    -webkit-backdrop-filter: blur(18px) saturate(1.6);
-    backdrop-filter: blur(18px) saturate(1.6);
+    background: #ffffff00;
+    -webkit-backdrop-filter: blur(9px) saturate(1.6);
+    backdrop-filter: blur(9px) saturate(1.6);
     border-top: 1px solid rgb(24 24 27 / 10%);
   }
   .bottom-bar button {
