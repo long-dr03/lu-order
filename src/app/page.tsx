@@ -581,7 +581,9 @@ export default function Page() {
         <div className="app-main">
           <header className="app-header">
             <div className="inline-actions">
-              <span className="mobile-brand">LUUTA</span>
+              <span className="mobile-brand" role="img" aria-label="LUUTA">
+                <Logo compact />
+              </span>
             </div>
             <button
               className="profile-button"
