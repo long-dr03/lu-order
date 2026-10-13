@@ -1,15 +1,23 @@
 "use client";
-import { MoneyInput, parseMoney } from "./SmartInputs";
+import { MoneyInput } from "./SmartInputs";
 import { useEffect, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { ChevronDown, Plus, Search, X } from "lucide-react";
 import type { Order } from "@/lib/types";
 import { type Api, type ViewLog, money, message } from "@/lib/client";
 import type { Rate } from "@/lib/server/business";
 import { OUTPUT_STAGES } from "@/lib/workflow";
+import { OPTIONAL_RATE_STAGES, PriceInput } from "./detail-rates";
 import { Action, Field, ErrorNotice, Empty } from "./Primitives";
 import { DEFAULT_POLICY, type Policy } from "@/lib/policy";
 export { ProductionForm, OrderDetail } from "./DepartmentWorkspace";
 
+const PAGE = 15;
+type RateFilter = "missing" | "open" | "all";
+
+/**
+ * Piece rates, one row per order. The eye lands on what needs doing: orders still missing a
+ * production price come first with an amber count; opening a row edits every stage in place.
+ */
 export function RatesPanel({
   orders,
   rates,
@@ -21,87 +29,209 @@ export function RatesPanel({
   api: Api;
   onSaved: () => Promise<void>;
 }) {
-  const [id, setId] = useState(orders[0]?.id || "");
-  const [stage, setStage] = useState("May");
-  const [workId, setWorkId] = useState(0);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState("");
-  const stages: string[] = [...OUTPUT_STAGES];
-  const selectedOrder = orders.find((o) => o.id === id);
-  const parts = (selectedOrder?.work_items || []).filter(
-    (p) => p.stage === stage,
-  );
-  const chosenPart = parts.find((p) => p.id === workId) || parts[0];
-  const currentRate = rates.find(
-    (r) =>
-      r.order_id === id &&
-      r.stage === stage &&
-      (chosenPart ? r.work_item_id === chosenPart.id : !r.work_item_id),
-  );
-  // Earlier orders that already carry prices; the same product is suggested first.
-  const sources = orders
-    .filter((o) => o.id !== id && rates.some((r) => r.order_id === o.id))
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<RateFilter>("open");
+  const [openId, setOpenId] = useState("");
+  const [shown, setShown] = useState(PAGE);
+  const priced = (o: Order, stage: string) =>
+    rates.some((r) => r.order_id === o.id && r.stage === stage) ||
+    (o.work_items || []).some((w) => w.stage === stage);
+  const lacking = (o: Order) =>
+    OUTPUT_STAGES.filter(
+      (s) => !OPTIONAL_RATE_STAGES.includes(s) && !priced(o, s),
+    );
+  const running = orders.filter((o) => o.status !== "completed");
+  const counts: Record<RateFilter, number> = {
+    missing: running.filter((o) => lacking(o).length).length,
+    open: running.length,
+    all: orders.length,
+  };
+  const needle = search.trim().toLocaleLowerCase("vi");
+  const list = (filter === "all" ? orders : running)
+    .filter((o) => filter !== "missing" || lacking(o).length)
+    .filter((o) =>
+      `${o.id} ${o.product_name} ${o.customer}`
+        .toLocaleLowerCase("vi")
+        .includes(needle),
+    )
     .sort(
       (a, b) =>
-        Number(
-          !!selectedOrder &&
-            (b.product_code === selectedOrder.product_code ||
-              b.product_name === selectedOrder.product_name),
-        ) -
-          Number(
-            !!selectedOrder &&
-              (a.product_code === selectedOrder.product_code ||
-                a.product_name === selectedOrder.product_name),
-          ) || (b.order_date || "").localeCompare(a.order_date || ""),
+        Number(!!lacking(b).length) - Number(!!lacking(a).length) ||
+        (b.created_at || "").localeCompare(a.created_at || ""),
     );
+  return (
+    <div className="stack rates-workspace">
+      <section className="panel">
+        <div className="panel-toolbar rates-toolbar">
+          <div className="search-input">
+            <Search size={20} />
+            <input
+              type="search"
+              aria-label="Tìm đơn để đặt giá"
+              placeholder="Mã đơn, sản phẩm, khách hàng…"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setShown(PAGE);
+              }}
+            />
+          </div>
+          <div className="segmented" role="group" aria-label="Lọc đơn">
+            {(
+              [
+                ["missing", "Thiếu giá"],
+                ["open", "Đang làm"],
+                ["all", "Tất cả"],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                type="button"
+                key={key}
+                aria-pressed={filter === key}
+                onClick={() => {
+                  setFilter(key);
+                  setShown(PAGE);
+                }}
+              >
+                {label} ({counts[key]})
+              </button>
+            ))}
+          </div>
+        </div>
+        <ul className="rate-orders">
+          {list.slice(0, shown).map((o) => {
+            const open = openId === o.id;
+            const gaps = lacking(o);
+            return (
+              <li key={o.id} className={open ? "open" : undefined}>
+                <button
+                  type="button"
+                  className="rate-order-row"
+                  aria-expanded={open}
+                  onClick={() => setOpenId(open ? "" : o.id)}
+                >
+                  <span className="rate-order-name">
+                    <strong>{o.product_name}</strong>
+                    <small>
+                      {o.id} · {o.customer}
+                    </small>
+                  </span>
+                  <span
+                    className={`rate-badge ${gaps.length ? "missing" : "done"}`}
+                  >
+                    {gaps.length ? `Thiếu ${gaps.length} giá` : "Đủ giá"}
+                  </span>
+                  <ChevronDown size={18} aria-hidden="true" />
+                </button>
+                {open && (
+                  <OrderRatesEditor
+                    order={o}
+                    rates={rates}
+                    sources={orders.filter(
+                      (x) =>
+                        x.id !== o.id && rates.some((r) => r.order_id === x.id),
+                    )}
+                    api={api}
+                    onSaved={onSaved}
+                  />
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        {!list.length && (
+          <Empty>
+            {filter === "missing"
+              ? "Không còn đơn nào thiếu giá."
+              : "Không có đơn phù hợp."}
+          </Empty>
+        )}
+        {list.length > shown && (
+          <div className="padded">
+            <Action
+              type="button"
+              tone="secondary"
+              onClick={() => setShown(shown + PAGE)}
+            >
+              Xem thêm {Math.min(PAGE, list.length - shown)} đơn
+            </Action>
+          </div>
+        )}
+      </section>
+      <PolicyCard api={api} />
+    </div>
+  );
+}
+
+/** Every stage price of one order, edited together; work parts are priced per part. */
+function OrderRatesEditor({
+  order,
+  rates,
+  sources,
+  api,
+  onSaved,
+}: {
+  order: Order;
+  rates: Rate[];
+  sources: Order[];
+  api: Api;
+  onSaved: () => Promise<void>;
+}) {
+  const [draft, setDraft] = useState<Record<string, number | undefined>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState("");
+  // The same product first, then the most recent orders.
+  const ranked = [...sources].sort(
+    (a, b) =>
+      Number(
+        b.product_code === order.product_code ||
+          b.product_name === order.product_name,
+      ) -
+        Number(
+          a.product_code === order.product_code ||
+            a.product_name === order.product_name,
+        ) || (b.order_date || "").localeCompare(a.order_date || ""),
+  );
   const [sourceValue, setSource] = useState("");
-  const source = sources.some((o) => o.id === sourceValue)
+  const source = ranked.some((o) => o.id === sourceValue)
     ? sourceValue
-    : sources[0]?.id || "";
-  async function copyFrom() {
-    if (!selectedOrder || !source) return;
-    setBusy(true);
-    setError("");
-    setSaved("");
-    try {
-      const result = await api<{ copied: string[]; skipped: string[] }>(
-        "/api/rates",
-        { order_id: id, copy_from: source, version: selectedOrder.version },
-      );
-      await onSaved();
-      setSaved(
-        `Đã sao chép đơn giá từ ${source} sang ${id}: ${result.copied.join(", ")}.${result.skipped.length ? ` Bỏ qua: ${result.skipped.join("; ")}.` : ""}`,
-      );
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  const visibleRates = rates.flatMap((rate) => {
-    const order = orders.find((o) => o.id === rate.order_id);
-    return order &&
-      (rate.work_item_id ||
-        !(order.work_items || []).some((p) => p.stage === rate.stage))
-      ? [{ ...rate, order }]
-      : [];
+    : ranked[0]?.id || "";
+  const fields = OUTPUT_STAGES.flatMap((stage) => {
+    const parts = (order.work_items || []).filter((p) => p.stage === stage);
+    return parts.length
+      ? parts.map((p) => ({
+          key: `part:${p.id}`,
+          stage,
+          part: p.id as number | undefined,
+          label: `${stage} · ${p.name}`,
+          current: rates.find((r) => r.work_item_id === p.id)?.unit_price,
+        }))
+      : [
+          {
+            key: stage,
+            stage,
+            part: undefined as number | undefined,
+            label: stage,
+            current: rates.find(
+              (r) =>
+                r.order_id === order.id && r.stage === stage && !r.work_item_id,
+            )?.unit_price,
+          },
+        ];
   });
-  async function submit(form: FormData) {
+  const pending = fields.filter(
+    (f) => draft[f.key] !== undefined && draft[f.key] !== f.current,
+  );
+  async function run(work: () => Promise<string>) {
     setBusy(true);
     setError("");
     setSaved("");
     try {
-      await api("/api/rates", {
-        order_id: id,
-        stage,
-        ...(chosenPart ? { work_item_id: chosenPart.id } : {}),
-        unit_price: parseMoney(String(form.get("price"))),
-      });
+      const done = await work();
+      setDraft({});
       await onSaved();
-      setSaved(
-        `Đã lưu ${id} · ${stage}${chosenPart ? ` · ${chosenPart.name}` : ""}: ${money(parseMoney(String(form.get("price"))))} / sản phẩm.`,
-      );
+      setSaved(done);
     } catch (e) {
       setError(message(e));
     } finally {
@@ -109,236 +239,97 @@ export function RatesPanel({
     }
   }
   return (
-    <div className="stack rates-workspace">
-      <section className="panel padded">
-        <h2>Đơn giá công đoạn</h2>
-        <p className="muted">
-          Áp dụng cho lần ghi nhận tiếp theo; tiền công đã lưu giữ nguyên.
-        </p>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submit(new FormData(event.currentTarget));
-          }}
-          className="stack"
-        >
-          <ErrorNotice error={error} />
-          <div className="form-grid">
-            <Field label="Đơn hàng">
-              <select value={id} onChange={(e) => setId(e.target.value)}>
-                {orders.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.id} · {o.product_name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            {!!sources.length && (
-              <Field
-                label="Sao chép từ đơn trước"
-                hint="Chép giá mọi công đoạn và phần việc Cắt/May; công đoạn đã có phân công hoặc sản lượng được giữ nguyên."
-              >
-                <div className="inline-actions">
-                  <select
-                    value={source}
-                    onChange={(e) => setSource(e.target.value)}
-                  >
-                    {sources.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.id} · {o.product_name}
-                      </option>
-                    ))}
-                  </select>
-                  <Action
-                    type="button"
-                    tone="secondary"
-                    busy={busy}
-                    disabled={!id}
-                    onClick={() => void copyFrom()}
-                  >
-                    Sao chép
-                  </Action>
-                </div>
-              </Field>
-            )}
-            <Field label="Công đoạn">
-              <select value={stage} onChange={(e) => setStage(e.target.value)}>
-                {stages.map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </select>
-            </Field>
-            {!!parts.length && (
-              <Field label="Phần việc">
-                <select
-                  value={chosenPart?.id || ""}
-                  onChange={(e) => setWorkId(Number(e.target.value))}
-                >
-                  {parts.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            )}
-            <Field label="Đơn giá (đ / sản phẩm)">
-              <MoneyInput
-                key={`${id}-${stage}-${chosenPart?.id}-${currentRate?.unit_price}`}
-                name="price"
-                defaultValue={currentRate?.unit_price || 0}
-                required
-              />
-            </Field>
-          </div>
-          <p className="muted">
-            Giá đang áp dụng:{" "}
-            <strong>
-              {currentRate
-                ? `${money(currentRate.unit_price)} / sản phẩm`
-                : "Chưa cấu hình cho công đoạn này"}
-            </strong>
-          </p>
-          {saved && (
-            <p role="status" className="rate-save-notice">
-              {saved}
-            </p>
-          )}
-          <Action type="submit" busy={busy} disabled={!id}>
-            Lưu đơn giá
-          </Action>
-        </form>
-        {selectedOrder && ["Cắt", "May"].includes(stage) && (
-          <WorkPlanForm
-            key={`${id}-${stage}`}
-            order={selectedOrder}
-            stage={stage}
-            rates={rates}
-            api={api}
-            onSaved={onSaved}
-          />
-        )}
-        {!!parts.length && (
-          <div className="stack padded">
-            {parts.map((p) => (
-              <div className="card-top" key={p.id}>
-                <strong>{p.name}</strong>
-                <span>
-                  {money(
-                    rates.find((r) => r.work_item_id === p.id)?.unit_price || 0,
-                  )}{" "}
-                  / sản phẩm
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-        {selectedOrder && (
-          <div className="rate-preview">
-            <h3>
-              Đơn giá của {selectedOrder.id} · {selectedOrder.product_name}
-            </h3>
-            <div className="rate-stage-grid">
-              {stages.map((step) => {
-                const rate = rates.find(
-                  (r) => r.order_id === id && r.stage === step,
-                );
-                return (
-                  <button
-                    type="button"
-                    key={step}
-                    className="rate-stage-card"
-                    aria-pressed={stage === step}
-                    onClick={() => {
-                      setStage(step);
-                      setSaved("");
-                    }}
-                  >
-                    <span>{step}</span>
-                    <strong>
-                      {(selectedOrder.work_items || []).some(
-                        (p) => p.stage === step,
-                      )
-                        ? "Theo phần việc"
-                        : rate
-                          ? money(rate.unit_price)
-                          : "Chưa đặt giá"}
-                    </strong>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </section>
-      <PolicyCard api={api} />
-      <section className="panel">
-        <div className="panel-toolbar">
-          <h2>Đơn giá đã lưu</h2>
-          <span className="muted">{visibleRates.length} mức giá</span>
-        </div>
-        <div className="table-scroll">
-          <table className="mobile-stack-table">
-            <thead>
-              <tr>
-                <th>Đơn hàng / sản phẩm</th>
-                <th>Công đoạn</th>
-                <th>Đơn giá (đ / sản phẩm)</th>
-                <th>Thao tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleRates.map((rate) => (
-                <tr
-                  key={`${rate.order_id}-${rate.stage}-${rate.work_item_id || "whole"}`}
-                >
-                  <td data-label="Đơn / sản phẩm">
-                    <div className="mobile-cell-value">
-                      <strong>{rate.order_id}</strong>
-                      <span className="table-subtitle">
-                        {rate.order.product_name}
-                      </span>
-                    </div>
-                  </td>
-                  <td data-label="Công đoạn">
-                    <div className="mobile-cell-value">
-                      {rate.stage}
-                      {rate.work_item_name && (
-                        <span className="table-subtitle">
-                          {rate.work_item_name}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td data-label="Đơn giá / sản phẩm" className="rate-price">
-                    {money(rate.unit_price)}
-                  </td>
-                  <td data-label="Thao tác">
-                    <button
-                      type="button"
-                      className="action secondary"
-                      aria-label={`Chỉnh giá ${rate.order_id} ${rate.stage}`}
-                      onClick={() => {
-                        setId(rate.order_id);
-                        setStage(rate.stage);
-                        setWorkId(rate.work_item_id || 0);
-                        setSaved("");
-                      }}
-                    >
-                      Chỉnh giá
-                    </button>
-                  </td>
-                </tr>
+    <div className="rate-order-edit">
+      <ErrorNotice error={error} />
+      <div className="rates-grid">
+        {fields.map((f) => (
+          <label key={f.key} className="rates-cell">
+            <span>{f.label}</span>
+            <PriceInput
+              label={`Đơn giá ${f.label}`}
+              value={f.key in draft ? draft[f.key] : f.current}
+              missing={
+                !OPTIONAL_RATE_STAGES.includes(f.stage) &&
+                f.current === undefined &&
+                draft[f.key] === undefined
+              }
+              placeholder={
+                OPTIONAL_RATE_STAGES.includes(f.stage)
+                  ? "Không bắt buộc"
+                  : "Chưa có"
+              }
+              onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))}
+            />
+          </label>
+        ))}
+      </div>
+      <div className="rates-foot">
+        {!!ranked.length && (
+          <span className="rate-copy">
+            <select
+              aria-label="Đơn để lấy giá"
+              value={source}
+              onChange={(e) => setSource(e.target.value)}
+            >
+              {ranked.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.id} · {o.product_name}
+                </option>
               ))}
-            </tbody>
-          </table>
-        </div>
-        {!visibleRates.length && (
-          <Empty>
-            Chưa có đơn giá được lưu. Chọn đơn hàng và công đoạn để đặt giá.
-          </Empty>
+            </select>
+            <Action
+              type="button"
+              tone="secondary"
+              busy={busy}
+              onClick={() =>
+                void run(async () => {
+                  const result = await api<{
+                    copied: string[];
+                    skipped: string[];
+                  }>("/api/rates", {
+                    order_id: order.id,
+                    copy_from: source,
+                    version: order.version,
+                  });
+                  return `Đã lấy giá từ ${source}: ${result.copied.join(", ") || "không có gì mới"}.`;
+                })
+              }
+            >
+              Lấy giá đơn này
+            </Action>
+          </span>
         )}
-      </section>
+        {saved && <span className="muted">{saved}</span>}
+        <Action
+          type="button"
+          busy={busy}
+          disabled={!pending.length}
+          onClick={() =>
+            void run(async () => {
+              for (const f of pending)
+                await api("/api/rates", {
+                  order_id: order.id,
+                  stage: f.stage,
+                  unit_price: draft[f.key],
+                  ...(f.part ? { work_item_id: f.part } : {}),
+                });
+              return "Đã lưu đơn giá.";
+            })
+          }
+        >
+          Lưu đơn giá
+        </Action>
+      </div>
+      {(["Cắt", "May"] as const).map((stage) => (
+        <WorkPlanForm
+          key={`${order.id}-${stage}`}
+          order={order}
+          stage={stage}
+          rates={rates}
+          api={api}
+          onSaved={onSaved}
+        />
+      ))}
     </div>
   );
 }

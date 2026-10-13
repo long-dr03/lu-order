@@ -3085,3 +3085,31 @@ input.date-proxy { position: absolute; left: 0; bottom: 0; width: 100%; height: 
 }
 .lines-toggle { margin-left: 10px; padding: 0; border: 0; background: none; color: #3f3f46; font-size: 14px; font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
 .rate-stage-card span small { font-weight: 400; color: var(--muted); }
+
+/* Đơn giá page: one row per order; what still needs a price is what stands out. */
+.rates-toolbar { gap: 12px; }
+.rates-toolbar .search-input { flex: 1 1 260px; }
+.rate-orders { list-style: none; margin: 0; padding: 0; }
+.rate-orders li + li { border-top: 1px solid var(--border); }
+.rate-orders li.open { background: #fafafa; }
+.rate-order-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 12px 22px; border: 0; background: transparent; color: inherit; text-align: left; }
+.rate-order-row:hover { background: #f4f4f5; }
+.rate-order-name { display: grid; gap: 2px; min-width: 0; }
+.rate-order-name strong { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rate-order-name small { color: var(--muted); font-size: 13px; }
+.rate-badge { padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.rate-badge.missing { background: #fef3c7; color: #92400e; }
+.rate-badge.done { background: #f4f4f5; color: #52525b; font-weight: 500; }
+.rate-order-row svg { color: #71717a; transition: transform 0.15s; }
+.rate-orders li.open .rate-order-row svg { transform: rotate(180deg); }
+.rate-order-edit { display: grid; gap: 14px; padding: 4px 22px 18px; }
+.rate-order-edit .rates-foot { flex-wrap: wrap; }
+.rate-copy { display: flex; gap: 8px; margin-right: auto; min-width: 0; }
+.rate-copy select { width: auto; max-width: 260px; min-height: 40px; }
+.rate-copy .action { min-height: 40px; padding: 8px 14px; white-space: nowrap; }
+@media (max-width: 767px) {
+  .rate-order-row { padding: 12px 14px; }
+  .rate-order-edit { padding: 4px 14px 16px; }
+  .rate-copy { width: 100%; }
+  .rate-copy select { flex: 1; max-width: none; }
+}

@@ -349,7 +349,7 @@ function OrderWorkspaceView({
               href={`/api/export/excel?${exportParams}`}
             >
               <Download size={18} />
-              Excel
+              Xuất danh sách đơn
             </a>
           )}
           {(permits(session.user, "export.data", {}) ||
@@ -362,7 +362,7 @@ function OrderWorkspaceView({
               title="File theo dõi đơn hàng theo mẫu của xưởng: mỗi khách một sheet, số giao theo ngày và size"
             >
               <Download size={18} />
-              Mẫu theo dõi
+              Xuất bảng theo dõi giao hàng
             </a>
           )}
           {hasPermission(session.user, "orders.create") && (

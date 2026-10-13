@@ -8,7 +8,11 @@ import type { Detail } from "./order-detail-shared";
 import { OUTPUT_STAGES } from "@/lib/workflow";
 
 const PAY_STAGES = OUTPUT_STAGES;
-const OPTIONAL: readonly string[] = ["Kiểm NPL/Vải", "Kiểm rập", "Giao hàng"];
+export const OPTIONAL_RATE_STAGES: readonly string[] = [
+  "Kiểm NPL/Vải",
+  "Kiểm rập",
+  "Giao hàng",
+];
 
 /** Piece rates of this order, for a manager who may price at least one stage. */
 export function useOrderRates(
@@ -95,7 +99,7 @@ export function RatesSetup({
   // Production stages need a price to record output at all. Checks and delivery are priced only
   // by workshops that pay them per piece, so they are never chased.
   const missing = stages.filter(
-    (s) => !OPTIONAL.includes(s) && !split(s) && !rates.priced(s),
+    (s) => !OPTIONAL_RATE_STAGES.includes(s) && !split(s) && !rates.priced(s),
   );
   if (!rates.ready || !stages.length) return null;
   const pending = Object.entries(draft).filter(
@@ -199,12 +203,14 @@ export function RatesSetup({
                 label={`Đơn giá ${stage}`}
                 value={shown(stage)}
                 missing={
-                  !OPTIONAL.includes(stage) &&
+                  !OPTIONAL_RATE_STAGES.includes(stage) &&
                   !rates.priced(stage) &&
                   draft[stage] === undefined
                 }
                 placeholder={
-                  OPTIONAL.includes(stage) ? "Không bắt buộc" : "Chưa có"
+                  OPTIONAL_RATE_STAGES.includes(stage)
+                    ? "Không bắt buộc"
+                    : "Chưa có"
                 }
                 onChange={(v) =>
                   setDraft((d) => {
@@ -251,7 +257,7 @@ export function RatesSetup({
 }
 
 /** Whole đồng with a dot every three digits and the unit inside the field. */
-function PriceInput({
+export function PriceInput({
   label,
   value,
   missing,
