@@ -1051,9 +1051,11 @@ td strong {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: #18181b70;
+  /* No backdrop blur: it made the browser re-blur the whole page behind the dialog on every
+     keystroke and scroll inside it (about 4x slower to paint when measured). A darker veil
+     separates the dialog just as well. */
+  background: #18181b8c;
   z-index: 100;
-  backdrop-filter: blur(3px);
 }
 .modal-content {
   position: fixed;
