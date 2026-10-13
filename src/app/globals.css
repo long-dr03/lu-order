@@ -3112,7 +3112,8 @@ input.date-proxy { position: absolute; left: 0; bottom: 0; width: 100%; height: 
   .rate-order-edit { padding: 4px 14px 16px; }
   .rate-copy { width: 100%; }
   .rate-copy select { flex: 1; min-width: 0; max-width: none; }
-  .rate-order-edit .rates-foot .action:last-child { width: 100%; justify-content: center; }
+  .rate-order-edit .rates-foot > .action { width: 100%; justify-content: center; }
+  .rate-copy .action { flex: none; }
   .rate-order-edit .price-input input { padding-left: 6px; }
   .rate-order-edit .price-input input::placeholder { font-size: 14px; }
 }
