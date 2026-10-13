@@ -636,13 +636,17 @@ export default function Page() {
                 <Action
                   tone="secondary"
                   aria-label="Làm mới dữ liệu"
-                  busy={loading}
+                  disabled={loading}
+                  aria-busy={loading || undefined}
                   onClick={() => {
                     setLoading(true);
                     void refresh();
                   }}
                 >
-                  <RefreshCw size={18} />
+                  <RefreshCw
+                    size={18}
+                    className={loading ? "spin" : undefined}
+                  />
                   Làm mới
                 </Action>
               </div>
