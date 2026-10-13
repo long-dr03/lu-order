@@ -670,6 +670,7 @@ export default function Page() {
             </motion.div>
           </main>
         </div>
+        <InstallApp toast />
         {/* Phones: the places a person goes all day sit under the thumb; the rest is one tap
             away under "Thêm". Recording output is the centre button. */}
         <nav className="bottom-bar" aria-label="Điều hướng nhanh">

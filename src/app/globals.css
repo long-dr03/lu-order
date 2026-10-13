@@ -3306,3 +3306,17 @@ button, a, select, label { touch-action: manipulation; }
   html, body { overscroll-behavior-y: none; }
   .bottom-bar button, .app-header { -webkit-user-select: none; user-select: none; }
 }
+.install-toast { display: none; }
+@media (max-width: 767px) {
+  .install-toast {
+    position: fixed; left: 12px; right: 12px; bottom: calc(72px + env(safe-area-inset-bottom, 0px)); z-index: 39;
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px;
+    padding: 10px 10px 10px 14px; border-radius: 14px; background: #18181b; color: #fff;
+    box-shadow: 0 10px 30px rgb(0 0 0 / 22%);
+  }
+  .install-toast p { display: grid; gap: 1px; margin: 0; min-width: 0; }
+  .install-toast strong { font-size: 14px; font-weight: 600; }
+  .install-toast span { font-size: 13px; color: #d4d4d8; text-wrap: pretty; }
+  .install-toast .action { min-height: 36px; padding: 6px 16px; background: #fff; color: #18181b; border-color: #fff; }
+  .install-toast .icon-button { width: 36px; height: 36px; min-height: 36px; border: 0; background: transparent; color: #d4d4d8; }
+}
