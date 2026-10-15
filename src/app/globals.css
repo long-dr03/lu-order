@@ -2103,7 +2103,7 @@ th.sticky-col {
 @media (max-width: 639px) {
   .app-header { padding: 0 12px; }
   .mobile-brand { display: inline-flex; }
-  .mobile-brand .logo svg { width: 34px; height: 34px; }
+  .mobile-brand .logo-mark { height: 36px; }
   .profile-button { min-width: 0; max-width: calc(100% - 124px); padding: 4px; }
   .profile-button > span:not(.avatar) { white-space: nowrap; }
   .profile-button > svg { display: none; }
@@ -3322,3 +3322,10 @@ button, a, select, label { touch-action: manipulation; }
 }
 .over-limit { color: #b45309; font-weight: 600; }
 .modal-footer strong small.over-limit { display: block; font-size: 13px; }
+/* Brand logo: a raster mark, sized by height so it keeps its proportions. */
+.logo-mark { width: auto; height: 46px; flex-shrink: 0; }
+.auth-card .logo-mark { height: 56px; }
+.logo-full img { width: min(240px, 60vw); height: auto; }
+@media (max-width: 767px) {
+  .auth-intro .logo-full img { width: 150px; }
+}

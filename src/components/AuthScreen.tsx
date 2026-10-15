@@ -42,7 +42,7 @@ export function AuthScreen({
   return (
     <div className="auth-page">
       <section className="auth-intro">
-        <Logo />
+        <Logo full />
         <div>
           <span className="eyebrow">LUUTA GARMENT</span>
           <h1>
@@ -51,8 +51,8 @@ export function AuthScreen({
             đến thành phẩm.
           </h1>
           <p>
-            Một không gian để điều phối các bộ phận, kiểm soát chất lượng và theo
-            dõi tiền công.
+            Một không gian để điều phối các bộ phận, kiểm soát chất lượng và
+            theo dõi tiền công.
           </p>
           <div className="auth-pills">
             <span>6 bộ phận</span>
@@ -61,8 +61,8 @@ export function AuthScreen({
           </div>
         </div>
         <p className="muted">
-          <ShieldCheck size={18} /> Truy cập dữ liệu theo vai trò và bộ phận được
-          giao.
+          <ShieldCheck size={18} /> Truy cập dữ liệu theo vai trò và bộ phận
+          được giao.
         </p>
       </section>
       <section className="auth-form">

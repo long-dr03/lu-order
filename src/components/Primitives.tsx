@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   AnimatePresence,
@@ -8,26 +9,37 @@ import {
 } from "motion/react";
 import { X, LoaderCircle } from "lucide-react";
 import { useId, useRef, type ReactNode } from "react";
-export function Logo({ compact = false }: { compact?: boolean }) {
+/** The brand mark (diamond over the LU monogram), with the name beside it unless compact. */
+export function Logo({
+  compact = false,
+  full = false,
+}: {
+  compact?: boolean;
+  /** The whole brand logo with the Luuta wordmark, for the sign-in screen. */
+  full?: boolean;
+}) {
+  if (full)
+    return (
+      <div className="logo logo-full">
+        <Image
+          src="/brand/luuta-logo.png"
+          alt="Luuta"
+          width={395}
+          height={480}
+          priority
+        />
+      </div>
+    );
   return (
     <div className="logo">
-      <svg aria-hidden="true" viewBox="0 0 48 48" width="40" height="40">
-        <rect x="1" y="1" width="46" height="46" rx="12" fill="currentColor" />
-        <path
-          d="M13 12v24h10M25 12v16c0 11 11 11 11 0V12"
-          fill="none"
-          stroke="white"
-          strokeWidth="3"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <path
-          d="M8 40h31"
-          stroke="white"
-          strokeWidth="1"
-          strokeDasharray="2 3"
-        />
-      </svg>
+      <Image
+        src="/brand/luuta-mark.png"
+        alt={compact ? "Luuta" : ""}
+        width={113}
+        height={160}
+        className="logo-mark"
+        priority
+      />
       {!compact && (
         <div>
           <strong>LUUTA</strong>

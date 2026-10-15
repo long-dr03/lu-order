@@ -583,7 +583,7 @@ export default function Page() {
         <div className="app-main">
           <header className="app-header">
             <div className="inline-actions">
-              <span className="mobile-brand" role="img" aria-label="LUUTA">
+              <span className="mobile-brand">
                 <Logo compact />
               </span>
             </div>
