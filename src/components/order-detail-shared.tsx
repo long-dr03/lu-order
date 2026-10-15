@@ -268,10 +268,13 @@ export function QuantityGrid({
   rows,
   amounts,
   onChange,
+  overcut = false,
 }: {
   rows: (OrderVariant & { remaining: number; limit?: number })[];
   amounts: Record<string, number>;
   onChange: (v: Record<string, number>) => void;
+  /** Cutting may go over the order by a margin; anywhere else, more than what is left is an error. */
+  overcut?: boolean;
 }) {
   return (
     <div className="quantity-groups">
@@ -288,7 +291,19 @@ export function QuantityGrid({
                     <span className="muted">
                       Còn {v.remaining.toLocaleString("vi-VN")}
                       {(amounts[keyFor(v)] || 0) > v.remaining &&
-                        ` · cắt dư +${((amounts[keyFor(v)] || 0) - v.remaining).toLocaleString("vi-VN")}`}
+                        (overcut &&
+                        (amounts[keyFor(v)] || 0) <=
+                          (v.limit ?? v.remaining) ? (
+                          ` · cắt dư +${((amounts[keyFor(v)] || 0) - v.remaining).toLocaleString("vi-VN")}`
+                        ) : (
+                          <span className="over-limit">
+                            {" "}
+                            · vượt{" "}
+                            {(
+                              (amounts[keyFor(v)] || 0) - v.remaining
+                            ).toLocaleString("vi-VN")}
+                          </span>
+                        ))}
                     </span>
                   </span>
                   <input

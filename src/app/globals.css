@@ -3320,3 +3320,5 @@ button, a, select, label { touch-action: manipulation; }
   .install-toast .action { min-height: 36px; padding: 6px 16px; background: #fff; color: #18181b; border-color: #fff; }
   .install-toast .icon-button { width: 36px; height: 36px; min-height: 36px; border: 0; background: transparent; color: #d4d4d8; }
 }
+.over-limit { color: #b45309; font-weight: 600; }
+.modal-footer strong small.over-limit { display: block; font-size: 13px; }

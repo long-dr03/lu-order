@@ -325,6 +325,8 @@ export function ProductionForm({
   );
   // Without a rate the server refuses the record, so say so before the worker types anything.
   const missingRate = canSeePrice && ratesReady && !!detail && !rate;
+  // Nothing left anywhere on this stage: say why instead of offering boxes that cannot be saved.
+  const empty = !!detail && !!stage && rows.every((v) => v.limit === 0);
   const problem = !detail
     ? "Đang tải số lượng và phân công…"
     : !stage
@@ -335,11 +337,15 @@ export function ProductionForm({
           ? canAssign
             ? "Chưa có thợ cho công đoạn này. Bấm “Thêm thợ” để chọn người làm."
             : "Chưa có thợ được phân công cho công đoạn/phần việc này."
-          : missingRate
-            ? `Chưa có đơn giá ${stage}. Quản lý đặt ở tab Tiến độ → Đơn giá công đoạn rồi mới ghi sản lượng.`
-            : invalid
-              ? "Có số lượng vượt mức còn lại hoặc không phải số nguyên."
-              : "";
+          : empty
+            ? stage === "Sửa hàng"
+              ? "Chưa có hàng lỗi chờ sửa. QC phải ghi số lỗi ở tab Kiểm QC thì mới có hàng để sửa."
+              : `${stage}: ${stageNote(stage)}, không còn gì để ghi.`
+            : missingRate
+              ? `Chưa có đơn giá ${stage}. Quản lý đặt ở tab Tiến độ → Đơn giá công đoạn rồi mới ghi sản lượng.`
+              : invalid
+                ? "Có số lượng vượt mức còn lại hoặc không phải số nguyên."
+                : "";
   /** Assigns one more worker to this stage of the order and selects them for entry. */
   async function addHelper(employeeId: string) {
     if (!detail) return;
@@ -603,41 +609,56 @@ export function ProductionForm({
             : ", phần dư vẫn tính công."}
         </p>
       )}
-      <div className="fill-row">
-        <strong>
-          Số lượng theo màu / size
-          {people.length > 1 &&
-            ` · ${people.find((p) => p.id === person)?.name || ""}`}
-          {scoped && (
-            <button
+      {!empty && (
+        <div className="fill-row">
+          <strong>
+            Số lượng theo màu / size
+            {people.length > 1 &&
+              ` · ${people.find((p) => p.id === person)?.name || ""}`}
+            {scoped && (
+              <button
+                type="button"
+                className="link-button lines-toggle"
+                onClick={() => setAllLines(!allLines)}
+              >
+                {allLines
+                  ? `Chỉ phần được giao (${scopeLabel(scopeFor(person))})`
+                  : "Hiện cả màu / size khác"}
+              </button>
+            )}
+          </strong>
+          <div className="fill-actions">
+            <Action
               type="button"
-              className="link-button lines-toggle"
-              onClick={() => setAllLines(!allLines)}
+              tone="secondary"
+              onClick={() =>
+                setAmounts(
+                  Object.fromEntries(
+                    lines.map((v) => [keyFor(v), v.remaining]),
+                  ),
+                )
+              }
             >
-              {allLines
-                ? `Chỉ phần được giao (${scopeLabel(scopeFor(person))})`
-                : "Hiện cả màu / size khác"}
-            </button>
-          )}
-        </strong>
-        <div className="fill-actions">
-          <Action
-            type="button"
-            tone="secondary"
-            onClick={() =>
-              setAmounts(
-                Object.fromEntries(lines.map((v) => [keyFor(v), v.remaining])),
-              )
-            }
-          >
-            Điền tối đa
-          </Action>
-          <Action type="button" tone="secondary" onClick={() => setAmounts({})}>
-            Xóa số
-          </Action>
+              Điền tối đa
+            </Action>
+            <Action
+              type="button"
+              tone="secondary"
+              onClick={() => setAmounts({})}
+            >
+              Xóa số
+            </Action>
+          </div>
         </div>
-      </div>
-      <QuantityGrid rows={lines} amounts={amounts} onChange={setAmounts} />
+      )}
+      {empty ? null : (
+        <QuantityGrid
+          rows={lines}
+          amounts={amounts}
+          onChange={setAmounts}
+          overcut={stage === "Cắt"}
+        />
+      )}
       {canSeePrice && (
         <div className="pay-preview">
           {rate ? (
@@ -697,6 +718,12 @@ export function ProductionForm({
           {total === 0
             ? "Chưa nhập số lượng nào"
             : `Tổng lần này: ${total.toLocaleString("vi-VN")} sản phẩm`}
+          {/* The reason is also at the top, but that is off screen once the form is scrolled. */}
+          {total > 0 && invalid && (
+            <small className="over-limit">
+              Có ô vượt số còn lại, sửa lại mới ghi được.
+            </small>
+          )}
         </strong>
         <Action type="submit" busy={busy} disabled={!!problem || total === 0}>
           <Check size={18} />
