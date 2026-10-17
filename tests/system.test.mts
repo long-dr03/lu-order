@@ -739,6 +739,53 @@ test("Removing assignment or worker department blocks new entries but retains hi
     "cutting",
   );
 });
+test("Inspecting credits the inspector's QC pay in the same save, re-inspection included", async () => {
+  const id = await order([{ color: "Đen", size: "M", quantity: 5 }]);
+  await db
+    .prepare("UPDATE order_variants SET cut_qty=5,sewn_qty=5 WHERE order_id=?")
+    .run(id);
+  await db
+    .prepare("DELETE FROM order_rates WHERE order_id=? AND stage='QC'")
+    .run(id);
+  // Without a QC rate the result still stands; the pay waits for the output form.
+  assert.equal(
+    ((await result(await qc(id, 2, 2))) as { qc_pay: string }).qc_pay,
+    "no_rate",
+  );
+  await db
+    .prepare(
+      "INSERT INTO order_rates(order_id,stage,unit_price) VALUES (?,'QC',500)",
+    )
+    .run(id);
+  assert.equal(
+    ((await result(await qc(id, 3, 2))) as { qc_pay: string }).qc_pay,
+    "recorded",
+  );
+  await assign(id, "Sửa hàng", workers.sewing);
+  await result(
+    await record(id, "Sửa hàng", workers.sewing[0], 1, "sewing", {
+      record_rework: true,
+    }),
+    201,
+  );
+  await result(await qc(id, 1, 1, "reinspect"));
+  const paid = (await db
+    .prepare(
+      "SELECT employee_id,SUM(quantity) q,SUM(total_pay) p FROM production_logs WHERE order_id=? AND stage='QC' GROUP BY employee_id",
+    )
+    .all(id)) as { employee_id: string; q: number; p: number }[];
+  assert.deepEqual(
+    paid.map((r) => [r.employee_id, Number(r.q), Number(r.p)]),
+    [["EMP-quality", 4, 2000]],
+  );
+  assert(
+    await db
+      .prepare(
+        "SELECT 1 FROM work_assignments WHERE order_id=? AND stage='QC' AND employee_id='EMP-quality' AND active=1",
+      )
+      .get(id),
+  );
+});
 test("QC identity comes from session, and repair belongs to Sewing rather than QC", async () => {
   const id = await order([{ color: "Đen", size: "M", quantity: 5 }]);
   await db
@@ -759,7 +806,7 @@ test("QC identity comes from session, and repair belongs to Sewing rather than Q
         params("id", id),
       )
     ).status,
-    403,
+    422,
   );
   await result(await qc(id, 5, 3));
   const inspection = (await db
@@ -3608,12 +3655,21 @@ test("Workshop simulation: seven operators complete a 100-piece, two-shipment or
   }));
   assert.equal(
     logs.reduce((n, r) => n + r.total_pay, 0),
-    1306000,
+    // 1,306,000 of production plus the inspector's QC pay, now credited when inspecting.
+    1306000 + stages.find((r) => r.stage === "QC")!.quantity * 800,
   );
+  // Every inspected piece, first time and after repair, is paid once, to the inspector.
   assert.equal(
-    logs.filter((r) => r.stage === "QC").length,
-    0,
-    "QC screen currently records physical inspection but not wages",
+    stages.find((r) => r.stage === "QC")?.quantity,
+    (await current(id)).variants!.reduce((n, v) => {
+      const w = v as typeof v & {
+        qc_inspected_qty?: number;
+        reinspected_qty?: number;
+      };
+      return (
+        n + Number(w.qc_inspected_qty || 0) + Number(w.reinspected_qty || 0)
+      );
+    }, 0),
   );
   const final = await current(id);
   assert.equal(final.status, "completed");

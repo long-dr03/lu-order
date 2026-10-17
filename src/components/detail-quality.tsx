@@ -3,23 +3,54 @@ import { useState } from "react";
 import { Plus } from "lucide-react";
 import { type Api, day, message } from "@/lib/client";
 import { type SessionInfo } from "@/lib/permissions";
+import { type Employee } from "@/lib/types";
 import { remainingOperation } from "@/lib/workflow";
 import { Action, Field, ErrorNotice, Empty } from "./Primitives";
 import { ProductImagePicker, uploadProductImage } from "./ProductImage";
 import { Detail, keyFor } from "./order-detail-shared";
 import { DateInput, TimeInput } from "./DateInput";
 
+const PAY_NOTE: Record<string, string> = {
+  recorded: "Đã lưu kết quả kiểm và tính công QC.",
+  no_rate:
+    "Đã lưu kết quả kiểm. Chưa có đơn giá QC nên chưa tính công; đặt giá ở tab Tiến độ rồi ghi bù ở Ghi sản lượng.",
+  no_permission:
+    "Đã lưu kết quả kiểm. Tài khoản này không được ghi công QC; quản lý ghi bù ở Ghi sản lượng.",
+  locked: "Đã lưu kết quả kiểm. Tháng lương đã chốt nên chưa tính công QC.",
+  no_inspector:
+    "Đã lưu kết quả kiểm. Chưa chọn người kiểm nên chưa tính công QC.",
+};
+
 export function QualityForm({
   order,
   session,
+  employees,
   api,
   onChanged,
 }: {
   order: Detail;
   session: SessionInfo;
+  employees: Employee[];
   api: Api;
   onChanged: () => Promise<void>;
 }) {
+  // Who did the inspecting and gets paid for it: QC staff, or anyone already assigned to QC here.
+  const assignedQc = (order.assignments || [])
+    .filter((a) => a.active === 1 && a.stage === "QC")
+    .map((a) => a.employee_id);
+  const inspectors = employees.filter(
+    (e) =>
+      e.active !== 0 &&
+      (e.department_ids?.includes("quality") || assignedQc.includes(e.id)),
+  );
+  const [inspectorValue, setInspector] = useState("");
+  const inspector = inspectors.some((e) => e.id === inspectorValue)
+    ? inspectorValue
+    : assignedQc.find((id) => inspectors.some((e) => e.id === id)) ||
+      (inspectors.some((e) => e.id === session.user.employee_id)
+        ? session.user.employee_id!
+        : inspectors[0]?.id || "");
+  const [notice, setNotice] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   // What waits for each kind of inspection; open on the one that has work, so re-inspection
   // after repair is not hidden behind the first-inspection view.
@@ -79,21 +110,27 @@ export function QualityForm({
         e.preventDefault();
         setBusy(true);
         setError("");
+        setNotice("");
         const f = new FormData(e.currentTarget);
         try {
           const imageUrl = imageFile
             ? await uploadProductImage(imageFile, session)
             : undefined;
-          await api(`/api/orders/${encodeURIComponent(order.id)}/operations`, {
-            version: order.version,
-            action,
-            operation_date: f.get("date"),
-            operation_time: f.get("time"),
-            image_url: imageUrl,
-            defect_type: String(f.get("defect") || ""),
-            reason: String(f.get("reason") || "").trim() || undefined,
-            entries,
-          });
+          const saved = await api<{ qc_pay?: string }>(
+            `/api/orders/${encodeURIComponent(order.id)}/operations`,
+            {
+              version: order.version,
+              worker_id: inspector || undefined,
+              action,
+              operation_date: f.get("date"),
+              operation_time: f.get("time"),
+              image_url: imageUrl,
+              defect_type: String(f.get("defect") || ""),
+              reason: String(f.get("reason") || "").trim() || undefined,
+              entries,
+            },
+          );
+          setNotice(PAY_NOTE[saved.qc_pay || ""] || "Đã lưu kết quả kiểm.");
           setQty({});
           setDefects({});
           setBlame({});
@@ -106,10 +143,12 @@ export function QualityForm({
         }
       }}
     >
-      <p className="muted">
-        Người kiểm: <strong>{session.user.name}</strong>
-      </p>
       <ErrorNotice error={error} />
+      {notice && (
+        <p role="status" className="rate-save-notice">
+          {notice}
+        </p>
+      )}
       <div className="segmented qc-kind" role="group" aria-label="Loại kiểm">
         {(
           [
@@ -133,6 +172,24 @@ export function QualityForm({
         ))}
       </div>
       <div className="form-grid">
+        <Field label="Người kiểm (nhận công QC)">
+          {inspectors.length ? (
+            <select
+              value={inspector}
+              onChange={(e) => setInspector(e.target.value)}
+            >
+              {inspectors.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="muted">
+              Chưa có ai ở bộ phận QC. Khai báo ở Danh sách thợ.
+            </span>
+          )}
+        </Field>
         <Field label="Ngày kiểm">
           <DateInput
             name="date"

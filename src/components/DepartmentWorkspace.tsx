@@ -987,6 +987,7 @@ export function OrderDetail({
           <QualityForm
             order={order}
             session={session}
+            employees={employees}
             api={api}
             onChanged={onChanged}
           />

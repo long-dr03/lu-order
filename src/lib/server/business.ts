@@ -1664,8 +1664,97 @@ export async function recordOperations(
         }),
       );
     }
-    return { count: result.length };
+    const qc_pay = ["qc", "reinspect"].includes(input.action)
+      ? await creditInspection(ctx, id, input, entries)
+      : undefined;
+    return { count: result.length, qc_pay };
   })();
+}
+async function requireInspector(orderId: string, employeeId: string) {
+  const e = (await getEmployees()).find((e) => e.id === employeeId);
+  ensure(
+    e && e.active !== 0,
+    422,
+    "Người kiểm không tồn tại hoặc đã ngừng làm.",
+  );
+  ensure(
+    e.department_ids?.includes("quality") ||
+      (await db
+        .prepare(
+          "SELECT 1 FROM work_assignments WHERE order_id=? AND stage='QC' AND employee_id=? AND active=1",
+        )
+        .get(orderId, employeeId)),
+    422,
+    "Người kiểm phải thuộc bộ phận QC hoặc được phân công QC cho đơn này.",
+  );
+  return e;
+}
+/**
+ * Inspecting is the QC worker's output: one save records the result and credits the pay, so
+ * nobody has to enter the same pieces again under Ghi sản lượng. Without a rate, permission or
+ * an open month the result still stands and the pay can be added later from the output form.
+ */
+async function creditInspection(
+  ctx: Context,
+  id: string,
+  input: { worker_id?: string; operation_date?: string; reason?: string },
+  entries: { color: string; size: string; quantity: number }[],
+): Promise<
+  "recorded" | "no_inspector" | "no_rate" | "no_permission" | "locked"
+> {
+  const inspector = input.worker_id || ctx.user.employee_id;
+  if (!inspector) return "no_inspector";
+  await requireInspector(id, inspector);
+  if (!permits(ctx.user, "production.create", { stage: "QC" }))
+    return "no_permission";
+  if (
+    !(await db
+      .prepare("SELECT 1 FROM order_rates WHERE order_id=? AND stage='QC'")
+      .get(id))
+  )
+    return "no_rate";
+  const date = input.operation_date || today();
+  if (
+    await db
+      .prepare("SELECT 1 FROM payroll_locks WHERE month=?")
+      .get(date.slice(0, 7))
+  )
+    return "locked";
+  if (
+    !(await db
+      .prepare(
+        "SELECT 1 FROM work_assignments WHERE order_id=? AND stage='QC' AND employee_id=? AND COALESCE(work_item_id,0)=0 AND active=1",
+      )
+      .get(id, inspector))
+  )
+    await db
+      .prepare(
+        "INSERT INTO work_assignments(id,order_id,stage,work_item_id,employee_id,department_id,actor_id) VALUES (?,?,?,?,?,?,?)",
+      )
+      .run(
+        crypto.randomUUID(),
+        id,
+        "QC",
+        null,
+        inspector,
+        "quality",
+        ctx.actor.id,
+      );
+  for (const entry of entries) {
+    const fresh = (await getOrderById(id))!;
+    await recordProductionSingle(ctx, {
+      log_date: date,
+      employee_id: inspector,
+      order_id: id,
+      stage: "QC",
+      color: entry.color,
+      size: entry.size,
+      quantity: entry.quantity,
+      reason: input.reason,
+      version: fresh.version,
+    });
+  }
+  return "recorded";
 }
 export async function recordOperation(
   ctx: Context,
@@ -1714,11 +1803,10 @@ export async function recordOperation(
       input.worker_id,
     );
   }
-  ensure(
-    !inspection || !input.worker_id || input.worker_id === ctx.user.employee_id,
-    403,
-    "Người kiểm QC được xác định từ tài khoản đang thao tác; không được chọn người khác.",
-  );
+  // The inspector may be someone other than the one typing (an assistant enters for the floor),
+  // but must be a QC person: in Quality or assigned to QC on this order.
+  if (inspection && input.worker_id && input.worker_id !== ctx.user.employee_id)
+    await requireInspector(id, input.worker_id);
   if (input.operation_time)
     ensure(
       new Date(`${operationDate}T${input.operation_time}:00+07:00`).getTime() <=
@@ -1809,9 +1897,7 @@ export async function recordOperation(
       input.packages || 0,
       operationDate,
       opTime,
-      inspection
-        ? ctx.user.employee_id
-        : input.worker_id || ctx.user.employee_id,
+      input.worker_id || ctx.user.employee_id,
       input.notes || input.defect_type || "",
       input.reason || null,
       input.image_url || null,
@@ -1837,7 +1923,12 @@ export async function recordOperation(
         input.action === "rework" ? input.quantity : 0,
         input.action === "reinspect" ? input.quantity : 0,
         input.action === "reinspect" ? passed : 0,
-        inspection ? ctx.user.name : actorLabel(ctx),
+        inspection
+          ? (input.worker_id &&
+              (await getEmployees()).find((e) => e.id === input.worker_id)
+                ?.name) ||
+              ctx.user.name
+          : actorLabel(ctx),
       );
   if (input.blame?.length) {
     ensure(input.action === "qc", 422, "Chỉ quy lỗi cho thợ khi QC lần đầu.");
