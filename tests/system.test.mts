@@ -2588,6 +2588,76 @@ test("Logging in as a worker-only account never issues a business session", asyn
   assert.equal(response.status, 403);
   assert.equal(response.headers.get("set-cookie"), null);
 });
+test("Admin deletes an account, keeping the person's work history", async () => {
+  await operator("deleteqa", "leader", ["sewing"]);
+  const id = people.deleteqa.id;
+  assert.equal(
+    (
+      await adminApi.POST(
+        req("/api/admin/users", "management", { id, action: "delete" }),
+        params("section", "users"),
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await adminApi.POST(
+        req("/api/admin/users", "admin", {
+          id: people.admin.id,
+          action: "delete",
+        }),
+        params("section", "users"),
+      )
+    ).status,
+    403,
+  );
+  await result(
+    await adminApi.POST(
+      req("/api/admin/users", "admin", { id, action: "delete" }),
+      params("section", "users"),
+    ),
+  );
+  assert.equal(
+    await db.prepare("SELECT 1 FROM accounts WHERE id=?").get(id),
+    undefined,
+  );
+  assert.equal(
+    (await ordersApi.GET(req("/api/orders", "deleteqa"))).status,
+    401,
+  );
+  assert(
+    await db.prepare("SELECT 1 FROM employees WHERE id='EMP-deleteqa'").get(),
+  );
+});
+test("Admin deletes an order with everything recorded on it, typing its code to confirm", async () => {
+  const id = await order([{ color: "Đen", size: "M", quantity: 5 }]);
+  await assign(id, "Cắt", workers.cutting);
+  await result(await record(id, "Cắt", workers.cutting[0], 5, "cutting"), 201);
+  const remove = (who: string, confirm: string) =>
+    detailApi.DELETE(
+      req(`/api/orders/${id}`, who, { confirm }, { method: "DELETE" }),
+      params("id", id),
+    );
+  assert.equal((await remove("management", id)).status, 403);
+  assert.equal((await remove("admin", "nhầm")).status, 422);
+  await result(await remove("admin", id));
+  for (const table of [
+    "orders",
+    "order_variants",
+    "production_logs",
+    "work_assignments",
+  ])
+    assert.equal(
+      await db
+        .prepare(
+          `SELECT 1 FROM ${table} WHERE ${table === "orders" ? "id" : "order_id"}=?`,
+        )
+        .get(id),
+      undefined,
+      table,
+    );
+});
 test("Account lock, password reset and password change revoke every old session", async () => {
   await operator("credentialsqa", "leader", ["sewing"]);
   const id = people.credentialsqa.id;

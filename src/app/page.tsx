@@ -796,6 +796,10 @@ export default function Page() {
                 lines={data?.lines || []}
                 employees={data?.employees || []}
                 onChanged={reloadDetail}
+                onDeleted={async () => {
+                  setSelected(null);
+                  await refresh();
+                }}
               />
             </ErrorBoundary>
           )}

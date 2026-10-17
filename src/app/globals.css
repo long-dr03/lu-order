@@ -3332,3 +3332,6 @@ button, a, select, label { touch-action: manipulation; }
 .qc-kind { align-self: flex-start; }
 .qc-kind small { font-weight: 400; color: var(--muted); }
 @media (max-width: 767px) { .qc-kind { align-self: stretch; } .qc-kind button { flex: 1; white-space: nowrap; } }
+.danger-zone { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 24px; padding: 14px 16px; border: 1px solid #fecaca; border-radius: 10px; background: #fef2f2; }
+.danger-zone p { margin: 2px 0 0; font-size: 14px; }
+@media (max-width: 767px) { .danger-zone { flex-direction: column; align-items: stretch; } }

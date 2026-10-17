@@ -180,7 +180,14 @@ export async function POST(
     const input = z
       .object({
         id: text,
-        action: z.enum(["approve", "update", "lock", "unlock", "reset"]),
+        action: z.enum([
+          "approve",
+          "update",
+          "lock",
+          "unlock",
+          "reset",
+          "delete",
+        ]),
         name: text.optional(),
         employeeId: z.string().nullable().optional(),
         createEmployee: z.boolean().optional(),
@@ -239,6 +246,20 @@ export async function POST(
         403,
         "Không thể gán vai trò có quyền vượt quyền của bạn.",
       );
+    if (input.action === "delete") {
+      // Removes the login only. The person's work history stays with their employee profile,
+      // and files they uploaded are handed to whoever deletes the account.
+      await db.transaction(async () => {
+        await revoke(target.id);
+        for (const table of ["product_images", "preparation_files"])
+          await db
+            .prepare(`UPDATE ${table} SET owner_id=? WHERE owner_id=?`)
+            .run(ctx.actor.id, target.id);
+        await db.prepare("DELETE FROM accounts WHERE id=?").run(target.id);
+        await audit(ctx, "Xóa tài khoản", target.username);
+      })();
+      return ok({ deleted: target.id });
+    }
     await db.transaction(async () => {
       if (input.action === "reset") {
         ensure(input.temporaryPassword, 422, "Cần nhập mật khẩu tạm.");

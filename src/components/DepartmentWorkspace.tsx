@@ -8,7 +8,14 @@ import {
   LazyExoticComponent,
   ReactNode,
 } from "react";
-import { Check, ClipboardList, Plus, Users, Pencil } from "lucide-react";
+import {
+  Check,
+  ClipboardList,
+  Plus,
+  Users,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { type Api, day, message, money } from "@/lib/client";
 import { type SessionInfo, hasPermission, permits } from "@/lib/permissions";
 import {
@@ -741,6 +748,7 @@ export function OrderDetail({
   employees,
   onChanged,
   initialTab,
+  onDeleted,
 }: {
   order: Order;
   session: SessionInfo;
@@ -750,6 +758,8 @@ export function OrderDetail({
   onChanged: () => Promise<void>;
   /** Tab to land on when the caller already knows what the person came to do. */
   initialTab?: string;
+  /** Called after the order is deleted, to close the dialog and reload the list. */
+  onDeleted?: () => Promise<void>;
 }) {
   const order = raw as Detail;
   const firstTab =
@@ -1195,7 +1205,92 @@ export function OrderDetail({
           </Action>
         </form>
       )}
+      {tab === "edit" && isAdmin(session.user) && onDeleted && (
+        <DeleteOrder order={order} api={api} onDeleted={onDeleted} />
+      )}
     </div>
+  );
+}
+
+/** Admin-only removal of a whole order; the order code is typed back so it is never one tap. */
+function DeleteOrder({
+  order,
+  api,
+  onDeleted,
+}: {
+  order: Detail;
+  api: Api;
+  onDeleted: () => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return (
+    <section className="danger-zone">
+      <div>
+        <strong>Xóa đơn hàng</strong>
+        <p className="muted">
+          Xóa hẳn đơn cùng sản lượng, tiền công, phân công, đợt giao và ảnh.
+          Không khôi phục được.
+        </p>
+      </div>
+      <Action type="button" tone="danger" onClick={() => setOpen(true)}>
+        <Trash2 size={18} />
+        Xóa đơn
+      </Action>
+      <Modal
+        open={open}
+        onClose={() => {
+          if (!busy) setOpen(false);
+        }}
+        title={`Xóa đơn ${order.id}`}
+        description={order.product_name}
+      >
+        <form
+          className="stack"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setBusy(true);
+            setError("");
+            try {
+              await api(
+                `/api/orders/${encodeURIComponent(order.id)}`,
+                { confirm: typed },
+                "DELETE",
+              );
+              setOpen(false);
+              await onDeleted();
+            } catch (err) {
+              setError(message(err));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <p>
+            Mọi dữ liệu của đơn này sẽ bị xóa và không khôi phục được. Gõ mã{" "}
+            <strong>{order.id}</strong> để xác nhận.
+          </p>
+          <ErrorNotice error={error} />
+          <Field label="Mã đơn">
+            <input
+              value={typed}
+              autoComplete="off"
+              onChange={(e) => setTyped(e.target.value)}
+            />
+          </Field>
+          <Action
+            type="submit"
+            tone="danger"
+            busy={busy}
+            disabled={typed.trim() !== order.id}
+          >
+            Xóa vĩnh viễn
+          </Action>
+        </form>
+      </Modal>
+    </section>
   );
 }
 

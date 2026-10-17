@@ -2,6 +2,7 @@
 import { DEPARTMENTS, departmentName } from "@/lib/departments";
 import { useEffect, useState } from "react";
 import {
+  Trash2,
   UserCheck,
   UserRoundCog,
   Plus,
@@ -49,7 +50,7 @@ export function AdminPanel({
   const [reset, setReset] = useState<Account | null>(null);
   const [confirm, setConfirm] = useState<{
     user: Account;
-    action: "lock" | "unlock";
+    action: "lock" | "unlock" | "delete";
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState("");
@@ -201,6 +202,17 @@ export function AdminPanel({
                         </Action>
                       </>
                     )}
+                    {editable && (
+                      <Action
+                        tone="danger"
+                        onClick={() =>
+                          setConfirm({ user: u, action: "delete" })
+                        }
+                      >
+                        <Trash2 size={16} />
+                        Xóa
+                      </Action>
+                    )}
                   </div>
                 </article>
               );
@@ -344,24 +356,31 @@ export function AdminPanel({
           if (!busy) setConfirm(null);
         }}
         title={
-          confirm?.action === "lock" ? "Khóa tài khoản" : "Mở khóa tài khoản"
+          confirm?.action === "delete"
+            ? "Xóa tài khoản"
+            : confirm?.action === "lock"
+              ? "Khóa tài khoản"
+              : "Mở khóa tài khoản"
         }
         description={confirm?.user.username}
       >
         <div className="stack">
           <p>
-            {confirm?.action === "lock"
-              ? "Các phiên đăng nhập của tài khoản này sẽ bị thu hồi."
-              : "Tài khoản sẽ được phép đăng nhập trở lại."}
+            {confirm?.action === "delete"
+              ? "Tài khoản bị xóa hẳn, không đăng nhập được nữa và không khôi phục được. Hồ sơ thợ và sản lượng đã ghi của người này vẫn giữ nguyên."
+              : confirm?.action === "lock"
+                ? "Các phiên đăng nhập của tài khoản này sẽ bị thu hồi."
+                : "Tài khoản sẽ được phép đăng nhập trở lại."}
           </p>
           <ErrorNotice error={error} />
           <Action
             busy={busy}
+            tone={confirm?.action === "delete" ? "danger" : "primary"}
             onClick={() => {
               if (confirm) act({ id: confirm.user.id, action: confirm.action });
             }}
           >
-            Xác nhận
+            {confirm?.action === "delete" ? "Xóa tài khoản" : "Xác nhận"}
           </Action>
         </div>
       </Modal>

@@ -9,6 +9,7 @@ import {
 } from "@/lib/server/business";
 import { body } from "@/lib/server/validation";
 import { initializeDatabase } from "@/lib/server/migrate";
+import { deleteOrder, deleteOrderSchema } from "@/lib/server/order-delete";
 
 export async function GET(
   request: Request,
@@ -53,6 +54,22 @@ export async function PATCH(
         input,
         async () => await moveOrder(ctx, id, input),
       ),
+    );
+  } catch (e) {
+    return failure(e);
+  }
+}
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    await initializeDatabase();
+    const { id } = await params;
+    const ctx = await authenticate(request);
+    guardWrite(request, ctx);
+    return ok(
+      await deleteOrder(ctx, id, deleteOrderSchema.parse(await body(request))),
     );
   } catch (e) {
     return failure(e);
