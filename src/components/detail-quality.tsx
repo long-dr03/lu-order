@@ -17,6 +17,8 @@ const PAY_NOTE: Record<string, string> = {
   no_permission:
     "Đã lưu kết quả kiểm. Tài khoản này không được ghi công QC; quản lý ghi bù ở Ghi sản lượng.",
   locked: "Đã lưu kết quả kiểm. Tháng lương đã chốt nên chưa tính công QC.",
+  split:
+    "Đã lưu kết quả kiểm. QC của đơn này chia theo phần việc, nên ghi công từng phần ở Ghi sản lượng.",
   no_inspector:
     "Đã lưu kết quả kiểm. Chưa chọn người kiểm nên chưa tính công QC.",
 };

@@ -1700,13 +1700,20 @@ async function creditInspection(
   input: { worker_id?: string; operation_date?: string; reason?: string },
   entries: { color: string; size: string; quantity: number }[],
 ): Promise<
-  "recorded" | "no_inspector" | "no_rate" | "no_permission" | "locked"
+  "recorded" | "no_inspector" | "no_rate" | "no_permission" | "locked" | "split"
 > {
   const inspector = input.worker_id || ctx.user.employee_id;
   if (!inspector) return "no_inspector";
   await requireInspector(id, inspector);
   if (!permits(ctx.user, "production.create", { stage: "QC" }))
     return "no_permission";
+  // QC split into parts is paid per part, which only the output form can tell apart.
+  if (
+    await db
+      .prepare("SELECT 1 FROM order_work_items WHERE order_id=? AND stage='QC'")
+      .get(id)
+  )
+    return "split";
   if (
     !(await db
       .prepare("SELECT 1 FROM order_rates WHERE order_id=? AND stage='QC'")
