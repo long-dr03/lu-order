@@ -21,7 +21,14 @@ export function QualityForm({
   onChanged: () => Promise<void>;
 }) {
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const [action, setAction] = useState<"qc" | "reinspect">("qc");
+  // What waits for each kind of inspection; open on the one that has work, so re-inspection
+  // after repair is not hidden behind the first-inspection view.
+  const waiting = (kind: "qc" | "reinspect") =>
+    (order.variants || []).reduce((n, v) => n + remainingOperation(v, kind), 0);
+  const [chosen, setAction] = useState<"qc" | "reinspect" | null>(null);
+  const action =
+    chosen ||
+    (waiting("qc") === 0 && waiting("reinspect") > 0 ? "reinspect" : "qc");
   const [qty, setQty] = useState<Record<string, number>>({});
   // Inspectors count defects, not passes: "kiểm 10, lỗi 2" is how the floor reports it.
   const [defects, setDefects] = useState<Record<string, number>>({});
@@ -103,20 +110,29 @@ export function QualityForm({
         Người kiểm: <strong>{session.user.name}</strong>
       </p>
       <ErrorNotice error={error} />
-      <div className="form-grid">
-        <Field label="Loại kiểm">
-          <select
-            value={action}
-            onChange={(e) => {
-              setAction(e.target.value as "qc" | "reinspect");
+      <div className="segmented qc-kind" role="group" aria-label="Loại kiểm">
+        {(
+          [
+            ["qc", "Kiểm lần đầu"],
+            ["reinspect", "QC lại sau sửa"],
+          ] as const
+        ).map(([kind, label]) => (
+          <button
+            type="button"
+            key={kind}
+            aria-pressed={action === kind}
+            onClick={() => {
+              setAction(kind);
               setQty({});
               setDefects({});
             }}
           >
-            <option value="qc">Kiểm lần đầu</option>
-            <option value="reinspect">Kiểm lại sau sửa</option>
-          </select>
-        </Field>
+            {label}
+            <small> · chờ {waiting(kind).toLocaleString("vi-VN")}</small>
+          </button>
+        ))}
+      </div>
+      <div className="form-grid">
         <Field label="Ngày kiểm">
           <DateInput
             name="date"

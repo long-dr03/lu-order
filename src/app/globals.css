@@ -3329,3 +3329,6 @@ button, a, select, label { touch-action: manipulation; }
 @media (max-width: 767px) {
   .auth-intro .logo-full img { width: 150px; }
 }
+.qc-kind { align-self: flex-start; }
+.qc-kind small { font-weight: 400; color: var(--muted); }
+@media (max-width: 767px) { .qc-kind { align-self: stretch; } .qc-kind button { flex: 1; white-space: nowrap; } }
