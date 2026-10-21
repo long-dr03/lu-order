@@ -205,8 +205,12 @@ export function guardWrite(
     request.headers.get("x-forwarded-proto") ||
     (request.url.startsWith("https") ? "https" : "http");
   const hostOrigin = host ? `${proto}://${host}` : new URL(request.url).origin;
-  const expected = process.env.APP_ORIGIN || hostOrigin;
-  const isAllowedOrigin = origin === expected;
+  // APP_ORIGIN may list several addresses (comma separated) while moving to a new domain.
+  const allowed = (process.env.APP_ORIGIN || hostOrigin)
+    .split(",")
+    .map((o) => o.trim().replace(/\/$/, ""))
+    .filter(Boolean);
+  const isAllowedOrigin = !!origin && allowed.includes(origin);
   ensure(isAllowedOrigin, 403, "Nguồn yêu cầu không hợp lệ.");
   ensure(
     request.headers.get("content-type")?.startsWith(options.contentType),

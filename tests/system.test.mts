@@ -786,6 +786,30 @@ test("Inspecting credits the inspector's QC pay in the same save, re-inspection 
       .get(id),
   );
 });
+test("APP_ORIGIN can list several domains while moving to a new one", () => {
+  const saved = process.env.APP_ORIGIN;
+  const post = (origin?: string) =>
+    new Request("http://localhost:3003/api/orders", {
+      method: "POST",
+      headers: {
+        ...(origin ? { origin } : {}),
+        "content-type": "application/json",
+      },
+      body: "{}",
+    });
+  try {
+    process.env.APP_ORIGIN =
+      "https://luu-order.example, https://luuta.example/";
+    auth.guardWrite(post("https://luu-order.example"));
+    auth.guardWrite(post("https://luuta.example"));
+    assert.throws(() => auth.guardWrite(post("https://evil.example")), {
+      status: 403,
+    });
+    assert.throws(() => auth.guardWrite(post()), { status: 403 });
+  } finally {
+    process.env.APP_ORIGIN = saved;
+  }
+});
 test("QC on a monthly salary: a 0 đ rate still counts inspections but pays nothing", async () => {
   const id = await order([{ color: "Đen", size: "M", quantity: 5 }]);
   await db
