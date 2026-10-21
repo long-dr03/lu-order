@@ -27,6 +27,7 @@ export function Logo({
           width={395}
           height={480}
           priority
+          unoptimized
         />
       </div>
     );
@@ -39,6 +40,7 @@ export function Logo({
         height={160}
         className="logo-mark"
         priority
+        unoptimized
       />
       {!compact && (
         <div>

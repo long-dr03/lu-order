@@ -38,6 +38,9 @@ COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 
+# The app runs as "node": Next needs to write its image cache under .next/cache.
+RUN mkdir -p /app/.next/cache && chown -R node:node /app/.next/cache
+
 # Persistent application backups are mounted separately from PostgreSQL
 RUN mkdir -p /app/backups && chown node:node /app/backups && chmod 700 /app/backups
 
