@@ -786,6 +786,27 @@ test("Inspecting credits the inspector's QC pay in the same save, re-inspection 
       .get(id),
   );
 });
+test("QC on a monthly salary: a 0 đ rate still counts inspections but pays nothing", async () => {
+  const id = await order([{ color: "Đen", size: "M", quantity: 5 }]);
+  await db
+    .prepare("UPDATE order_variants SET cut_qty=5,sewn_qty=5 WHERE order_id=?")
+    .run(id);
+  await result(
+    await ratesApi.POST(
+      req("/api/rates", "admin", { order_id: id, stage: "QC", unit_price: 0 }),
+    ),
+  );
+  assert.equal(
+    ((await result(await qc(id, 5, 4))) as { qc_pay: string }).qc_pay,
+    "recorded",
+  );
+  const row = (await db
+    .prepare(
+      "SELECT SUM(quantity) q,SUM(total_pay) p FROM production_logs WHERE order_id=? AND stage='QC'",
+    )
+    .get(id)) as { q: number; p: number };
+  assert.deepEqual([Number(row.q), Number(row.p)], [5, 0]);
+});
 test("QC identity comes from session, and repair belongs to Sewing rather than QC", async () => {
   const id = await order([{ color: "Đen", size: "M", quantity: 5 }]);
   await db
