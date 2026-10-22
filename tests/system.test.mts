@@ -816,6 +816,47 @@ test("An order typed in late can have its received date moved back, so older out
   // Output now exists on that date, so the received date cannot move past it.
   assert.equal((await edit(today())).status, 422);
 });
+test("A partly delivered order can be closed short, with the shortfall kept", async () => {
+  const id = await order([{ color: "Đen", size: "M", quantity: 5 }]);
+  const close = async (extra: Record<string, unknown>) =>
+    detailApi.PATCH(
+      req(
+        `/api/orders/${id}`,
+        "admin",
+        {
+          version: (await current(id)).version,
+          stage: "hoan_thanh",
+          exception: true,
+          reason: "Khách nhận 3 cái, hết vải",
+          ...extra,
+        },
+        { method: "PATCH" },
+      ),
+      params("id", id),
+    );
+  await db
+    .prepare("UPDATE orders SET current_stage='giao_hang' WHERE id=?")
+    .run(id);
+  assert.equal(
+    (await close({ close_short: true })).status,
+    422,
+    "nothing delivered yet",
+  );
+  await db
+    .prepare(
+      "UPDATE order_variants SET cut_qty=5,sewn_qty=5,qc_inspected_qty=5,qc_passed_qty=5,packed_qty=3,delivered_qty=3 WHERE order_id=?",
+    )
+    .run(id);
+  assert.equal(
+    (await close({})).status,
+    422,
+    "a plain exception still needs full delivery",
+  );
+  await result(await close({ close_short: true }));
+  const done = await current(id);
+  assert.equal(done.status, "completed");
+  assert.match(String(done.reason), /Đen\/M thiếu 2/);
+});
 test("APP_ORIGIN can list several domains while moving to a new one", () => {
   const saved = process.env.APP_ORIGIN;
   const post = (origin?: string) =>

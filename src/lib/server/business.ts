@@ -798,6 +798,8 @@ export const moveSchema = z
     deadline: date.optional(),
     order_date: date.optional(),
     notes: z.string().max(2000).optional(),
+    /** Completes an order that was delivered only in part (the customer accepts the shortfall). */
+    close_short: z.boolean().optional(),
   })
   .strict()
   .refine(
@@ -839,9 +841,15 @@ export async function moveOrder(
       requirePermission(ctx, "orders.override", { lineId: o.line_id });
     const permissionProblem = transitionPermissionProblem(ctx.user, o);
     ensure(!permissionProblem, 403, permissionProblem || "");
-    const problem = input.exception
-      ? exceptionalTransitionProblem(o, input.stage)
-      : transitionProblem(o, input.stage);
+    const short =
+      input.close_short && input.exception && input.stage === "hoan_thanh";
+    const problem = short
+      ? (o.variants || []).some((v) => v.delivered_qty > 0)
+        ? null
+        : "Chưa giao cái nào; không chốt đơn thiếu được."
+      : input.exception
+        ? exceptionalTransitionProblem(o, input.stage)
+        : transitionProblem(o, input.stage);
     ensure(!problem, 422, problem || "");
   }
   ensure(
@@ -935,10 +943,16 @@ export async function moveOrder(
   );
   const stage = input.stage || o.current_stage;
   const index = LUUTA_STAGES.findIndex((s) => s.key === stage);
+  const shortfall = (o.variants || [])
+    .filter((v) => v.delivered_qty < v.quantity)
+    .map((v) => `${v.color}/${v.size} thiếu ${v.quantity - v.delivered_qty}`)
+    .join(", ");
   const updatedReason =
-    input.reason !== undefined && !input.exception
-      ? input.reason || null
-      : o.reason || null;
+    input.close_short && input.stage === "hoan_thanh"
+      ? `Chốt giao thiếu (${shortfall}): ${input.reason}`
+      : input.reason !== undefined && !input.exception
+        ? input.reason || null
+        : o.reason || null;
   await db
     .prepare(
       "UPDATE orders SET order_date=?,responsible_id=?,product_code=?,current_stage=?,line_id=?,assigned_to=?,customer=?,deadline=?,notes=?,reason=?,image_url=?,progress=?,status=?,version=version+1 WHERE id=?",

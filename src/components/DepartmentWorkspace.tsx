@@ -897,6 +897,20 @@ export function OrderDetail({
               {LUUTA_STAGES.find((s) => s.key === order.current_stage)?.label}
             </strong>
           </p>
+          {/* Pieces move on at different speeds (part of an order is often delivered early),
+              so the counts say more than the single stage label. */}
+          <p className="order-progress">
+            <span>
+              Đã giao{" "}
+              <b>
+                {totals.delivered}/{order.total_quantity}
+              </b>
+            </span>
+            <span>Đóng gói {totals.packed}</span>
+            <span>QC đạt {totals.qc}</span>
+            <span>May {totals.sewn}</span>
+            <span>Cắt {totals.cut}</span>
+          </p>
         </div>
       </div>
       <nav className="detail-tabs" aria-label="Chi tiết đơn">
@@ -975,6 +989,13 @@ export function OrderDetail({
             rateBlock={rateBlock}
             onMove={move}
           />
+          {order.status !== "completed" &&
+            totals.delivered > 0 &&
+            totals.delivered < order.total_quantity &&
+            isManagement(session.user) &&
+            permits(session.user, "orders.override", {}) && (
+              <CloseShort order={order} api={api} onChanged={onChanged} />
+            )}
         </>
       )}
       {tab === "assignments" && (
@@ -1232,6 +1253,100 @@ export function OrderDetail({
       {tab === "edit" && isAdmin(session.user) && onDeleted && (
         <DeleteOrder order={order} api={api} onDeleted={onDeleted} />
       )}
+    </div>
+  );
+}
+
+/**
+ * Ends an order delivered only in part, when the customer accepts the shortfall: the order is
+ * completed as it stands and the reason, with what is missing per colour and size, is kept.
+ */
+function CloseShort({
+  order,
+  api,
+  onChanged,
+}: {
+  order: Detail;
+  api: Api;
+  onChanged: () => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const short = (order.variants || []).filter(
+    (v) => v.delivered_qty < v.quantity,
+  );
+  const missing = short.reduce((n, v) => n + v.quantity - v.delivered_qty, 0);
+  return (
+    <div className="close-short">
+      <span className="muted">Khách nhận thiếu và không giao thêm nữa?</span>
+      <Action type="button" tone="secondary" onClick={() => setOpen(true)}>
+        Chốt đơn giao thiếu
+      </Action>
+      <Modal
+        open={open}
+        onClose={() => {
+          if (!busy) setOpen(false);
+        }}
+        title={`Chốt đơn ${order.id} khi giao thiếu`}
+        description={`Còn thiếu ${missing} sản phẩm so với đơn đặt.`}
+      >
+        <form
+          className="stack"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setBusy(true);
+            setError("");
+            try {
+              await api(
+                `/api/orders/${encodeURIComponent(order.id)}`,
+                {
+                  version: order.version,
+                  stage: "hoan_thanh",
+                  exception: true,
+                  close_short: true,
+                  reason: reason.trim(),
+                },
+                "PATCH",
+              );
+              setOpen(false);
+              await onChanged();
+            } catch (err) {
+              setError(message(err));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <ul className="close-short-list">
+            {short.map((v) => (
+              <li key={`${v.color}|${v.size}`}>
+                {v.color} / {v.size}: giao {v.delivered_qty}/{v.quantity},{" "}
+                <strong>thiếu {v.quantity - v.delivered_qty}</strong>
+              </li>
+            ))}
+          </ul>
+          <p className="muted">
+            Đơn chuyển sang Hoàn thành và không ghi thêm sản lượng được nữa.
+            Phần thiếu và lý do được lưu lại trên đơn.
+          </p>
+          <ErrorNotice error={error} />
+          <Field label="Lý do">
+            <textarea
+              required
+              minLength={5}
+              maxLength={2000}
+              value={reason}
+              placeholder="Ví dụ: khách đồng ý nhận 140 cái, hết vải không làm thêm"
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </Field>
+          <Action type="submit" busy={busy} disabled={reason.trim().length < 5}>
+            Chốt đơn
+          </Action>
+        </form>
+      </Modal>
     </div>
   );
 }
