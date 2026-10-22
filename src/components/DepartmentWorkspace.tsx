@@ -705,6 +705,13 @@ export function ProductionForm({
             </Action>
           </div>
         )}
+        {editDate && detail?.order_date && (
+          <small className="muted">
+            Chọn được từ ngày nhận đơn{" "}
+            {detail.order_date.split("-").reverse().join("/")} đến hôm nay. Đơn
+            nhận trước ngày đó thì sửa ngày nhận ở tab Sửa thông tin của đơn.
+          </small>
+        )}
       </div>
       <label className="check-label">
         <input
@@ -762,6 +769,8 @@ export function OrderDetail({
   onDeleted?: () => Promise<void>;
 }) {
   const order = raw as Detail;
+  // The received date shown in Sửa thông tin; it also bounds the deadline picker.
+  const [received, setReceived] = useState(order.order_date);
   const firstTab =
     !isManagement(session.user) &&
     order.current_stage === "kiem_npl" &&
@@ -1128,6 +1137,7 @@ export function OrderDetail({
                   customer: f.get("customer"),
                   product_code: f.get("product_code"),
                   deadline: f.get("deadline"),
+                  order_date: f.get("order_date"),
                   notes: f.get("notes"),
                   photos: uploaded,
                   responsible_id: f.get("responsible") || null,
@@ -1185,14 +1195,28 @@ export function OrderDetail({
               defaultValue={order.product_code}
             />
           </Field>
-          <Field label="Hạn giao">
-            <DateInput
-              name="deadline"
-              required
-              defaultValue={order.deadline}
-              min={order.order_date}
-            />
-          </Field>
+          <div className="form-grid">
+            <Field
+              label="Ngày nhận đơn"
+              hint="Ngày xưởng nhận đơn thật, không phải ngày nhập vào hệ thống. Sản lượng chỉ ghi được từ ngày này trở đi."
+            >
+              <DateInput
+                name="order_date"
+                required
+                max={day()}
+                value={received}
+                onChange={setReceived}
+              />
+            </Field>
+            <Field label="Hạn giao">
+              <DateInput
+                name="deadline"
+                required
+                defaultValue={order.deadline}
+                min={received}
+              />
+            </Field>
+          </div>
           <Field label="Ghi chú">
             <textarea
               name="notes"

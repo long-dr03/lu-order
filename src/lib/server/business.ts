@@ -796,11 +796,13 @@ export const moveSchema = z
     product_code: text.optional(),
     customer: text.optional(),
     deadline: date.optional(),
+    order_date: date.optional(),
     notes: z.string().max(2000).optional(),
   })
   .strict()
   .refine(
     (v) =>
+      v.order_date !== undefined ||
       v.responsible_id !== undefined ||
       v.product_code !== undefined ||
       v.image_url !== undefined ||
@@ -861,14 +863,38 @@ export async function moveOrder(
     input.product_code ||
     input.customer ||
     input.deadline ||
+    input.order_date ||
     input.notes !== undefined ||
     (input.reason !== undefined && !input.exception) ||
     input.image_url !== undefined ||
     input.photos !== undefined
   )
     requirePermission(ctx, "orders.edit", { stage: "nhan_don" });
+  // Orders are often typed in days after the workshop received them, so the received date
+  // can be corrected later; nothing already recorded may then fall before it.
+  const orderDate = input.order_date || o.order_date;
+  if (input.order_date && input.order_date !== o.order_date) {
+    ensure(
+      input.order_date <= today(),
+      422,
+      "Ngày nhận đơn không được ở tương lai.",
+    );
+    const earliest = (
+      (await db
+        .prepare(
+          "SELECT MIN(d) d FROM (SELECT MIN(log_date) d FROM production_logs WHERE order_id=? UNION ALL SELECT MIN(operation_date) FROM operation_records WHERE order_id=? UNION ALL SELECT MIN(to_char(delivered_at AT TIME ZONE 'Asia/Ho_Chi_Minh','YYYY-MM-DD')) FROM shipments WHERE order_id=?) x",
+        )
+        .get(id, id, id)) as { d: string | null }
+    ).d;
+    ensure(
+      !earliest || input.order_date <= earliest,
+      422,
+      `Đơn đã có dữ liệu ghi ngày ${earliest?.split("-").reverse().join("/")}; ngày nhận đơn không được sau ngày đó.`,
+    );
+  }
   ensure(
-    !input.deadline || input.deadline >= o.order_date,
+    !(input.deadline || input.order_date) ||
+      (input.deadline || o.deadline) >= orderDate,
     422,
     "Hạn giao không được trước ngày nhận đơn.",
   );
@@ -915,9 +941,10 @@ export async function moveOrder(
       : o.reason || null;
   await db
     .prepare(
-      "UPDATE orders SET responsible_id=?,product_code=?,current_stage=?,line_id=?,assigned_to=?,customer=?,deadline=?,notes=?,reason=?,image_url=?,progress=?,status=?,version=version+1 WHERE id=?",
+      "UPDATE orders SET order_date=?,responsible_id=?,product_code=?,current_stage=?,line_id=?,assigned_to=?,customer=?,deadline=?,notes=?,reason=?,image_url=?,progress=?,status=?,version=version+1 WHERE id=?",
     )
     .run(
+      orderDate,
       responsible,
       input.product_code || o.product_code,
       stage,

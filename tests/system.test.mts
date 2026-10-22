@@ -786,6 +786,36 @@ test("Inspecting credits the inspector's QC pay in the same save, re-inspection 
       .get(id),
   );
 });
+test("An order typed in late can have its received date moved back, so older output can be recorded", async () => {
+  const daysAgo = (n: number) =>
+    new Date(Date.parse(`${today()}T00:00:00Z`) - n * 86400000)
+      .toISOString()
+      .slice(0, 10);
+  const id = await order([{ color: "Đen", size: "M", quantity: 5 }]);
+  await db
+    .prepare("UPDATE orders SET order_date=? WHERE id=?")
+    .run(today(), id);
+  await assign(id, "Cắt", workers.cutting);
+  const cut = (date: string) =>
+    record(id, "Cắt", workers.cutting[0], 1, "cutting", { log_date: date });
+  assert.equal((await cut(daysAgo(10))).status, 422);
+  const edit = async (order_date: string) =>
+    detailApi.PATCH(
+      req(
+        `/api/orders/${id}`,
+        "admin",
+        { version: (await current(id)).version, order_date },
+        { method: "PATCH" },
+      ),
+      params("id", id),
+    );
+  assert.equal((await edit(daysAgo(-1))).status, 422, "not in the future");
+  await result(await edit(daysAgo(30)));
+  assert.equal((await current(id)).order_date, daysAgo(30));
+  await result(await cut(daysAgo(10)), 201);
+  // Output now exists on that date, so the received date cannot move past it.
+  assert.equal((await edit(today())).status, 422);
+});
 test("APP_ORIGIN can list several domains while moving to a new one", () => {
   const saved = process.env.APP_ORIGIN;
   const post = (origin?: string) =>
