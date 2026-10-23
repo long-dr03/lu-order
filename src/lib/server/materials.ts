@@ -1,3 +1,4 @@
+import { receivedBy } from "./business";
 import { z } from "zod";
 import { db, getOrderById } from "../db";
 import { permits } from "../permissions";
@@ -126,11 +127,8 @@ export async function saveMaterial(
         { name: string; unit: string } | undefined;
       ensure(material, 422, "NPL/vải không thuộc đơn.");
       const date = input.movement_date || today();
-      ensure(
-        date <= today() && date >= order.order_date,
-        422,
-        "Ngày ghi nhận phải từ ngày nhận đơn đến hôm nay.",
-      );
+      ensure(date <= today(), 422, "Ngày ghi nhận không được ở tương lai.");
+      await receivedBy(orderId, date);
       if (["use", "defect", "return"].includes(input.kind)) {
         const totals = (await materialsFor(orderId)).items.find(
           (m) => m.id === input.material_id,

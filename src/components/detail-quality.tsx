@@ -193,13 +193,7 @@ export function QualityForm({
           )}
         </Field>
         <Field label="Ngày kiểm">
-          <DateInput
-            name="date"
-            required
-            max={day()}
-            min={order.order_date}
-            defaultValue={day()}
-          />
+          <DateInput name="date" required max={day()} defaultValue={day()} />
         </Field>
         <Field label="Giờ kiểm">
           <TimeInput name="time" />

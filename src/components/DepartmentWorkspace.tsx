@@ -689,7 +689,6 @@ export function ProductionForm({
             label="Ngày làm việc"
             required
             max={day()}
-            min={detail?.order_date}
             value={date}
             onChange={setDate}
           />
@@ -704,13 +703,6 @@ export function ProductionForm({
               Làm vào ngày khác
             </Action>
           </div>
-        )}
-        {editDate && detail?.order_date && (
-          <small className="muted">
-            Chọn được từ ngày nhận đơn{" "}
-            {detail.order_date.split("-").reverse().join("/")} đến hôm nay. Đơn
-            nhận trước ngày đó thì sửa ngày nhận ở tab Sửa thông tin của đơn.
-          </small>
         )}
       </div>
       <label className="check-label">
@@ -1219,7 +1211,7 @@ export function OrderDetail({
           <div className="form-grid">
             <Field
               label="Ngày nhận đơn"
-              hint="Ngày xưởng nhận đơn thật, không phải ngày nhập vào hệ thống. Sản lượng chỉ ghi được từ ngày này trở đi."
+              hint="Ngày xưởng nhận đơn thật, không phải ngày nhập vào hệ thống. Ghi sản lượng vào ngày sớm hơn thì ngày nhận tự lùi theo."
             >
               <DateInput
                 name="order_date"

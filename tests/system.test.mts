@@ -786,7 +786,7 @@ test("Inspecting credits the inspector's QC pay in the same save, re-inspection 
       .get(id),
   );
 });
-test("An order typed in late can have its received date moved back, so older output can be recorded", async () => {
+test("Output can be entered on any past date; the received date follows it back", async () => {
   const daysAgo = (n: number) =>
     new Date(Date.parse(`${today()}T00:00:00Z`) - n * 86400000)
       .toISOString()
@@ -798,7 +798,10 @@ test("An order typed in late can have its received date moved back, so older out
   await assign(id, "Cắt", workers.cutting);
   const cut = (date: string) =>
     record(id, "Cắt", workers.cutting[0], 1, "cutting", { log_date: date });
-  assert.equal((await cut(daysAgo(10))).status, 422);
+  assert.equal((await cut(daysAgo(-1))).status, 422, "not in the future");
+  // Entered a month and a half late, before the day the order was typed in.
+  await result(await cut(daysAgo(45)), 201);
+  assert.equal((await current(id)).order_date, daysAgo(45));
   const edit = async (order_date: string) =>
     detailApi.PATCH(
       req(
@@ -809,12 +812,10 @@ test("An order typed in late can have its received date moved back, so older out
       ),
       params("id", id),
     );
-  assert.equal((await edit(daysAgo(-1))).status, 422, "not in the future");
-  await result(await edit(daysAgo(30)));
-  assert.equal((await current(id)).order_date, daysAgo(30));
-  await result(await cut(daysAgo(10)), 201);
-  // Output now exists on that date, so the received date cannot move past it.
+  // The received date can still be corrected, but not past work already recorded.
   assert.equal((await edit(today())).status, 422);
+  await result(await edit(daysAgo(60)));
+  assert.equal((await current(id)).order_date, daysAgo(60));
 });
 test("A partly delivered order can be closed short, with the shortfall kept", async () => {
   const id = await order([{ color: "Đen", size: "M", quantity: 5 }]);

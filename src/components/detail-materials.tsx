@@ -211,7 +211,6 @@ export function MaterialsPanel({
                 name="date"
                 required
                 max={day()}
-                min={order.order_date}
                 defaultValue={day()}
               />
             </Field>

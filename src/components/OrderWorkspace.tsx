@@ -1030,7 +1030,7 @@ export function CreateOrderForm({
         </Field>
         <Field
           label="Ngày nhận"
-          hint="Nhập bù đơn cũ thì chọn đúng ngày xưởng nhận đơn; sản lượng chỉ ghi được từ ngày này."
+          hint="Nhập bù đơn cũ thì chọn đúng ngày xưởng nhận đơn."
         >
           <DateInput
             name="order_date"

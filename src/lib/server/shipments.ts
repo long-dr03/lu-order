@@ -1,3 +1,4 @@
+import { receivedBy } from "./business";
 import { z } from "zod";
 import { db, getOrderById } from "../db";
 import {
@@ -117,10 +118,11 @@ export async function createShipment(
       hour12: false,
     }).format(delivered);
     ensure(
-      delivered.getTime() <= Date.now() && date >= o.order_date,
+      delivered.getTime() <= Date.now(),
       422,
-      "Thời điểm giao phải từ ngày nhận đơn đến hiện tại.",
+      "Thời điểm giao không được ở tương lai.",
     );
+    await receivedBy(o.id, date);
     ensure(
       !(date > o.deadline || input.incident) || !!input.reason,
       422,

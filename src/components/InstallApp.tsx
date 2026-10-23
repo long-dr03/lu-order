@@ -39,7 +39,7 @@ export function InstallApp({ toast = false }: { toast?: boolean }) {
     const onInstalled = () => setPrompt(null);
     window.addEventListener("beforeinstallprompt", onPrompt);
     window.addEventListener("appinstalled", onInstalled);
-     
+
     setIos(/iPhone|iPad|iPod/.test(navigator.userAgent));
     return () => {
       window.removeEventListener("beforeinstallprompt", onPrompt);

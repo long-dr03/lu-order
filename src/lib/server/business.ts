@@ -510,6 +510,16 @@ export async function dashboard(ctx: Context) {
     employeesCount: (await employeesFor(ctx)).length,
   };
 }
+/**
+ * Work may be entered days or weeks after it happened, and orders are often typed in after the
+ * workshop received them. Any past date is accepted; when it falls before the order's received
+ * date, the received date moves back to it, since nothing can be done before an order arrives.
+ */
+export async function receivedBy(orderId: string, date: string) {
+  await db
+    .prepare("UPDATE orders SET order_date=? WHERE id=? AND order_date>?")
+    .run(date, orderId, date);
+}
 export async function unlocked(month: string) {
   ensure(
     !(await db.prepare("SELECT 1 FROM payroll_locks WHERE month=?").get(month)),
@@ -1308,10 +1318,11 @@ async function recordProductionSingle(
     "Bạn không có quyền ghi nhận cho thợ tại bộ phận của công đoạn này.",
   );
   ensure(
-    input.log_date <= today() && input.log_date >= o.order_date,
+    input.log_date <= today(),
     422,
     "Không ghi sản lượng trong tương lai.",
   );
+  await receivedBy(o.id, input.log_date);
   const deferPackingPay =
     input.record_packing &&
     input.stage === "Đóng gói" &&
@@ -1422,11 +1433,6 @@ async function recordProductionSingle(
       !["nhan_don", "kiem_npl", "kiem_rap"].includes(o.current_stage),
       422,
       "Đơn hàng chưa ở bước Đóng gói.",
-    );
-    ensure(
-      input.log_date >= o.order_date,
-      422,
-      "Ngày đóng gói không được trước ngày nhận đơn.",
     );
     ensure(
       v.packed_qty + input.quantity <= v.qc_passed_qty,
@@ -1836,11 +1842,8 @@ export async function recordOperation(
   );
   await validateProductImage(ctx, input.image_url);
   const operationDate = input.operation_date || today();
-  ensure(
-    operationDate <= today() && operationDate >= o.order_date,
-    422,
-    "Ngày xử lý phải từ ngày nhận đơn đến hôm nay.",
-  );
+  ensure(operationDate <= today(), 422, "Ngày xử lý không được ở tương lai.");
+  await receivedBy(o.id, operationDate);
   const inspection = ["qc", "reinspect"].includes(input.action);
   if (!inspection) {
     ensure(input.worker_id, 422, "Chọn thợ thực hiện đã phân công.");
