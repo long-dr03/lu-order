@@ -161,6 +161,8 @@ export default function Page() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [create, setCreate] = useState(false);
+  // An earlier order to start the new one from (a repeat batch of the same garment).
+  const [copySource, setCopySource] = useState<Order | null>(null);
   const [production, setProduction] = useState(false);
   const [selectedTab, setSelectedTab] = useState<string>();
   const [selected, setSelected] = useState<Order | null>(null);
@@ -736,19 +738,32 @@ export default function Page() {
         </AnimatePresence>
         <Modal
           open={create}
-          onClose={() => setCreate(false)}
-          title="Tạo đơn hàng"
+          onClose={() => {
+            setCreate(false);
+            setCopySource(null);
+          }}
+          title={
+            copySource ? `Tạo đơn mới từ ${copySource.id}` : "Tạo đơn hàng"
+          }
           description="Phân bổ sản phẩm theo màu và size."
           wide
         >
           {data && (
             <CreateOrderForm
+              key={copySource?.id || "new"}
               api={api}
               session={session}
               employees={data.employees}
               nextCode={data.nextCode}
               lines={[]}
-              onSaved={() => saved(() => setCreate(false))}
+              source={copySource || undefined}
+              takenCodes={(data.orders || []).map((o) => o.id)}
+              onSaved={() =>
+                saved(() => {
+                  setCreate(false);
+                  setCopySource(null);
+                })
+              }
             />
           )}
         </Modal>
@@ -796,6 +811,11 @@ export default function Page() {
                 lines={data?.lines || []}
                 employees={data?.employees || []}
                 onChanged={reloadDetail}
+                onDuplicate={(order) => {
+                  setSelected(null);
+                  setCopySource(order);
+                  setCreate(true);
+                }}
                 onDeleted={async () => {
                   setSelected(null);
                   await refresh();

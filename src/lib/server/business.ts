@@ -665,6 +665,8 @@ export const createOrderSchema = z
     priority: z.enum(["normal", "high", "urgent"]).default("normal"),
     notes: z.string().max(2000).default(""),
     reason: z.string().max(2000).optional(),
+    /** An earlier order of the same garment: its rates, parts, pattern specs and materials are copied. */
+    copy_from: text.optional(),
     variants: z
       .array(
         z
@@ -701,7 +703,16 @@ export async function createOrder(
   ctx: Context,
   input: z.infer<typeof createOrderSchema>,
 ) {
+  return db.transaction(() => createOrderNow(ctx, input))();
+}
+async function createOrderNow(
+  ctx: Context,
+  input: z.infer<typeof createOrderSchema>,
+) {
   requirePermission(ctx, "orders.create", { stage: "nhan_don" });
+  const source = input.copy_from
+    ? await orderFor(ctx, input.copy_from, "orders.view")
+    : undefined;
   ensure(
     input.deadline >= input.order_date,
     422,
@@ -718,7 +729,12 @@ export async function createOrder(
       "Người điều phối phải thuộc bộ phận Quản lý.",
     );
   const photos = requestedPhotos(input) || [];
-  await validatePhotos(ctx, photos);
+  // Pictures reused from the order being copied were checked when they were added there.
+  await validatePhotos(
+    ctx,
+    photos,
+    (source?.photos || []).map((p) => p.image_url),
+  );
   validatePhotoColors(
     photos,
     input.variants.map((v) => v.color),
@@ -785,6 +801,7 @@ export async function createOrder(
       .prepare("UPDATE orders SET responsible_id=?,assigned_to=? WHERE id=?")
       .run(input.responsible_id, employee.name, order.id);
   }
+  if (source) await copyOrderSetup(ctx, source, order.id);
   // Enrich the legacy creation audit with verified identities.
   await db
     .prepare(
@@ -792,6 +809,49 @@ export async function createOrder(
     )
     .run(ctx.actor.id, ctx.representing ? ctx.user.id : null, null);
   return (await getOrderById(order.id))!;
+}
+/**
+ * A repeat batch of the same garment needs the same setup: stage rates and paid parts, pattern
+ * measurements and the materials list (quantities scaled to the new order size). Work, QC,
+ * assignments and deliveries belong to the earlier batch and are not copied.
+ */
+async function copyOrderSetup(
+  ctx: Context,
+  source: { id: string; total_quantity: number },
+  targetId: string,
+) {
+  const target = (await db
+    .prepare("SELECT total_quantity FROM orders WHERE id=?")
+    .get(targetId)) as { total_quantity: number };
+  const scale = source.total_quantity
+    ? Number(target.total_quantity) / Number(source.total_quantity)
+    : 1;
+  await db
+    .prepare(
+      "INSERT INTO order_rates(order_id,stage,unit_price) SELECT ?,stage,unit_price FROM order_rates WHERE order_id=? ON CONFLICT DO NOTHING",
+    )
+    .run(targetId, source.id);
+  await db
+    .prepare(
+      "INSERT INTO order_work_items(order_id,stage,name,unit_price) SELECT ?,stage,name,unit_price FROM order_work_items WHERE order_id=? ORDER BY id",
+    )
+    .run(targetId, source.id);
+  await db
+    .prepare(
+      "INSERT INTO pattern_sheets(order_id,unit,sizes,base_size) SELECT ?,unit,sizes,base_size FROM pattern_sheets WHERE order_id=? ON CONFLICT DO NOTHING",
+    )
+    .run(targetId, source.id);
+  await db
+    .prepare(
+      "INSERT INTO pattern_specs(order_id,position,point,size,spec,tolerance,code) SELECT ?,position,point,size,spec,tolerance,code FROM pattern_specs WHERE order_id=? ORDER BY id",
+    )
+    .run(targetId, source.id);
+  await db
+    .prepare(
+      "INSERT INTO order_materials(order_id,name,unit,required_qty,notes,created_by) SELECT ?,name,unit,ROUND(required_qty*?::numeric,2),notes,? FROM order_materials WHERE order_id=? ORDER BY id",
+    )
+    .run(targetId, scale, actorLabel(ctx), source.id);
+  await audit(ctx, "Tạo đơn từ đơn cũ", `${targetId} ← ${source.id}`);
 }
 export const moveSchema = z
   .object({

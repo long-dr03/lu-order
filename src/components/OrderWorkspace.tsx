@@ -5,6 +5,7 @@ import {
   ProductPhotosField,
   type PhotoDraft,
   resolvePhotos,
+  photoDraftsFrom,
 } from "./ProductImage";
 import { GarmentColors, SizeSelect } from "./SmartInputs";
 import { createViewPreference } from "@/lib/view-preference";
@@ -220,6 +221,8 @@ function OrderWorkspaceView({
         o.id,
         o.customer,
         o.product_name,
+        // The same garment keeps its product code across repeat batches.
+        o.product_code,
         ...(o.variants || []).flatMap((v) => [v.color, v.size]),
       ]
         .join(" ")
@@ -912,6 +915,16 @@ function DragCard({
   );
 }
 const ORDER_SIZES = ["XS", "S", "M", "L", "XL", "XXL"];
+/** Next free code for a repeat batch: GLAM261001 → GLAM261001-2, GLAM261001-2 → GLAM261001-3. */
+export function batchCode(id: string, taken: string[]) {
+  const base = id.replace(/-\d+$/, "");
+  for (let n = 2; n < 1000; n++) {
+    const code = `${base}-${n}`;
+    if (!taken.includes(code) && code.length <= 40) return code;
+  }
+  return "";
+}
+
 export function CreateOrderForm({
   api,
   session,
@@ -919,6 +932,8 @@ export function CreateOrderForm({
   nextCode,
   employees,
   onSaved,
+  source,
+  takenCodes = [],
 }: {
   api: Api;
   session: SessionInfo;
@@ -926,23 +941,42 @@ export function CreateOrderForm({
   employees: import("@/lib/types").Employee[];
   nextCode?: string;
   onSaved: () => Promise<void>;
+  /** A previous order of the same garment, to start this one from. */
+  source?: Order;
+  takenCodes?: string[];
 }) {
-  const orderCode = nextCode || "";
+  const orderCode = source ? batchCode(source.id, takenCodes) : nextCode || "";
   void lines;
   const [productCode] = useState(
-    () => `SP-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
+    () =>
+      source?.product_code ||
+      `SP-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
   );
-  const [photos, setPhotos] = useState<PhotoDraft[]>([]);
+  const [photos, setPhotos] = useState<PhotoDraft[]>(() =>
+    source ? photoDraftsFrom(source.photos, source.image_url) : [],
+  );
   const [received, setReceived] = useState(day());
-  const [variants, setVariants] = useState([
-    {
-      color: "",
-      color_hex: "#808080",
-      colors: [{ name: "", hex: "#808080" }],
-      size: "M",
-      quantity: 1,
-    },
-  ]);
+  const [variants, setVariants] = useState(() =>
+    source?.variants?.length
+      ? source.variants.map((v) => ({
+          color: v.color,
+          color_hex: v.color_hex || v.colors?.[0]?.hex || "#808080",
+          colors: v.colors?.length
+            ? v.colors.map((c) => ({ ...c }))
+            : [{ name: v.color, hex: v.color_hex || "#808080" }],
+          size: v.size,
+          quantity: v.quantity,
+        }))
+      : [
+          {
+            color: "",
+            color_hex: "#808080",
+            colors: [{ name: "", hex: "#808080" }],
+            size: "M",
+            quantity: 1,
+          },
+        ],
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function submit(form: FormData) {
@@ -964,6 +998,7 @@ export function CreateOrderForm({
         notes: form.get("notes"),
         reason: String(form.get("reason") || "") || undefined,
         variants,
+        copy_from: source?.id,
       });
       await onSaved();
     } catch (e) {
@@ -981,6 +1016,15 @@ export function CreateOrderForm({
       className="stack"
     >
       <ErrorNotice error={error} />
+      {source && (
+        <div className="copy-banner" role="note">
+          <strong>Tạo từ đơn {source.id}</strong>
+          <span>
+            Chép sẵn ảnh, màu/size, đơn giá, thông số rập và NPL. Chỉ cần sửa{" "}
+            <b>số lượng</b> và <b>hạn giao</b>.
+          </span>
+        </div>
+      )}
       <ProductPhotosField
         photos={photos}
         onChange={setPhotos}
@@ -997,10 +1041,20 @@ export function CreateOrderForm({
           />
         </Field>
         <Field label="Khách hàng">
-          <input name="customer" required maxLength={160} />
+          <input
+            name="customer"
+            required
+            maxLength={160}
+            defaultValue={source?.customer}
+          />
         </Field>
         <Field label="Tên sản phẩm">
-          <input name="product_name" required maxLength={160} />
+          <input
+            name="product_name"
+            required
+            maxLength={160}
+            defaultValue={source?.product_name}
+          />
         </Field>
         <Field label="Mã sản phẩm">
           <input
@@ -1014,7 +1068,10 @@ export function CreateOrderForm({
           label="Người điều phối đơn"
           hint="Đầu mối quản lý; thợ được phân công riêng theo công đoạn."
         >
-          <select name="responsible_id">
+          <select
+            name="responsible_id"
+            defaultValue={source?.responsible_id || ""}
+          >
             <option value="">Chưa phân công cá nhân</option>
             {employees
               .filter(
@@ -1045,7 +1102,7 @@ export function CreateOrderForm({
         </Field>
       </div>
       <Field label="Ưu tiên">
-        <select name="priority">
+        <select name="priority" defaultValue={source?.priority || "normal"}>
           <option value="normal">Bình thường</option>
           <option value="high">Cao</option>
           <option value="urgent">Gấp</option>
@@ -1180,6 +1237,7 @@ export function CreateOrderForm({
         <textarea
           name="notes"
           maxLength={2000}
+          defaultValue={source?.notes || ""}
           placeholder="Ghi chú quy cách, phụ liệu..."
         />
       </Field>

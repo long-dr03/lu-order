@@ -15,6 +15,7 @@ import {
   Users,
   Pencil,
   Trash2,
+  Copy,
 } from "lucide-react";
 import { type Api, day, message, money } from "@/lib/client";
 import { type SessionInfo, hasPermission, permits } from "@/lib/permissions";
@@ -748,6 +749,7 @@ export function OrderDetail({
   onChanged,
   initialTab,
   onDeleted,
+  onDuplicate,
 }: {
   order: Order;
   session: SessionInfo;
@@ -759,6 +761,8 @@ export function OrderDetail({
   initialTab?: string;
   /** Called after the order is deleted, to close the dialog and reload the list. */
   onDeleted?: () => Promise<void>;
+  /** Opens a new order prefilled from this one (a repeat batch of the same garment). */
+  onDuplicate?: (order: Order) => void;
 }) {
   const order = raw as Detail;
   // The received date shown in Sửa thông tin; it also bounds the deadline picker.
@@ -903,6 +907,17 @@ export function OrderDetail({
             <span>May {totals.sewn}</span>
             <span>Cắt {totals.cut}</span>
           </p>
+          {onDuplicate &&
+            permits(session.user, "orders.create", { stage: "nhan_don" }) && (
+              <button
+                type="button"
+                className="link-button duplicate-order"
+                onClick={() => onDuplicate(order)}
+              >
+                <Copy size={16} aria-hidden="true" />
+                Tạo đơn mới từ đơn này
+              </button>
+            )}
         </div>
       </div>
       <nav className="detail-tabs" aria-label="Chi tiết đơn">

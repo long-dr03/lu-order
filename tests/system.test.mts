@@ -858,6 +858,76 @@ test("A partly delivered order can be closed short, with the shortfall kept", as
   assert.equal(done.status, "completed");
   assert.match(String(done.reason), /Đen\/M thiếu 2/);
 });
+test("A repeat batch copies the earlier order's setup but none of its work", async () => {
+  const source = await order([
+    { color: "Đen", size: "M", quantity: 5 },
+    { color: "Đen", size: "L", quantity: 5 },
+  ]);
+  await db
+    .prepare(
+      "INSERT INTO order_work_items(order_id,stage,name,unit_price) VALUES (?,'May','Tra cổ',700)",
+    )
+    .run(source);
+  await db
+    .prepare(
+      "INSERT INTO pattern_specs(order_id,position,point,size,spec,tolerance,code) VALUES (?,1,'Dài áo','M',70,1,'A')",
+    )
+    .run(source);
+  await db
+    .prepare(
+      "INSERT INTO order_materials(order_id,name,unit,required_qty,notes,created_by) VALUES (?,'Vải chính','m',12,'',?)",
+    )
+    .run(source, "test");
+  await assign(source, "Cắt", workers.cutting);
+  await result(
+    await record(source, "Cắt", workers.cutting[0], 3, "cutting"),
+    201,
+  );
+  const copy = await business.createOrder(
+    await ctx("admin"),
+    business.createOrderSchema.parse({
+      customer: "Khách cũ",
+      product_name: "Áo kiểm thử",
+      product_code: (await current(source)).product_code,
+      order_code: `${source}-2`,
+      order_date: today(),
+      deadline: "2030-01-01",
+      copy_from: source,
+      variants: [
+        { color: "Đen", size: "M", quantity: 10 },
+        { color: "Đen", size: "L", quantity: 10 },
+      ],
+    }),
+  );
+  assert.equal(copy.id, `${source}-2`);
+  assert.equal(copy.product_code, (await current(source)).product_code);
+  const count = async (table: string) =>
+    Number(
+      (
+        (await db
+          .prepare(`SELECT count(*) n FROM ${table} WHERE order_id=?`)
+          .get(copy.id)) as { n: number }
+      ).n,
+    );
+  assert.equal(await count("order_rates"), 5);
+  assert.equal(await count("order_work_items"), 1);
+  assert.equal(await count("pattern_specs"), 1);
+  for (const table of [
+    "production_logs",
+    "work_assignments",
+    "operation_records",
+  ])
+    assert.equal(await count(table), 0, table);
+  const material = (await db
+    .prepare("SELECT required_qty FROM order_materials WHERE order_id=?")
+    .get(copy.id)) as { required_qty: string };
+  // 12 m for 10 pieces becomes 24 m for 20.
+  assert.equal(Number(material.required_qty), 24);
+  assert.equal(
+    (await current(copy.id)).variants?.every((v) => v.cut_qty === 0),
+    true,
+  );
+});
 test("APP_ORIGIN can list several domains while moving to a new one", () => {
   const saved = process.env.APP_ORIGIN;
   const post = (origin?: string) =>
