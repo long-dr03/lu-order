@@ -190,3 +190,14 @@ export function remainingOperation(
               : 0,
   );
 }
+
+/** Next free code for a repeat or split batch: GLAM261001 → GLAM261001-2, GLAM261001-2 → GLAM261001-3. */
+export function batchCode(id: string, taken: string[]) {
+  // Only a short suffix is a batch number: LU-008 is a code of its own, LU-008-2 its second batch.
+  const base = id.replace(/-\d{1,2}$/, "");
+  for (let n = 2; n < 1000; n++) {
+    const code = `${base}-${n}`;
+    if (!taken.includes(code) && code.length <= 40) return code;
+  }
+  return "";
+}

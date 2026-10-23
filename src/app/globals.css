@@ -3342,3 +3342,31 @@ button, a, select, label { touch-action: manipulation; }
 .copy-banner { display: grid; gap: 4px; padding: 12px 14px; border: 1px solid #bfdbfe; border-radius: 10px; background: #eff6ff; font-size: 14px; color: #1e3a5f; }
 .copy-banner strong { font-size: 15px; }
 .duplicate-order { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 14px; }
+.batch-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.batch-actions [role="status"] { flex-basis: 100%; margin: 2px 0 0; }
+.batch-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: #27272a; font-size: 14px; font-weight: 500; white-space: nowrap; }
+.batch-btn:hover { background: #f4f4f5; }
+.split-quick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; }
+.split-quick span { color: var(--muted); margin-right: 2px; }
+.split-quick button { min-height: 32px; padding: 4px 12px; border: 1px solid var(--border); border-radius: 999px; background: #fff; font-size: 14px; font-weight: 500; }
+.split-quick button:hover { background: #f4f4f5; }
+.split-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.split-table th { text-align: left; font-weight: 500; color: var(--muted); padding: 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.split-table td { padding: 8px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.split-table .num { text-align: right; width: 1%; white-space: nowrap; }
+.split-table input { width: 104px; min-height: 40px; text-align: right; }
+.split-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid var(--border); }
+.split-footer p { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; color: var(--muted); font-size: 14px; }
+.split-footer b { color: #18181b; font-size: 16px; font-variant-numeric: tabular-nums; }
+@media (max-width: 767px) {
+  .split-table th, .split-table td { padding: 8px 4px; }
+  .split-table th:nth-child(2), .split-table td:nth-child(2) { display: none; }
+  .split-table input { width: 80px; }
+  .split-footer .action { width: 100%; justify-content: center; }
+}
+/* "Đơn giá công đoạn" keeps its unit beside it and the copy link on its own line on phones. */
+.rates-head h3 { white-space: nowrap; }
+@media (max-width: 767px) {
+  .rates-head { flex-wrap: wrap; row-gap: 2px; }
+  .rates-head h3 small { display: none; }
+}

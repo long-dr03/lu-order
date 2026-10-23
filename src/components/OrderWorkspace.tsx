@@ -40,6 +40,7 @@ import { permits, hasPermission } from "@/lib/permissions";
 import type { Order, Line, StageKey } from "@/lib/types";
 import { LUUTA_STAGES } from "@/lib/types";
 import {
+  batchCode,
   transitionProblem,
   transitionPermissionProblem,
   exceptionalTransitionProblem,
@@ -915,16 +916,6 @@ function DragCard({
   );
 }
 const ORDER_SIZES = ["XS", "S", "M", "L", "XL", "XXL"];
-/** Next free code for a repeat batch: GLAM261001 → GLAM261001-2, GLAM261001-2 → GLAM261001-3. */
-export function batchCode(id: string, taken: string[]) {
-  const base = id.replace(/-\d+$/, "");
-  for (let n = 2; n < 1000; n++) {
-    const code = `${base}-${n}`;
-    if (!taken.includes(code) && code.length <= 40) return code;
-  }
-  return "";
-}
-
 export function CreateOrderForm({
   api,
   session,

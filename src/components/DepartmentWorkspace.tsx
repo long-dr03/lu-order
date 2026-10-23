@@ -16,6 +16,7 @@ import {
   Pencil,
   Trash2,
   Copy,
+  Scissors,
 } from "lucide-react";
 import { type Api, day, message, money } from "@/lib/client";
 import { type SessionInfo, hasPermission, permits } from "@/lib/permissions";
@@ -42,6 +43,7 @@ import {
   transitionPermissionProblem,
   sewLimit,
   creditedStageBase,
+  batchCode,
 } from "@/lib/workflow";
 import { Action, Field, ErrorNotice, Empty, Modal } from "./Primitives";
 import { Pagination } from "./Pagination";
@@ -907,17 +909,24 @@ export function OrderDetail({
             <span>May {totals.sewn}</span>
             <span>Cắt {totals.cut}</span>
           </p>
-          {onDuplicate &&
-            permits(session.user, "orders.create", { stage: "nhan_don" }) && (
-              <button
-                type="button"
-                className="link-button duplicate-order"
-                onClick={() => onDuplicate(order)}
-              >
-                <Copy size={16} aria-hidden="true" />
-                Tạo đơn mới từ đơn này
-              </button>
-            )}
+          {permits(session.user, "orders.create", { stage: "nhan_don" }) && (
+            <div className="batch-actions">
+              {onDuplicate && (
+                <button
+                  type="button"
+                  className="batch-btn"
+                  onClick={() => onDuplicate(order)}
+                >
+                  <Copy size={16} aria-hidden="true" />
+                  Nhân bản đơn
+                </button>
+              )}
+              {order.status !== "completed" &&
+                permits(session.user, "orders.edit", { stage: "nhan_don" }) && (
+                  <SplitOrder order={order} api={api} onChanged={onChanged} />
+                )}
+            </div>
+          )}
         </div>
       </div>
       <nav className="detail-tabs" aria-label="Chi tiết đơn">
@@ -1261,6 +1270,230 @@ export function OrderDetail({
         <DeleteOrder order={order} api={api} onDeleted={onDeleted} />
       )}
     </div>
+  );
+}
+
+/**
+ * Moves part of an order to a new batch at any time. Only pieces nobody has worked on can move,
+ * so the form shows that limit per colour–size and offers the two usual choices in one tap.
+ */
+function SplitOrder({
+  order,
+  api,
+  onChanged,
+}: {
+  order: Detail;
+  api: Api;
+  onChanged: () => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [amounts, setAmounts] = useState<Record<string, number>>({});
+  const [code, setCode] = useState("");
+  const [deadline, setDeadline] = useState(order.deadline);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState("");
+  const rows = (order.variants || []).map((v) => {
+    const paid = (order.work_totals || [])
+      .filter((r) => r.color === v.color && r.size === v.size)
+      .reduce((m, r) => Math.max(m, r.quantity), 0);
+    const started = Math.max(
+      v.cut_qty,
+      v.sewn_qty,
+      (v as { qc_inspected_qty?: number }).qc_inspected_qty || 0,
+      v.packed_qty,
+      v.delivered_qty,
+      paid,
+    );
+    return { v, key: keyFor(v), free: Math.max(0, v.quantity - started) };
+  });
+  const moving = rows.reduce(
+    (n, r) => n + Math.min(amounts[r.key] || 0, r.free),
+    0,
+  );
+  const freeTotal = rows.reduce((n, r) => n + r.free, 0);
+  const left = order.total_quantity - moving;
+  const fill = (part: (free: number) => number) =>
+    setAmounts(Object.fromEntries(rows.map((r) => [r.key, part(r.free)])));
+  return (
+    <>
+      <button
+        type="button"
+        className="batch-btn"
+        onClick={() => {
+          setAmounts({});
+          setError("");
+          setOpen(true);
+        }}
+      >
+        <Scissors size={16} aria-hidden="true" />
+        Tách đợt
+      </button>
+      {done && (
+        <p role="status" className="rate-save-notice">
+          {done}
+        </p>
+      )}
+      <Modal
+        open={open}
+        onClose={() => {
+          if (!busy) setOpen(false);
+        }}
+        title={`Tách đợt từ đơn ${order.id}`}
+        description="Phần tách ra thành đơn mới, chép sẵn ảnh, đơn giá, rập, NPL."
+        wide
+      >
+        <form
+          className="stack"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setBusy(true);
+            setError("");
+            try {
+              const result = await api<{ id: string; moved: number }>(
+                `/api/orders/${encodeURIComponent(order.id)}/split`,
+                {
+                  version: order.version,
+                  order_code: code.trim(),
+                  deadline,
+                  entries: rows
+                    .filter((r) => (amounts[r.key] || 0) > 0)
+                    .map((r) => ({
+                      color: r.v.color,
+                      size: r.v.size,
+                      quantity: Math.min(amounts[r.key], r.free),
+                    })),
+                },
+              );
+              setOpen(false);
+              setDone(
+                `Đã tách ${result.moved} sản phẩm sang đơn ${result.id}. Tìm mã ${order.product_code} để thấy cả hai đợt.`,
+              );
+              await onChanged();
+            } catch (err) {
+              setError(message(err));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {freeTotal === 0 ? (
+            <Empty>
+              Mọi sản phẩm của đơn đã được làm ít nhất một bước, không còn phần
+              nào để tách.
+            </Empty>
+          ) : (
+            <>
+              <p className="muted">
+                Chỉ tách được phần <b>chưa làm</b>. Phần đã cắt, đã ghi sản
+                lượng hay đã giao vẫn ở đơn này.
+              </p>
+              <div className="split-quick" role="group" aria-label="Điền nhanh">
+                <span>Điền nhanh:</span>
+                <button
+                  type="button"
+                  onClick={() => fill((free) => Math.floor(free / 2))}
+                >
+                  Chia đôi
+                </button>
+                <button type="button" onClick={() => fill((free) => free)}>
+                  Chuyển hết
+                </button>
+                <button type="button" onClick={() => setAmounts({})}>
+                  Xóa số
+                </button>
+              </div>
+              <table className="split-table">
+                <thead>
+                  <tr>
+                    <th>Màu / size</th>
+                    <th className="num">Đặt</th>
+                    <th className="num">Chưa làm</th>
+                    <th className="num">Sang đợt mới</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.key}>
+                      <td>
+                        <strong>
+                          {r.v.color} / {r.v.size}
+                        </strong>
+                      </td>
+                      <td className="num">{r.v.quantity}</td>
+                      <td className="num">{r.free}</td>
+                      <td className="num">
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          max={r.free}
+                          disabled={!r.free}
+                          aria-label={`Chuyển ${r.v.color} size ${r.v.size}`}
+                          value={amounts[r.key] || ""}
+                          placeholder="0"
+                          onFocus={(e) => e.target.select()}
+                          onChange={(e) =>
+                            setAmounts({
+                              ...amounts,
+                              [r.key]: Math.min(
+                                r.free,
+                                Math.max(0, Number(e.target.value) || 0),
+                              ),
+                            })
+                          }
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="form-grid">
+                <Field
+                  label="Mã đơn mới"
+                  hint="Để trống thì tự đặt theo đơn này: thêm -2, -3…"
+                >
+                  <input
+                    value={code}
+                    maxLength={40}
+                    pattern="[A-Za-z0-9_-]+"
+                    placeholder={batchCode(order.id, [order.id])}
+                    onChange={(e) => setCode(e.target.value)}
+                  />
+                </Field>
+                <Field label="Hạn giao đợt mới">
+                  <DateInput
+                    required
+                    value={deadline}
+                    min={order.order_date}
+                    onChange={setDeadline}
+                  />
+                </Field>
+              </div>
+            </>
+          )}
+          <ErrorNotice error={error} />
+          <div className="split-footer">
+            <p>
+              <span>
+                Ở lại {order.id}: <b>{left}</b>
+              </span>
+              <span>
+                Sang đợt mới: <b>{moving}</b>
+              </span>
+            </p>
+            <Action
+              type="submit"
+              busy={busy}
+              disabled={!moving || left < 1 || !deadline}
+            >
+              <Scissors size={18} />
+              Tách {moving || ""} sản phẩm
+            </Action>
+          </div>
+        </form>
+      </Modal>
+    </>
   );
 }
 

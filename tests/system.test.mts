@@ -928,6 +928,99 @@ test("A repeat batch copies the earlier order's setup but none of its work", asy
     true,
   );
 });
+test("Splitting an order moves only unstarted pieces to a new batch", async () => {
+  const splitApi = await import("../src/app/api/orders/[id]/split/route");
+  const id = await order([
+    { color: "Đen", size: "M", quantity: 10 },
+    { color: "Đen", size: "L", quantity: 6 },
+  ]);
+  await db
+    .prepare(
+      "INSERT INTO order_materials(order_id,name,unit,required_qty,notes,created_by) VALUES (?,'Vải chính','m',16,'',?)",
+    )
+    .run(id, "test");
+  await assign(id, "Cắt", workers.cutting);
+  await result(await record(id, "Cắt", workers.cutting[0], 4, "cutting"), 201);
+  const split = async (entries: unknown[], who = "admin", extra = {}) =>
+    splitApi.POST(
+      req(`/api/orders/${id}/split`, who, {
+        version: (await current(id)).version,
+        deadline: "2030-06-01",
+        entries,
+        ...extra,
+      }),
+      params("id", id),
+    );
+  // Đen/M has 4 cut, so only 6 can move.
+  assert.equal(
+    (await split([{ color: "Đen", size: "M", quantity: 7 }])).status,
+    422,
+  );
+  assert.equal(
+    (
+      await split([
+        { color: "Đen", size: "M", quantity: 6 },
+        { color: "Đen", size: "L", quantity: 6 },
+      ])
+    ).status,
+    201,
+  );
+  const original = await current(id);
+  assert.equal(original.total_quantity, 4);
+  assert.deepEqual(
+    original.variants?.map((v) => [v.size, v.quantity, v.cut_qty]),
+    [["M", 4, 4]],
+  );
+  const batch = await current(`${id}-2`);
+  assert.equal(batch.total_quantity, 12);
+  assert.equal(batch.deadline, "2030-06-01");
+  assert.equal(batch.product_code, original.product_code);
+  assert(batch.variants?.every((v) => v.cut_qty === 0));
+  const materials = (await db
+    .prepare(
+      "SELECT order_id,required_qty FROM order_materials WHERE order_id IN (?,?) ORDER BY order_id",
+    )
+    .all(id, `${id}-2`)) as { order_id: string; required_qty: string }[];
+  // 16 m for 16 pieces: 4 stay (4 m), 12 move (12 m).
+  assert.deepEqual(
+    materials.map((m) => Number(m.required_qty)),
+    [4, 12],
+  );
+  // The cut pieces and their pay stay on the original.
+  assert.equal(
+    Number(
+      (
+        (await db
+          .prepare(
+            "SELECT COALESCE(SUM(quantity),0) n FROM production_logs WHERE order_id=?",
+          )
+          .get(`${id}-2`)) as { n: number }
+      ).n,
+    ),
+    0,
+  );
+  // Everything left on the original has been started (cut and paid), so nothing more moves.
+  assert.match(
+    JSON.stringify(
+      await (await split([{ color: "Đen", size: "M", quantity: 1 }])).json(),
+    ),
+    /tối đa 0/,
+  );
+  // Splitting the batch again names the next one after the original, not "-2-2".
+  const again = await splitApi.POST(
+    req(`/api/orders/${id}-2/split`, "admin", {
+      version: (await current(`${id}-2`)).version,
+      deadline: "2030-07-01",
+      entries: [{ color: "Đen", size: "M", quantity: 2 }],
+    }),
+    params("id", `${id}-2`),
+  );
+  assert.equal(((await result(again, 201)) as { id: string }).id, `${id}-3`);
+  assert.equal(
+    (await split([{ color: "Đen", size: "M", quantity: 1 }], "worker")).status,
+    403,
+  );
+});
 test("APP_ORIGIN can list several domains while moving to a new one", () => {
   const saved = process.env.APP_ORIGIN;
   const post = (origin?: string) =>

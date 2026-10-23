@@ -20,6 +20,7 @@ import {
   sewLimit,
   OUTPUT_STAGES,
   creditedStageBase,
+  batchCode,
 } from "../workflow";
 import { z } from "zod";
 import {
@@ -852,6 +853,139 @@ async function copyOrderSetup(
     )
     .run(targetId, scale, actorLabel(ctx), source.id);
   await audit(ctx, "Tạo đơn từ đơn cũ", `${targetId} ← ${source.id}`);
+}
+export const splitOrderSchema = z
+  .object({
+    version: z.number().int().positive(),
+    order_code: z
+      .string()
+      .trim()
+      .max(40)
+      .regex(/^[A-Za-z0-9_-]+$/)
+      .optional()
+      .or(z.literal("")),
+    deadline: date,
+    entries: z
+      .array(z.object({ color: text, size: text, quantity }).strict())
+      .min(1)
+      .max(100),
+  })
+  .strict();
+/**
+ * Moves part of an order to a new batch at any time: only pieces nobody has worked on yet, so
+ * recorded output and pay stay with the order they were earned on. The new batch starts with
+ * the same setup; the original keeps its history and shrinks by what was moved.
+ */
+export async function splitOrder(
+  ctx: Context,
+  id: string,
+  input: z.infer<typeof splitOrderSchema>,
+) {
+  requirePermission(ctx, "orders.create", { stage: "nhan_don" });
+  requirePermission(ctx, "orders.edit", { stage: "nhan_don" });
+  return db.transaction(async () => {
+    const o = await getOrderById(id);
+    ensure(o, 404, "Không tìm thấy đơn.");
+    assertVersion(o, input.version);
+    ensure(
+      o.status !== "completed",
+      422,
+      "Đơn đã hoàn thành, không tách được.",
+    );
+    const keys = input.entries.map((e) => `${e.color}|${e.size}`);
+    ensure(new Set(keys).size === keys.length, 422, "Màu–size bị trùng.");
+    const credited = (await db
+      .prepare(
+        "SELECT color,size,stage,SUM(quantity) n FROM production_logs WHERE order_id=? GROUP BY color,size,stage",
+      )
+      .all(id)) as { color: string; size: string; stage: string; n: number }[];
+    const moving = input.entries.map((e) => {
+      const v = o.variants?.find(
+        (x) => x.color === e.color && x.size === e.size,
+      ) as Variant | undefined;
+      ensure(v, 422, `Màu–size ${e.color}/${e.size} không thuộc đơn.`);
+      // Pieces already touched anywhere stay here: cut, sewn, inspected, packed, delivered or paid.
+      const started = Math.max(
+        v.cut_qty,
+        v.sewn_qty,
+        v.qc_inspected_qty || 0,
+        v.packed_qty,
+        v.delivered_qty,
+        ...credited
+          .filter((c) => c.color === v.color && c.size === v.size)
+          .map((c) => Number(c.n)),
+      );
+      const free = Math.max(0, v.quantity - started);
+      ensure(
+        e.quantity <= free,
+        422,
+        `${v.color}/${v.size}: chỉ tách được tối đa ${free} cái chưa làm.`,
+      );
+      return { v, quantity: e.quantity };
+    });
+    const moved = moving.reduce((n, m) => n + m.quantity, 0);
+    ensure(
+      moved < Number(o.total_quantity),
+      422,
+      "Phải để lại ít nhất 1 sản phẩm ở đơn gốc.",
+    );
+    const taken = (
+      (await db.prepare("SELECT id FROM orders").all()) as { id: string }[]
+    ).map((r) => r.id);
+    const code = input.order_code || batchCode(o.id, taken);
+    ensure(code, 422, "Không đặt được mã đơn mới; nhập mã khác.");
+    const created = await createOrderNow(ctx, {
+      order_code: code,
+      customer: o.customer,
+      product_name: o.product_name,
+      product_code: o.product_code,
+      responsible_id: o.responsible_id || null,
+      order_date: o.order_date,
+      deadline: input.deadline,
+      priority: o.priority,
+      notes: o.notes || "",
+      reason: `Tách từ đơn ${o.id}`,
+      photos: (o.photos || []).map((p) => ({
+        image_url: p.image_url,
+        color: p.color,
+      })),
+      copy_from: o.id,
+      variants: moving.map(({ v, quantity }) => ({
+        color: v.color,
+        size: v.size,
+        color_hex: v.color_hex || null,
+        ...(v.colors?.length ? { colors: v.colors } : {}),
+        quantity,
+      })),
+    });
+    // The original keeps the rest; a colour–size moved entirely and never started is removed.
+    for (const { v, quantity } of moving) {
+      if (quantity === v.quantity)
+        await db.prepare("DELETE FROM order_variants WHERE id=?").run(v.id);
+      else
+        await db
+          .prepare("UPDATE order_variants SET quantity=quantity-? WHERE id=?")
+          .run(quantity, v.id);
+    }
+    const left = Number(o.total_quantity) - moved;
+    await db
+      .prepare(
+        "UPDATE orders SET total_quantity=?,version=version+1 WHERE id=?",
+      )
+      .run(left, o.id);
+    await db
+      .prepare(
+        "UPDATE order_stages SET received_qty=?,remaining_qty=GREATEST(0,?-completed_qty) WHERE order_id=?",
+      )
+      .run(left, left, o.id);
+    await db
+      .prepare(
+        "UPDATE order_materials SET required_qty=ROUND(required_qty*?::numeric,2) WHERE order_id=?",
+      )
+      .run(left / Number(o.total_quantity), o.id);
+    await audit(ctx, "Tách đợt", `${o.id} → ${created.id}: ${moved} sản phẩm`);
+    return { id: created.id, moved, left };
+  })();
 }
 export const moveSchema = z
   .object({
