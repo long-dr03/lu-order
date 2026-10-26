@@ -1021,6 +1021,83 @@ test("Splitting an order moves only unstarted pieces to a new batch", async () =
     403,
   );
 });
+test("Quantities can be corrected after an order is entered, never below work already done", async () => {
+  const variantsApi = await import("../src/app/api/orders/[id]/variants/route");
+  const id = await order([
+    { color: "Đen", size: "M", quantity: 10 },
+    { color: "Đen", size: "L", quantity: 5 },
+  ]);
+  await db
+    .prepare(
+      "INSERT INTO order_materials(order_id,name,unit,required_qty,notes,created_by) VALUES (?,'Vải chính','m',15,'',?)",
+    )
+    .run(id, "test");
+  await assign(id, "Cắt", workers.cutting);
+  await result(await record(id, "Cắt", workers.cutting[0], 4, "cutting"), 201);
+  const save = async (variants: unknown[], who = "admin") =>
+    variantsApi.POST(
+      req(`/api/orders/${id}/variants`, who, {
+        version: (await current(id)).version,
+        variants,
+      }),
+      params("id", id),
+    );
+  // Đen/M has 4 cut: it cannot drop to 3, nor be removed.
+  assert.equal(
+    (
+      await save([
+        { color: "Đen", size: "M", quantity: 3 },
+        { color: "Đen", size: "L", quantity: 5 },
+      ])
+    ).status,
+    422,
+  );
+  assert.equal(
+    (await save([{ color: "Đen", size: "L", quantity: 5 }])).status,
+    422,
+  );
+  assert.equal(
+    (await save([{ color: "Đen", size: "M", quantity: 12 }], "worker")).status,
+    403,
+  );
+  // Raise M, drop the untouched L, add a new colour.
+  await result(
+    await save([
+      { color: "Đen", size: "M", quantity: 12 },
+      { color: "Trắng", size: "S", quantity: 8 },
+    ]),
+  );
+  const o = await current(id);
+  assert.equal(o.total_quantity, 20);
+  assert.deepEqual(
+    o.variants?.map((v) => [v.color, v.size, v.quantity, v.cut_qty]).sort(),
+    [
+      ["Trắng", "S", 8, 0],
+      ["Đen", "M", 12, 4],
+    ].sort(),
+  );
+  const stage = (await db
+    .prepare(
+      "SELECT received_qty FROM order_stages WHERE order_id=? AND stage_key='cat'",
+    )
+    .get(id)) as { received_qty: number };
+  assert.equal(Number(stage.received_qty), 20);
+  const material = (await db
+    .prepare("SELECT required_qty FROM order_materials WHERE order_id=?")
+    .get(id)) as { required_qty: string };
+  // 15 m for 15 pieces becomes 20 m for 20.
+  assert.equal(Number(material.required_qty), 20);
+  // Nothing changed: refused rather than writing an empty edit.
+  assert.equal(
+    (
+      await save([
+        { color: "Đen", size: "M", quantity: 12 },
+        { color: "Trắng", size: "S", quantity: 8 },
+      ])
+    ).status,
+    422,
+  );
+});
 test("APP_ORIGIN can list several domains while moving to a new one", () => {
   const saved = process.env.APP_ORIGIN;
   const post = (origin?: string) =>

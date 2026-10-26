@@ -1,5 +1,6 @@
 "use client";
 import { createPortal } from "react-dom";
+import { SizeSelect } from "./SmartInputs";
 import {
   useEffect,
   useRef,
@@ -882,9 +883,10 @@ export function OrderDetail({
     canCopy &&
     order.status !== "completed" &&
     permits(session.user, "orders.edit", { stage: "nhan_don" });
+  const canEdit = allTabs.some((t) => t.id === "edit");
   return (
     <div className="stack department-detail">
-      {(canCopy && !!onDuplicate) || canSplit ? (
+      {(canCopy && !!onDuplicate) || canSplit || canEdit ? (
         <SideActions label="Thao tác với đơn">
           {canCopy && onDuplicate && (
             <button
@@ -904,6 +906,17 @@ export function OrderDetail({
               onChanged={onChanged}
               startOpen={initialAction === "split"}
             />
+          )}
+          {canEdit && (
+            <button
+              type="button"
+              className="float-btn"
+              title="Sửa thông tin đơn"
+              onClick={() => setTab("edit")}
+            >
+              <Pencil size={18} aria-hidden="true" />
+              Sửa thông tin
+            </button>
           )}
         </SideActions>
       ) : null}
@@ -1281,10 +1294,281 @@ export function OrderDetail({
           </Action>
         </form>
       )}
+      {tab === "edit" &&
+        order.status !== "completed" &&
+        permits(session.user, "orders.edit", { stage: "nhan_don" }) && (
+          <QuantityEditor order={order} api={api} onChanged={onChanged} />
+        )}
       {tab === "edit" && isAdmin(session.user) && onDeleted && (
         <DeleteOrder order={order} api={api} onDeleted={onDeleted} />
       )}
     </div>
+  );
+}
+
+/**
+ * Pieces of a colour–size someone has worked on (cut, sewn, inspected, packed, delivered or paid
+ * at any stage). Same rule as the server: these cannot be moved off or removed from the order.
+ */
+function startedOf(order: Detail, v: OrderVariant) {
+  const perStage = new Map<string, number>();
+  for (const r of order.work_totals || [])
+    if (r.color === v.color && r.size === v.size)
+      perStage.set(r.stage, (perStage.get(r.stage) || 0) + r.quantity);
+  return Math.max(
+    v.cut_qty,
+    v.sewn_qty,
+    (v as { qc_inspected_qty?: number }).qc_inspected_qty || 0,
+    v.packed_qty,
+    v.delivered_qty,
+    ...perStage.values(),
+  );
+}
+
+/**
+ * Corrects the colour–size quantities of an order already entered: change a number, add a
+ * colour–size, or drop one nobody has started. The floor of each line is what was already made.
+ */
+function QuantityEditor({
+  order,
+  api,
+  onChanged,
+}: {
+  order: Detail;
+  api: Api;
+  onChanged: () => Promise<void>;
+}) {
+  type Line = { color: string; size: string; quantity: number; done: number };
+  const fromOrder = (): Line[] =>
+    (order.variants || []).map((v) => ({
+      color: v.color,
+      size: v.size,
+      quantity: v.quantity,
+      done: startedOf(order, v),
+    }));
+  const [lines, setLines] = useState<Line[]>(fromOrder);
+  // After a save (or anyone else's change) the order comes back with a new version: start from it.
+  const [seen, setSeen] = useState(order.version);
+  if (seen !== order.version) {
+    setSeen(order.version);
+    setLines(fromOrder());
+  }
+  const [color, setColor] = useState("");
+  const [size, setSize] = useState("M");
+  const [qty, setQty] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState("");
+  const total = lines.reduce((n, l) => n + (l.quantity || 0), 0);
+  const key = (c: string, z: string) =>
+    `${c.trim().toLocaleLowerCase("vi")}|${z.trim()}`;
+  const changed =
+    lines.length !== (order.variants || []).length ||
+    lines.some((l) => {
+      const v = order.variants?.find(
+        (x) => key(x.color, x.size) === key(l.color, l.size),
+      );
+      return !v || v.quantity !== l.quantity;
+    });
+  const tooLow = lines.find(
+    (l) => !l.quantity || l.quantity < Math.max(1, l.done),
+  );
+  const duplicate =
+    !!color.trim() &&
+    lines.some((l) => key(l.color, l.size) === key(color, size));
+  const colors = [...new Set(lines.map((l) => l.color))];
+  return (
+    <section className="quantity-editor">
+      <div className="quantity-editor-head">
+        <h3>Số lượng theo màu / size</h3>
+        <span className="muted">
+          Tổng {order.total_quantity}
+          {changed && total !== order.total_quantity && (
+            <>
+              {" "}
+              → <b>{total}</b>
+            </>
+          )}
+        </span>
+      </div>
+      <p className="muted">
+        Sửa khi nhập nhầm số lượng. Không giảm được xuống dưới số đã làm;
+        màu/size chưa làm cái nào thì bỏ được.
+      </p>
+      <ErrorNotice error={error} />
+      {saved && (
+        <p role="status" className="rate-save-notice">
+          {saved}
+        </p>
+      )}
+      <table className="split-table quantity-table">
+        <thead>
+          <tr>
+            <th>Màu / size</th>
+            <th className="num">Đã làm</th>
+            <th className="num">Số lượng</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((l, i) => (
+            <tr key={key(l.color, l.size)}>
+              <td>
+                <strong>
+                  {l.color} / {l.size}
+                </strong>
+              </td>
+              <td className="num">{l.done}</td>
+              <td className="num">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={Math.max(1, l.done)}
+                  aria-label={`Số lượng ${l.color} size ${l.size}`}
+                  value={l.quantity || ""}
+                  aria-invalid={l.quantity < Math.max(1, l.done) || undefined}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) =>
+                    setLines(
+                      lines.map((x, n) =>
+                        n === i
+                          ? {
+                              ...x,
+                              quantity: Math.max(
+                                0,
+                                Number(e.target.value) || 0,
+                              ),
+                            }
+                          : x,
+                      ),
+                    )
+                  }
+                />
+              </td>
+              <td className="num">
+                {l.done === 0 && lines.length > 1 ? (
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={`Bỏ ${l.color} size ${l.size}`}
+                    title="Bỏ màu/size này"
+                    onClick={() => setLines(lines.filter((_, n) => n !== i))}
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                ) : null}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="quantity-add">
+        <Field label="Thêm màu">
+          <input
+            list={`colors-${order.id}`}
+            value={color}
+            maxLength={160}
+            placeholder="VD: Đen"
+            onChange={(e) => setColor(e.target.value)}
+          />
+          <datalist id={`colors-${order.id}`}>
+            {colors.map((c) => (
+              <option key={c} value={c} />
+            ))}
+          </datalist>
+        </Field>
+        <Field label="Size">
+          <SizeSelect value={size} onChange={setSize} />
+        </Field>
+        <Field label="Số lượng">
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            value={qty || ""}
+            onFocus={(e) => e.target.select()}
+            onChange={(e) => setQty(Math.max(0, Number(e.target.value) || 0))}
+          />
+        </Field>
+        <Action
+          type="button"
+          tone="secondary"
+          disabled={!color.trim() || qty < 1 || duplicate}
+          onClick={() => {
+            setLines([
+              ...lines,
+              { color: color.trim(), size, quantity: qty, done: 0 },
+            ]);
+            setQty(1);
+          }}
+        >
+          <Plus size={18} />
+          Thêm
+        </Action>
+      </div>
+      {duplicate && (
+        <small className="over-limit">Màu và size này đã có trong đơn.</small>
+      )}
+      <div className="split-footer">
+        <p>
+          {tooLow ? (
+            <span className="over-limit">
+              {tooLow.color}/{tooLow.size} không được ít hơn{" "}
+              {Math.max(1, tooLow.done)}.
+            </span>
+          ) : (
+            <span>
+              Tổng sau khi sửa: <b>{total}</b> sản phẩm
+            </span>
+          )}
+        </p>
+        <div className="inline-actions">
+          {changed && (
+            <Action
+              type="button"
+              tone="secondary"
+              onClick={() => {
+                setLines(fromOrder());
+                setError("");
+              }}
+            >
+              Hoàn tác
+            </Action>
+          )}
+          <Action
+            type="button"
+            busy={busy}
+            disabled={!changed || !!tooLow}
+            onClick={async () => {
+              setBusy(true);
+              setError("");
+              setSaved("");
+              try {
+                await api(
+                  `/api/orders/${encodeURIComponent(order.id)}/variants`,
+                  {
+                    version: order.version,
+                    variants: lines.map((l) => ({
+                      color: l.color,
+                      size: l.size,
+                      quantity: l.quantity,
+                    })),
+                  },
+                );
+                setSaved(`Đã lưu số lượng. Tổng mới: ${total} sản phẩm.`);
+                await onChanged();
+              } catch (err) {
+                setError(message(err));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Lưu số lượng
+          </Action>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1378,17 +1662,7 @@ function SplitOrder({
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
   const rows = (order.variants || []).map((v) => {
-    const paid = (order.work_totals || [])
-      .filter((r) => r.color === v.color && r.size === v.size)
-      .reduce((m, r) => Math.max(m, r.quantity), 0);
-    const started = Math.max(
-      v.cut_qty,
-      v.sewn_qty,
-      (v as { qc_inspected_qty?: number }).qc_inspected_qty || 0,
-      v.packed_qty,
-      v.delivered_qty,
-      paid,
-    );
+    const started = startedOf(order, v);
     return { v, key: keyFor(v), free: Math.max(0, v.quantity - started) };
   });
   const moving = rows.reduce(

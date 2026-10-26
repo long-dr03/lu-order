@@ -3379,3 +3379,20 @@ button, a, select, label { touch-action: manipulation; }
 .side-tabs .float-btn:hover { background: #f4f4f5; }
 .side-tabs [role="status"] { margin: 0; padding: 8px 12px; border-radius: 10px 0 0 10px; background: #fff; box-shadow: -8px 8px 24px rgb(0 0 0 / 18%); font-size: 13px; max-width: 220px; }
 .batch-row .float-btn { box-shadow: none; min-height: 40px; }
+/* Correcting quantities in "Sửa thông tin". */
+.quantity-editor { display: grid; gap: 12px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+.quantity-editor-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.quantity-editor-head h3 { margin: 0; font-size: 17px; }
+.quantity-editor > p { margin: 0; font-size: 14px; }
+.quantity-editor input[aria-invalid] { border-color: #f59e0b; background: #fffbeb; }
+.quantity-add { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.8fr) auto; gap: 10px; align-items: end; }
+@media (max-width: 767px) {
+  .quantity-add { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .quantity-add .action { grid-column: 1 / -1; justify-content: center; }
+}
+@media (max-width: 767px) {
+  /* Here the second column is "Đã làm", which explains the minimum: keep it on phones. */
+  .split-table.quantity-table th:nth-child(2), .split-table.quantity-table td:nth-child(2) { display: table-cell; }
+  .split-footer .inline-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .split-footer .inline-actions .action { width: 100%; }
+}

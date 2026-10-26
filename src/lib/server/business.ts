@@ -854,6 +854,153 @@ async function copyOrderSetup(
     .run(targetId, scale, actorLabel(ctx), source.id);
   await audit(ctx, "Tạo đơn từ đơn cũ", `${targetId} ← ${source.id}`);
 }
+/**
+ * How many pieces of each colour–size someone has already worked on: cut, sewn, inspected,
+ * packed, delivered or paid for at any stage. Those pieces cannot be moved or taken off an order.
+ */
+async function startedPieces(orderId: string) {
+  const credited = (await db
+    .prepare(
+      "SELECT color,size,stage,SUM(quantity) n FROM production_logs WHERE order_id=? GROUP BY color,size,stage",
+    )
+    .all(orderId)) as {
+    color: string;
+    size: string;
+    stage: string;
+    n: number;
+  }[];
+  return (v: Variant) =>
+    Math.max(
+      v.cut_qty,
+      v.sewn_qty,
+      v.qc_inspected_qty || 0,
+      v.packed_qty,
+      v.delivered_qty,
+      ...credited
+        .filter((c) => c.color === v.color && c.size === v.size)
+        .map((c) => Number(c.n)),
+    );
+}
+export const variantsSchema = z
+  .object({
+    version: z.number().int().positive(),
+    variants: z
+      .array(
+        z
+          .object({
+            color: text,
+            size: z.string().trim().min(1).max(40),
+            quantity,
+            color_hex: z
+              .string()
+              .regex(/^#[0-9a-fA-F]{6}$/)
+              .nullable()
+              .optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(100),
+  })
+  .strict();
+/**
+ * Corrects an order's colour–size quantities after it was entered: raise or lower a quantity,
+ * add a colour–size, or drop one nobody has started. A quantity can never go below the pieces
+ * already worked on, so recorded output and pay keep matching the order.
+ */
+export async function updateVariants(
+  ctx: Context,
+  id: string,
+  input: z.infer<typeof variantsSchema>,
+) {
+  requirePermission(ctx, "orders.edit", { stage: "nhan_don" });
+  return db.transaction(async () => {
+    const o = await getOrderById(id);
+    ensure(o, 404, "Không tìm thấy đơn.");
+    assertVersion(o, input.version);
+    ensure(
+      o.status !== "completed",
+      422,
+      "Đơn đã hoàn thành, không sửa số lượng được.",
+    );
+    const key = (c: string, z: string) =>
+      `${c.trim().toLocaleLowerCase("vi")}|${z.trim()}`;
+    const keys = input.variants.map((v) => key(v.color, v.size));
+    ensure(
+      new Set(keys).size === keys.length,
+      422,
+      "Màu và size không được trùng.",
+    );
+    const started = await startedPieces(id);
+    const current = (o.variants || []) as Variant[];
+    const changes: string[] = [];
+    for (const v of current) {
+      const next = input.variants.find(
+        (n) => key(n.color, n.size) === key(v.color, v.size),
+      );
+      const done = started(v);
+      if (!next) {
+        ensure(
+          done === 0,
+          422,
+          `${v.color}/${v.size} đã làm ${done} cái, không bỏ khỏi đơn được.`,
+        );
+        await db.prepare("DELETE FROM order_variants WHERE id=?").run(v.id);
+        changes.push(`bỏ ${v.color}/${v.size}`);
+        continue;
+      }
+      ensure(
+        next.quantity >= done,
+        422,
+        `${v.color}/${v.size} đã làm ${done} cái, số lượng không được ít hơn ${done}.`,
+      );
+      if (next.quantity !== v.quantity) {
+        await db
+          .prepare("UPDATE order_variants SET quantity=? WHERE id=?")
+          .run(next.quantity, v.id);
+        changes.push(`${v.color}/${v.size} ${v.quantity}→${next.quantity}`);
+      }
+    }
+    for (const n of input.variants) {
+      if (current.some((v) => key(v.color, v.size) === key(n.color, n.size)))
+        continue;
+      await db
+        .prepare(
+          "INSERT INTO order_variants(order_id,color,size,quantity,cut_qty,sewn_qty,qc_passed_qty,packed_qty,delivered_qty,color_hex) VALUES (?,?,?,?,0,0,0,0,0,?)",
+        )
+        .run(
+          id,
+          n.color.trim(),
+          n.size.trim(),
+          n.quantity,
+          n.color_hex || null,
+        );
+      changes.push(`thêm ${n.color.trim()}/${n.size.trim()} ${n.quantity}`);
+    }
+    ensure(changes.length, 422, "Chưa có thay đổi số lượng nào.");
+    const total = input.variants.reduce((n, v) => n + v.quantity, 0);
+    const before = Number(o.total_quantity);
+    await db
+      .prepare(
+        "UPDATE orders SET total_quantity=?,version=version+1 WHERE id=?",
+      )
+      .run(total, id);
+    await db
+      .prepare(
+        "UPDATE order_stages SET received_qty=?,remaining_qty=GREATEST(0,?-completed_qty) WHERE order_id=?",
+      )
+      .run(total, total, id);
+    // Material needs follow the order size, as when an order is split.
+    if (before > 0 && total !== before)
+      await db
+        .prepare(
+          "UPDATE order_materials SET required_qty=ROUND(required_qty*?::numeric,2) WHERE order_id=?",
+        )
+        .run(total / before, id);
+    await audit(ctx, "Sửa số lượng đơn", `${id}: ${changes.join(", ")}`);
+    return (await getOrderById(id))!;
+  })();
+}
 export const splitOrderSchema = z
   .object({
     version: z.number().int().positive(),
@@ -894,28 +1041,13 @@ export async function splitOrder(
     );
     const keys = input.entries.map((e) => `${e.color}|${e.size}`);
     ensure(new Set(keys).size === keys.length, 422, "Màu–size bị trùng.");
-    const credited = (await db
-      .prepare(
-        "SELECT color,size,stage,SUM(quantity) n FROM production_logs WHERE order_id=? GROUP BY color,size,stage",
-      )
-      .all(id)) as { color: string; size: string; stage: string; n: number }[];
+    const started = await startedPieces(id);
     const moving = input.entries.map((e) => {
       const v = o.variants?.find(
         (x) => x.color === e.color && x.size === e.size,
       ) as Variant | undefined;
       ensure(v, 422, `Màu–size ${e.color}/${e.size} không thuộc đơn.`);
-      // Pieces already touched anywhere stay here: cut, sewn, inspected, packed, delivered or paid.
-      const started = Math.max(
-        v.cut_qty,
-        v.sewn_qty,
-        v.qc_inspected_qty || 0,
-        v.packed_qty,
-        v.delivered_qty,
-        ...credited
-          .filter((c) => c.color === v.color && c.size === v.size)
-          .map((c) => Number(c.n)),
-      );
-      const free = Math.max(0, v.quantity - started);
+      const free = Math.max(0, v.quantity - started(v));
       ensure(
         e.quantity <= free,
         422,
