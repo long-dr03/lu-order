@@ -1,6 +1,8 @@
 "use client";
+import { createPortal } from "react-dom";
 import {
   useEffect,
+  useRef,
   useState,
   lazy,
   Suspense,
@@ -750,6 +752,7 @@ export function OrderDetail({
   employees,
   onChanged,
   initialTab,
+  initialAction,
   onDeleted,
   onDuplicate,
 }: {
@@ -761,6 +764,8 @@ export function OrderDetail({
   onChanged: () => Promise<void>;
   /** Tab to land on when the caller already knows what the person came to do. */
   initialTab?: string;
+  /** An action to open straight away, e.g. "split" from the order list. */
+  initialAction?: "split";
   /** Called after the order is deleted, to close the dialog and reload the list. */
   onDeleted?: () => Promise<void>;
   /** Opens a new order prefilled from this one (a repeat batch of the same garment). */
@@ -872,8 +877,36 @@ export function OrderDetail({
     ...allTabs.filter((t) => t.id === firstTab),
     ...allTabs.filter((t) => t.id !== firstTab),
   ];
+  const canCopy = permits(session.user, "orders.create", { stage: "nhan_don" });
+  const canSplit =
+    canCopy &&
+    order.status !== "completed" &&
+    permits(session.user, "orders.edit", { stage: "nhan_don" });
   return (
     <div className="stack department-detail">
+      {(canCopy && !!onDuplicate) || canSplit ? (
+        <SideActions label="Thao tác với đơn">
+          {canCopy && onDuplicate && (
+            <button
+              type="button"
+              className="float-btn"
+              title="Nhân bản đơn: tạo đơn mới từ đơn này"
+              onClick={() => onDuplicate(order)}
+            >
+              <Copy size={18} aria-hidden="true" />
+              Nhân bản đơn
+            </button>
+          )}
+          {canSplit && (
+            <SplitOrder
+              order={order}
+              api={api}
+              onChanged={onChanged}
+              startOpen={initialAction === "split"}
+            />
+          )}
+        </SideActions>
+      ) : null}
       <div className="order-detail-heading">
         <ProductPhotoGallery
           photos={order.photos}
@@ -909,24 +942,6 @@ export function OrderDetail({
             <span>May {totals.sewn}</span>
             <span>Cắt {totals.cut}</span>
           </p>
-          {permits(session.user, "orders.create", { stage: "nhan_don" }) && (
-            <div className="batch-actions">
-              {onDuplicate && (
-                <button
-                  type="button"
-                  className="batch-btn"
-                  onClick={() => onDuplicate(order)}
-                >
-                  <Copy size={16} aria-hidden="true" />
-                  Nhân bản đơn
-                </button>
-              )}
-              {order.status !== "completed" &&
-                permits(session.user, "orders.edit", { stage: "nhan_don" }) && (
-                  <SplitOrder order={order} api={api} onChanged={onChanged} />
-                )}
-            </div>
-          )}
         </div>
       </div>
       <nav className="detail-tabs" aria-label="Chi tiết đơn">
@@ -1274,6 +1289,73 @@ export function OrderDetail({
 }
 
 /**
+ * Order actions shown as tabs on the dialog's left edge, outside it like book tabs. The dialog
+ * clips anything inside that overflows, so on wide screens the tabs live beside it and follow
+ * its position; on narrow screens, where there is no room beside it, they sit in a row on top.
+ */
+function SideActions({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  const anchor = useRef<HTMLSpanElement>(null);
+  const [place, setPlace] = useState<{
+    top: number;
+    right: number;
+    host: HTMLElement;
+  } | null>(null);
+  useEffect(() => {
+    const modal = anchor.current?.closest<HTMLElement>(".modal-content");
+    const host = modal?.parentElement;
+    if (!modal || !host) return;
+    const update = () => {
+      const r = modal.getBoundingClientRect();
+      setPlace(
+        window.innerWidth >= 1024 && r.left >= 140
+          ? { top: r.top + 92, right: window.innerWidth - r.left, host }
+          : null,
+      );
+    };
+    update();
+    // The dialog slides in; measure again once it has settled.
+    const settle = window.setTimeout(update, 260);
+    const watch = new ResizeObserver(update);
+    watch.observe(modal);
+    window.addEventListener("resize", update);
+    return () => {
+      window.clearTimeout(settle);
+      watch.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, []);
+  return (
+    <>
+      <span ref={anchor} hidden />
+      {place ? (
+        createPortal(
+          <div
+            className="side-tabs"
+            data-dialog-side
+            role="toolbar"
+            aria-label={label}
+            style={{ top: place.top, right: place.right }}
+          >
+            {children}
+          </div>,
+          place.host,
+        )
+      ) : (
+        <div className="batch-row" role="toolbar" aria-label={label}>
+          {children}
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
  * Moves part of an order to a new batch at any time. Only pieces nobody has worked on can move,
  * so the form shows that limit per colour–size and offers the two usual choices in one tap.
  */
@@ -1281,12 +1363,14 @@ function SplitOrder({
   order,
   api,
   onChanged,
+  startOpen = false,
 }: {
   order: Detail;
   api: Api;
   onChanged: () => Promise<void>;
+  startOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(startOpen);
   const [amounts, setAmounts] = useState<Record<string, number>>({});
   const [code, setCode] = useState("");
   const [deadline, setDeadline] = useState(order.deadline);
@@ -1319,14 +1403,14 @@ function SplitOrder({
     <>
       <button
         type="button"
-        className="batch-btn"
+        className="float-btn"
         onClick={() => {
           setAmounts({});
           setError("");
           setOpen(true);
         }}
       >
-        <Scissors size={16} aria-hidden="true" />
+        <Scissors size={18} aria-hidden="true" />
         Tách đợt
       </button>
       {done && (

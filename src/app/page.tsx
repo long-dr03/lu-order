@@ -166,6 +166,7 @@ export default function Page() {
   const [production, setProduction] = useState(false);
   const [selectedTab, setSelectedTab] = useState<string>();
   const [selected, setSelected] = useState<Order | null>(null);
+  const [selectedAction, setSelectedAction] = useState<"split">();
   const [accountOpen, setAccountOpen] = useState(false);
   const [adminMode, setAdminMode] = useState<"users" | "roles">("users");
   const [notice, setNotice] = useState("");
@@ -276,10 +277,11 @@ export default function Page() {
 
   // Stable callbacks: the order list is memoised and must not re-render when a detail dialog opens.
   const openOrder = useCallback(
-    async (order: Order, tab?: string) => {
+    async (order: Order, tab?: string, action?: "split") => {
       try {
         const detail = await api<Order>(`/api/orders/${order.id}`);
         setSelectedTab(tab);
+        setSelectedAction(action);
         setSelected(detail);
       } catch (e) {
         setError(message(e));
@@ -288,6 +290,18 @@ export default function Page() {
     [api],
   );
   const startCreate = useCallback(() => setCreate(true), []);
+  // Starts a new order from another one; the detail is read again so every field is there.
+  const duplicateOrder = useCallback(
+    async (order: Order) => {
+      try {
+        setCopySource(await api<Order>(`/api/orders/${order.id}`));
+        setCreate(true);
+      } catch (e) {
+        setError(message(e));
+      }
+    },
+    [api],
+  );
   const orderProps = useMemo(
     () => ({
       orders: data?.orders || [],
@@ -298,8 +312,10 @@ export default function Page() {
       onOpen: openOrder,
       onCreate: startCreate,
       onChanged: refresh,
+      onDuplicate: duplicateOrder,
+      onSplit: (order: Order) => void openOrder(order, undefined, "split"),
     }),
-    [data, session, api, openOrder, startCreate, refresh],
+    [data, session, api, openOrder, startCreate, refresh, duplicateOrder],
   );
   async function reloadDetail() {
     // The open dialog is what the person is looking at: refresh it first and let the
@@ -806,6 +822,7 @@ export default function Page() {
                 key={selected.id}
                 order={selected}
                 initialTab={selectedTab}
+                initialAction={selectedAction}
                 session={session}
                 api={api}
                 lines={data?.lines || []}

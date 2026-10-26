@@ -34,6 +34,8 @@ import {
   Download,
   Search,
   AlertTriangle,
+  Copy,
+  Scissors,
 } from "lucide-react";
 import type { SessionInfo } from "@/lib/permissions";
 import { permits, hasPermission } from "@/lib/permissions";
@@ -159,6 +161,8 @@ function OrderWorkspaceView({
   onOpen,
   onCreate,
   onChanged,
+  onDuplicate,
+  onSplit,
 }: {
   orders: Order[];
   lines: Line[];
@@ -167,6 +171,8 @@ function OrderWorkspaceView({
   onOpen: (o: Order) => void;
   onCreate: () => void;
   onChanged: () => Promise<void>;
+  onDuplicate?: (o: Order) => void;
+  onSplit?: (o: Order) => void;
 }) {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -328,6 +334,15 @@ function OrderWorkspaceView({
     search,
     status,
   });
+  // Same rules as the order detail: copying needs order creation; splitting also needs editing.
+  const canCopy = () =>
+    !!onDuplicate &&
+    permits(session.user, "orders.create", { stage: "nhan_don" });
+  const canSplit = (o: Order) =>
+    !!onSplit &&
+    permits(session.user, "orders.create", { stage: "nhan_don" }) &&
+    o.status !== "completed" &&
+    permits(session.user, "orders.edit", { stage: "nhan_don" });
   return (
     <section className="panel order-workspace">
       <div className="panel-toolbar">
@@ -634,9 +649,30 @@ function OrderWorkspaceView({
                     <td>
                       <div className="row-actions">
                         {stageChoices(o)}
+                        {canCopy() && (
+                          <button
+                            className="icon-button"
+                            aria-label={`Nhân bản ${o.id}`}
+                            title="Nhân bản đơn"
+                            onClick={() => onDuplicate?.(o)}
+                          >
+                            <Copy size={20} />
+                          </button>
+                        )}
+                        {canSplit(o) && (
+                          <button
+                            className="icon-button"
+                            aria-label={`Tách đợt ${o.id}`}
+                            title="Tách đợt"
+                            onClick={() => onSplit?.(o)}
+                          >
+                            <Scissors size={20} />
+                          </button>
+                        )}
                         <button
                           className="icon-button"
                           aria-label={`Xem ${o.id}`}
+                          title="Xem chi tiết"
                           onClick={() => onOpen(o)}
                         >
                           <Eye size={20} />
@@ -694,6 +730,16 @@ function OrderWorkspaceView({
                   {permits(session.user, "orders.move", {
                     lineId: o.line_id,
                   }) && stageChoices(o)}
+                  {canCopy() && (
+                    <Action tone="secondary" onClick={() => onDuplicate?.(o)}>
+                      <Copy size={18} /> Nhân bản
+                    </Action>
+                  )}
+                  {canSplit(o) && (
+                    <Action tone="secondary" onClick={() => onSplit?.(o)}>
+                      <Scissors size={18} /> Tách đợt
+                    </Action>
+                  )}
                   <Action tone="secondary" onClick={() => onOpen(o)}>
                     <Eye size={18} /> Chi tiết
                   </Action>

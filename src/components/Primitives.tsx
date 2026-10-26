@@ -120,6 +120,13 @@ export function Modal({
             <Dialog.Content
               forceMount
               asChild
+              // Controls the dialog places beside itself (the order detail's side tabs) belong to it:
+              // pressing or focusing them must not count as leaving the dialog.
+              onInteractOutside={(event) => {
+                const target = event.target as Element | null;
+                if (target?.closest?.("[data-dialog-side]"))
+                  event.preventDefault();
+              }}
               onOpenAutoFocus={() => {
                 returnFocus.current =
                   document.activeElement instanceof HTMLElement
