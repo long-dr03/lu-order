@@ -37,6 +37,9 @@ const productionApi = await import("../src/app/api/production/log/route");
 const operationApi =
   await import("../src/app/api/orders/[id]/operations/route");
 const shipmentApi = await import("../src/app/api/orders/[id]/shipments/route");
+const shipmentDeleteApi = await import(
+  "../src/app/api/orders/[id]/shipments/[sid]/route"
+);
 const adminApi = await import("../src/app/api/admin/[section]/route");
 const ratesApi = await import("../src/app/api/rates/route");
 const shortageApi = await import("../src/app/api/orders/[id]/shortages/route");
@@ -1429,6 +1432,174 @@ test("Shipment has multi-line items, exact actual time, one package count and re
     5,
   );
 });
+test("Only Admin deletes a wrongly entered delivery batch; the numbers it moved go back", async () => {
+  const id = await order();
+  await db
+    .prepare("UPDATE order_variants SET packed_qty=10 WHERE order_id=?")
+    .run(id);
+  await assign(id, "Giao hàng", workers.delivery);
+  const created = await result<{ id: string }>(await ship(id, 2), 201);
+  assert.equal(
+    (
+      (await db
+        .prepare("SELECT delivered_qty n FROM order_variants WHERE order_id=?")
+        .get(id)) as { n: number }
+    ).n,
+    2,
+  );
+  const remove = (who: string, sid: string, version: number) =>
+    shipmentDeleteApi.DELETE(
+      req(`/api/orders/${id}/shipments/${sid}`, who, { version }, {
+        method: "DELETE",
+      }),
+      {
+        params: Promise.resolve({ id, sid }),
+      } as unknown as { params: Promise<{ id: string; sid: string }> },
+    );
+  // Người ghi nhận giao hàng (vai trò quản lý bộ phận) không được xóa — chỉ Admin.
+  assert.equal(
+    (await remove("delivery", created.id, (await current(id)).version)).status,
+    403,
+  );
+  // Phiên bản cũ bị chặn như mọi thao tác ghi khác.
+  assert.equal((await remove("admin", created.id, 1)).status, 409);
+  await result(await remove("admin", created.id, (await current(id)).version));
+  for (const table of [
+    "SELECT COUNT(*) n FROM shipments WHERE id=?",
+    "SELECT COUNT(*) n FROM shipment_items WHERE shipment_id=?",
+    "SELECT COUNT(*) n FROM operation_records WHERE shipment_id=?",
+  ])
+    assert.equal(((await db.prepare(table).get(created.id)) as { n: number }).n, 0);
+  assert.equal(
+    (
+      (await db
+        .prepare("SELECT delivered_qty n FROM order_variants WHERE order_id=?")
+        .get(id)) as { n: number }
+    ).n,
+    0,
+  );
+  assert.equal(
+    (
+      (await db
+        .prepare(
+          "SELECT action FROM audit_logs WHERE action='Xóa đợt giao' AND details LIKE ?",
+        )
+        .get(`%${created.id}%`)) as { action: string }
+    ).action,
+    "Xóa đợt giao",
+  );
+  // Đơn đã hoàn thành thì không xóa được đợt giao nữa.
+  await result(await ship(id, 2), 201);
+  await db.prepare("UPDATE orders SET status='completed' WHERE id=?").run(id);
+  assert.equal(
+    (
+      await remove(
+        "admin",
+        (
+          (await db
+            .prepare("SELECT id FROM shipments WHERE order_id=?")
+            .get(id)) as { id: string }
+        ).id,
+        (await current(id)).version,
+      )
+    ).status,
+    422,
+  );
+});
+
+test("Only Admin edits a wrongly entered delivery batch; the same gates still apply", async () => {
+  const id = await order();
+  await db
+    .prepare("UPDATE order_variants SET packed_qty=10 WHERE order_id=?")
+    .run(id);
+  await assign(id, "Giao hàng", workers.delivery);
+  const created = await result<{ id: string; code: string }>(
+    await ship(id, 2),
+    201,
+  );
+  const patch = (who: string, sid: string, input: Record<string, unknown>) =>
+    shipmentDeleteApi.PATCH(
+      req(`/api/orders/${id}/shipments/${sid}`, who, input),
+      {
+        params: Promise.resolve({ id, sid }),
+      } as unknown as { params: Promise<{ id: string; sid: string }> },
+    );
+  const body = async () => ({
+    version: (await current(id)).version,
+    worker_id: workers.delivery[0],
+    delivered_at: deliveredAt(),
+    packages: 3,
+    notes: "Đã sửa số",
+    items: [{ color: "Đen", size: "M", quantity: 3 }],
+  });
+  // Người ghi nhận giao hàng không được sửa — chỉ Admin.
+  assert.equal((await patch("delivery", created.id, await body())).status, 403);
+  // Phiên bản cũ bị chặn.
+  assert.equal(
+    (await patch("admin", created.id, { ...(await body()), version: 1 }))
+      .status,
+    409,
+  );
+  // Không được giao vượt lượng đã đóng gói chưa giao.
+  assert.equal(
+    (
+      await patch("admin", created.id, {
+        ...(await body()),
+        items: [{ color: "Đen", size: "M", quantity: 11 }],
+      })
+    ).status,
+    422,
+  );
+  // Giao sau hạn thì bắt buộc nguyên nhân, như khi nhập mới.
+  await db.prepare("UPDATE orders SET deadline='2020-01-02' WHERE id=?").run(id);
+  assert.equal((await patch("admin", created.id, await body())).status, 422);
+  const edited = await body();
+  await result(await patch("admin", created.id, { ...edited, reason: "Sửa lại ngày giao" }));
+  const item = (await db
+    .prepare("SELECT quantity FROM shipment_items WHERE shipment_id=?")
+    .get(created.id)) as { quantity: number };
+  assert.equal(item.quantity, 3);
+  assert.equal(
+    (
+      (await db
+        .prepare("SELECT delivered_qty n FROM order_variants WHERE order_id=?")
+        .get(id)) as { n: number }
+    ).n,
+    3,
+  );
+  const ops = (await db
+    .prepare(
+      "SELECT notes,reason,operation_date FROM operation_records WHERE shipment_id=?",
+    )
+    .all(created.id)) as {
+    notes: string;
+    reason: string;
+    operation_date: string;
+  }[];
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].notes, "Đã sửa số");
+  assert.equal(ops[0].reason, "Sửa lại ngày giao");
+  // Mã đợt giao giữ nguyên để sổ sách không đổi danh tính.
+  assert.equal(
+    (
+      (await db
+        .prepare("SELECT code FROM shipments WHERE id=?")
+        .get(created.id)) as { code: string }
+    ).code,
+    created.code,
+  );
+  assert.equal(
+    (
+      (await db
+        .prepare(
+          "SELECT action FROM audit_logs WHERE action='Sửa đợt giao' AND details LIKE ?",
+        )
+        .get(`%${created.code}%`)) as { action: string }
+    ).action,
+    "Sửa đợt giao",
+  );
+});
+
 test("Late deliveries and incidents require per-event reasons; ordinary partial deliveries do not", async () => {
   const id = await order();
   await db

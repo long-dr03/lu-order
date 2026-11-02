@@ -1,11 +1,11 @@
 "use client";
 import { useState } from "react";
-import { Truck } from "lucide-react";
+import { Pencil, Trash2, Truck } from "lucide-react";
 import { type Api, message } from "@/lib/client";
 import { type SessionInfo, permits } from "@/lib/permissions";
 import { type Employee } from "@/lib/types";
 import { remainingOperation } from "@/lib/workflow";
-import { Action, Field, ErrorNotice, Empty } from "./Primitives";
+import { Action, Field, ErrorNotice, Empty, Modal } from "./Primitives";
 import { Pagination } from "./Pagination";
 import {
   Detail,
@@ -15,8 +15,25 @@ import {
   localDateTime,
   unrecordedDelivered,
   DeliveryTable,
+  type Shipment,
 } from "./order-detail-shared";
 import { DateInput } from "./DateInput";
+
+/** Vietnam-local "YYYY-MM-DDTHH:mm" for the date picker, from an ISO delivery time. */
+const viDateTime = (value: string) => {
+  const d = new Date(value);
+  return `${new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d)}T${new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(d)}`;
+};
 
 export function ShipmentPanel({
   order,
@@ -35,9 +52,18 @@ export function ShipmentPanel({
   const [when, setWhen] = useState(localDateTime);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<Shipment | null>(null);
+  const isAdmin = session.user.roles?.some((r) => r.id === "admin") ?? false;
+  // While editing a batch, its own pieces count as "đã đóng gói chưa giao" until the fix saves.
   const rows = (order.variants || []).map((v) => ({
     ...v,
-    remaining: remainingOperation(v, "deliver"),
+    remaining:
+      remainingOperation(v, "deliver") +
+      (editing
+        ? (editing.items.find(
+            (i) => i.color === v.color && i.size === v.size,
+          )?.quantity ?? 0)
+        : 0),
   }));
   const ready = rows.reduce((n, v) => n + v.remaining, 0);
   const ids =
@@ -51,15 +77,34 @@ export function ShipmentPanel({
       ids.includes(e.id),
   );
   const [page, setPage] = useState(1);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
   const canWrite = permits(session.user, "delivery.manage", {
     stage: "Giao hàng",
   });
   return (
     <div className="stack">
       <ErrorNotice error={error} />
+      {canWrite && editing && (
+        <div className="panel-toolbar">
+          <strong>Đang sửa đợt giao {editing.code}</strong>
+          <Action
+            type="button"
+            tone="secondary"
+            onClick={() => {
+              setEditing(null);
+              setQty({});
+              setWhen(localDateTime());
+            }}
+          >
+            Hủy sửa
+          </Action>
+        </div>
+      )}
       {canWrite && (
         <form
           className="stack"
+          key={editing?.id || "new"}
           onSubmit={async (e) => {
             e.preventDefault();
             setBusy(true);
@@ -67,7 +112,9 @@ export function ShipmentPanel({
             const f = new FormData(e.currentTarget);
             try {
               await api(
-                `/api/orders/${encodeURIComponent(order.id)}/shipments`,
+                editing
+                  ? `/api/orders/${encodeURIComponent(order.id)}/shipments/${encodeURIComponent(editing.id)}`
+                  : `/api/orders/${encodeURIComponent(order.id)}/shipments`,
                 {
                   version: order.version,
                   worker_id: f.get("worker"),
@@ -84,9 +131,11 @@ export function ShipmentPanel({
                       quantity: qty[keyFor(v)],
                     })),
                 },
+                editing ? "PATCH" : undefined,
               );
               setQty({});
               setWhen(localDateTime());
+              setEditing(null);
               await onChanged();
             } catch (err) {
               setError(message(err));
@@ -97,7 +146,11 @@ export function ShipmentPanel({
         >
           <div className="form-grid">
             <Field label="Người giao">
-              <select name="worker" required>
+              <select
+                name="worker"
+                required
+                defaultValue={editing?.worker_id || ""}
+              >
                 <option value="">Chọn người đã phân công</option>
                 {people.map((e) => (
                   <option key={e.id} value={e.id}>
@@ -123,7 +176,7 @@ export function ShipmentPanel({
                 min={0}
                 max={1000000}
                 step={1}
-                defaultValue={0}
+                defaultValue={editing?.packages ?? 0}
               />
             </Field>
           </div>
@@ -170,13 +223,18 @@ export function ShipmentPanel({
               name="reason"
               maxLength={2000}
               required={when.slice(0, 10) > order.deadline}
+              defaultValue={editing?.reason || ""}
             />
           </Field>
           <Field
             label="Đối soát / ghi chú"
             hint="Ví dụ mã vận đơn, người nhận, biển số xe."
           >
-            <textarea name="notes" maxLength={2000} />
+            <textarea
+              name="notes"
+              maxLength={2000}
+              defaultValue={editing?.notes || ""}
+            />
           </Field>
           <Action
             type="submit"
@@ -186,7 +244,7 @@ export function ShipmentPanel({
             }
           >
             <Truck size={18} />
-            Lưu đợt giao
+            {editing ? "Lưu thay đổi" : "Lưu đợt giao"}
           </Action>
         </form>
       )}
@@ -210,6 +268,34 @@ export function ShipmentPanel({
                 {r.color} / {r.size}: <strong>{r.quantity}</strong>
               </p>
             ))}
+            {isAdmin && !s.id.startsWith("earlier-") && (
+              <div className="panel-toolbar">
+                <Action
+                  type="button"
+                  tone="secondary"
+                  onClick={() => {
+                    setEditing(s);
+                    setQty(
+                      Object.fromEntries(
+                        s.items.map((r) => [keyFor(r), r.quantity]),
+                      ),
+                    );
+                    setWhen(viDateTime(s.delivered_at));
+                  }}
+                >
+                  <Pencil size={16} />
+                  Sửa đợt giao
+                </Action>
+                <Action
+                  type="button"
+                  tone="secondary"
+                  onClick={() => setRemoving(s.id)}
+                >
+                  <Trash2 size={16} />
+                  Xóa đợt giao
+                </Action>
+              </div>
+            )}
           </div>
         </details>
       ))}
@@ -222,6 +308,45 @@ export function ShipmentPanel({
         pageSize={10}
         onChange={setPage}
       />
+      <Modal
+        open={!!removing}
+        onClose={() => {
+          if (!removeBusy) setRemoving(null);
+        }}
+        title="Xóa đợt giao"
+      >
+        <div className="stack">
+          <p>
+            Đợt giao bị xóa hẳn; số sản phẩm của đợt này trở lại thành đã đóng
+            gói chưa giao. Không khôi phục được.
+          </p>
+          <Action
+            busy={removeBusy}
+            tone="danger"
+            onClick={async () => {
+              if (!removing) return;
+              setRemoveBusy(true);
+              setError("");
+              try {
+                await api(
+                  `/api/orders/${encodeURIComponent(order.id)}/shipments/${encodeURIComponent(removing)}`,
+                  { version: order.version },
+                  "DELETE",
+                );
+                setRemoving(null);
+                await onChanged();
+              } catch (err) {
+                setError(message(err));
+                setRemoving(null);
+              } finally {
+                setRemoveBusy(false);
+              }
+            }}
+          >
+            Xóa đợt giao
+          </Action>
+        </div>
+      </Modal>
     </div>
   );
 }

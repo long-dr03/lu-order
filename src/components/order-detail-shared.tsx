@@ -50,6 +50,7 @@ export type Total = {
 export type Shipment = {
   id: string;
   code: string;
+  worker_id?: string;
   worker_name: string;
   actor_name: string;
   delivered_at: string;

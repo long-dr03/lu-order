@@ -83,6 +83,240 @@ export async function shipmentsFor(id: string) {
     })),
   ].sort((a, b) => time(b.delivered_at) - time(a.delivered_at));
 }
+/**
+ * Only Admin may remove a wrongly entered delivery batch (a manager-level request from the
+ * workshop). The batch's quantities go back to "đã đóng gói chưa giao" and its delivery
+ * records are deleted; wages are untouched because deliveries never write production_logs.
+ */
+export async function deleteShipment(
+  ctx: Context,
+  id: string,
+  sid: string,
+  version: number,
+) {
+  ensure(
+    !ctx.representing && ctx.actor.roles.some((r) => r.id === "admin"),
+    403,
+    "Chỉ tài khoản Admin mới được xóa đợt giao.",
+  );
+  return db.transaction(async () => {
+    const o = await getOrderById(id);
+    ensure(o, 404, "Không tìm thấy đơn.");
+    ensure(
+      o.version === version,
+      409,
+      "Đơn đã thay đổi. Tải lại trước khi xóa.",
+    );
+    ensure(
+      o.status !== "completed",
+      422,
+      "Đơn đã hoàn thành; chuyển đơn khỏi Hoàn thành trước khi xóa đợt giao.",
+    );
+    const s = (await db
+      .prepare("SELECT id FROM shipments WHERE id=? AND order_id=?")
+      .get(sid, id)) as { id: string } | undefined;
+    ensure(s, 404, "Không tìm thấy đợt giao.");
+    const items = (await db
+      .prepare(
+        "SELECT color,size,quantity FROM shipment_items WHERE shipment_id=?",
+      )
+      .all(sid)) as { color: string; size: string; quantity: number }[];
+    for (const r of items) {
+      const v = o.variants?.find(
+        (v) => v.color === r.color && v.size === r.size,
+      );
+      ensure(
+        v && v.delivered_qty >= r.quantity,
+        409,
+        `Số đã giao của ${r.color}/${r.size} đã thay đổi, không hoàn tác được.`,
+      );
+    }
+    for (const r of items)
+      await db
+        .prepare(
+          "UPDATE order_variants SET delivered_qty=delivered_qty-? WHERE order_id=? AND color=? AND size=?",
+        )
+        .run(r.quantity, id, r.color, r.size);
+    await db
+      .prepare("DELETE FROM operation_records WHERE shipment_id=?")
+      .run(sid);
+    await db
+      .prepare("DELETE FROM shipment_items WHERE shipment_id=?")
+      .run(sid);
+    await db.prepare("DELETE FROM shipments WHERE id=?").run(sid);
+    await db.prepare("UPDATE orders SET version=version+1 WHERE id=?").run(id);
+    await audit(
+      ctx,
+      "Xóa đợt giao",
+      `${id} ${sid}: ${JSON.stringify(items)}`,
+      undefined,
+      "delivery",
+    );
+    return { id: sid };
+  })();
+}
+/**
+ * Only Admin may fix a wrongly entered delivery batch (edit date/time, packages, notes,
+ * reason, deliverer and the colour–size quantities). Same gates as entering a batch; the
+ * old quantities go back before the new ones apply, so nothing exceeds what was packed.
+ */
+export async function updateShipment(
+  ctx: Context,
+  id: string,
+  sid: string,
+  input: z.infer<typeof shipmentSchema>,
+) {
+  ensure(
+    !ctx.representing && ctx.actor.roles.some((r) => r.id === "admin"),
+    403,
+    "Chỉ tài khoản Admin mới được sửa đợt giao.",
+  );
+  return db.transaction(async () => {
+    const o = await getOrderById(id);
+    ensure(o, 404, "Không tìm thấy đơn.");
+    ensure(
+      o.version === input.version,
+      409,
+      "Đơn đã thay đổi. Tải lại trước khi sửa.",
+    );
+    ensure(
+      o.status !== "completed",
+      422,
+      "Đơn đã hoàn thành; chuyển đơn khỏi Hoàn thành trước khi sửa đợt giao.",
+    );
+    const s = (await db
+      .prepare("SELECT id,code FROM shipments WHERE id=? AND order_id=?")
+      .get(sid, id)) as { id: string; code: string } | undefined;
+    ensure(s, 404, "Không tìm thấy đợt giao.");
+    const delivered = new Date(input.delivered_at);
+    ensure(
+      delivered.getTime() <= Date.now(),
+      422,
+      "Thời điểm giao không được ở tương lai.",
+    );
+    const date = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(delivered);
+    const time = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(delivered);
+    ensure(
+      !(date > o.deadline || input.incident) || !!input.reason,
+      422,
+      "Giao sau hạn hoặc có sự cố cần ghi rõ nguyên nhân.",
+    );
+    ensure(
+      new Set(input.items.map((r) => JSON.stringify([r.color, r.size])))
+        .size === input.items.length,
+      422,
+      "Không nhập trùng màu–size trong một đợt giao.",
+    );
+    const old = (await db
+      .prepare(
+        "SELECT color,size,quantity FROM shipment_items WHERE shipment_id=?",
+      )
+      .all(sid)) as { color: string; size: string; quantity: number }[];
+    for (const r of old) {
+      const v = o.variants?.find(
+        (v) => v.color === r.color && v.size === r.size,
+      );
+      ensure(
+        v && v.delivered_qty >= r.quantity,
+        409,
+        `Số đã giao của ${r.color}/${r.size} đã thay đổi, không sửa được.`,
+      );
+    }
+    for (const r of input.items) {
+      const v = o.variants?.find(
+        (v) => v.color === r.color && v.size === r.size,
+      );
+      const reverted =
+        (v?.delivered_qty || 0) -
+        (old.find((x) => x.color === r.color && x.size === r.size)?.quantity ||
+          0);
+      ensure(
+        v && reverted + r.quantity <= v.packed_qty,
+        422,
+        `Lượng giao ${r.color}/${r.size} vượt lượng đã đóng gói chưa giao.`,
+      );
+    }
+    await requireAssignment(ctx, id, "Giao hàng", input.worker_id);
+    await receivedBy(o.id, date);
+    for (const r of old)
+      await db
+        .prepare(
+          "UPDATE order_variants SET delivered_qty=delivered_qty-? WHERE order_id=? AND color=? AND size=?",
+        )
+        .run(r.quantity, id, r.color, r.size);
+    await db
+      .prepare("DELETE FROM shipment_items WHERE shipment_id=?")
+      .run(sid);
+    await db
+      .prepare("DELETE FROM operation_records WHERE shipment_id=?")
+      .run(sid);
+    for (const r of input.items) {
+      await db
+        .prepare("INSERT INTO shipment_items VALUES (?,?,?,?,?)")
+        .run(randomUUID(), sid, r.color, r.size, r.quantity);
+      await db
+        .prepare(
+          "UPDATE order_variants SET delivered_qty=delivered_qty+? WHERE order_id=? AND color=? AND size=?",
+        )
+        .run(r.quantity, id, r.color, r.size);
+      await db
+        .prepare(
+          "INSERT INTO operation_records(order_id,action,color,size,quantity,passed,packages,operation_date,operation_time,worker_id,notes,reason,actor_id,represented_id,department_id,shipment_id) VALUES (?,'deliver',?,?,?,NULL,0,?,?,?,?,?,?,?,'delivery',?)",
+        )
+        .run(
+          id,
+          r.color,
+          r.size,
+          r.quantity,
+          date,
+          time,
+          input.worker_id,
+          input.notes,
+          input.reason || null,
+          ctx.actor.id,
+          ctx.representing ? ctx.user.id : null,
+          sid,
+        );
+    }
+    await db
+      .prepare(
+        "UPDATE shipments SET worker_id=?,delivered_at=?,packages=?,notes=?,reason=? WHERE id=?",
+      )
+      .run(
+        input.worker_id,
+        input.delivered_at,
+        input.packages,
+        input.notes,
+        input.reason || null,
+        sid,
+      );
+    await db.prepare("UPDATE orders SET version=version+1 WHERE id=?").run(id);
+    await audit(
+      ctx,
+      "Sửa đợt giao",
+      `${id} ${s.code}: Trước ${JSON.stringify(old)}; Sau ${JSON.stringify({
+        worker_id: input.worker_id,
+        delivered_at: input.delivered_at,
+        packages: input.packages,
+        reason: input.reason || null,
+        items: input.items,
+      })}`,
+      undefined,
+      "delivery",
+    );
+    return { id: sid };
+  })();
+}
 export async function createShipment(
   ctx: Context,
   id: string,

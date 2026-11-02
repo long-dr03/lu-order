@@ -83,6 +83,7 @@ const sections: { title: string; paragraphs?: string[]; steps?: string[] }[] = [
       "Đóng gói: Nhập sản lượng → Đóng gói, chọn thợ và nhập số theo màu–size.",
       "Giao hàng: mở chi tiết đơn → tab Đợt giao. Chọn người giao, ngày giờ giao, số kiện và số lượng từng màu–size. “Giao hết phần đã đóng gói” điền sẵn mọi số đang chờ giao.",
       "Giao sau hạn hoặc có sự cố thì phải ghi nguyên nhân. Bấm Lưu đợt giao.",
+      "Nhập sai một đợt giao thì mở đợt đó trong Lịch sử đợt giao: nút “Sửa đợt giao” điền sẵn số cũ vào form để sửa rồi Lưu thay đổi, nút “Xóa đợt giao” xóa hẳn — cả hai chỉ hiện cho tài khoản Admin; số sản phẩm của đợt bị xóa trở lại thành đã đóng gói chưa giao.",
       "Bảng lịch sử giao hiện từng lần giao theo ngày, số lượng từng size và số còn lại.",
     ],
     paragraphs: [
